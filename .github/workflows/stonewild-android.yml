@@ -73,7 +73,20 @@ jobs:
 
       - name: Build debug APK
         working-directory: stonewild/android
-        run: gradle --no-daemon :app:assembleDebug --stacktrace
+        run: |
+          set +e
+          gradle --no-daemon :app:assembleDebug --stacktrace 2>&1 | tee /tmp/stonewild-gradle.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "## Android build failure"
+              echo '```text'
+              tail -n 180 /tmp/stonewild-gradle.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
 
       - name: Verify APK exists
         run: test -s stonewild/android/app/build/outputs/apk/debug/app-debug.apk
