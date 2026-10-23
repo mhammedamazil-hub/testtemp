@@ -141,9 +141,10 @@ jobs:
           timeout 180 adb wait-for-device
           timeout 300 bash -c \
             'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done'
-          adb install -r "$APK"
+          timeout 90 adb install -r "$APK"
           adb logcat -c
-          adb shell am start -W -n game.stonewild.mobile/android.app.NativeActivity
+          adb shell am force-stop game.stonewild.mobile
+          adb shell am start -n game.stonewild.mobile/android.app.NativeActivity
           timeout 90 bash -c \
             'until adb logcat -d -s Stonewild:I "*:S" | grep -q "first interactive frame presented"; do sleep 2; done'
           adb shell input tap 200 400
