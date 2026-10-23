@@ -64,12 +64,20 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0" \
             "ndk;28.2.13676358" \
-            "cmake;3.22.1"
+            "cmake;3.22.1" \
+            "emulator" \
+            "system-images;android-30;google_apis;x86_64"
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.9"
+
+      - name: Preserve debug signing identity
+        uses: actions/cache@v6
+        with:
+          path: ~/.android/debug.keystore
+          key: stonewild-android-debug-keystore-v1
 
       - name: Build debug APK
         working-directory: stonewild/android
@@ -97,6 +105,52 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libstonewild.so'
           unzip -l "$APK" | grep -q 'lib/x86_64/libstonewild.so'
+
+      - name: Launch APK in Android emulator
+        run: |
+          set -euo pipefail
+          APK=stonewild/android/app/build/outputs/apk/debug/app-debug.apk
+          echo no | avdmanager create avd \
+            --force \
+            --name stonewild-ci \
+            --package 'system-images;android-30;google_apis;x86_64' \
+            --device 'pixel_2'
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+          nohup "$ANDROID_HOME/emulator/emulator" \
+            -avd stonewild-ci \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -no-snapshot \
+            -gpu swiftshader_indirect \
+            > /tmp/stonewild-emulator.log 2>&1 &
+          emulator_pid=$!
+          finish_emulator_test() {
+            status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ]; then
+              echo '--- emulator output ---'
+              tail -n 200 /tmp/stonewild-emulator.log || true
+              echo '--- Android logcat ---'
+              adb logcat -d -t 500 || true
+            fi
+            kill "$emulator_pid" 2>/dev/null || true
+            exit "$status"
+          }
+          trap finish_emulator_test EXIT
+          timeout 180 adb wait-for-device
+          timeout 300 bash -c \
+            'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done'
+          adb install -r "$APK"
+          adb logcat -c
+          adb shell am start -W -n game.stonewild.mobile/android.app.NativeActivity
+          timeout 90 bash -c \
+            'until adb logcat -d -s Stonewild:I "*:S" | grep -q "first interactive frame presented"; do sleep 2; done'
+          adb shell input tap 200 400
+          sleep 2
+          test -n "$(adb shell pidof game.stonewild.mobile | tr -d '\r')"
+          ! adb logcat -d | grep -E 'ANR in game\.stonewild\.mobile|FATAL EXCEPTION.*Stonewild'
+          adb logcat -d -s Stonewild:I '*:S'
 
       - name: Upload Stonewild APK
         uses: actions/upload-artifact@v7

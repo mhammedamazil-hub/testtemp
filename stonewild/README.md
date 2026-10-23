@@ -124,7 +124,9 @@ cd stonewild/android
 gradle :app:assembleDebug
 ```
 
-The APK is produced at `stonewild/android/app/build/outputs/apk/debug/app-debug.apk`. The Android workflow compiles both native ABIs, checks the APK signature, verifies both libraries, and uploads the debug APK.
+The APK is produced at `stonewild/android/app/build/outputs/apk/debug/app-debug.apk`. The Android workflow compiles both native ABIs, checks the APK signature, verifies both libraries, installs the APK into an x86_64 emulator, waits for the first successfully presented interactive frame, rejects ANR/fatal output, and then uploads the debug APK.
+
+Android version 0.2.1 fixes the startup lifecycle deadlock that could leave version 0.1.0 on a black, non-responsive frame. If Android refuses to install the replacement over an earlier CI artifact, uninstall the earlier Stonewild debug app first: older workflow runs used an ephemeral debug certificate. The workflow now caches one debug signing identity for subsequent update builds.
 
 ## Validation boundary
 

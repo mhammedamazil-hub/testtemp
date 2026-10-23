@@ -45,6 +45,9 @@ constexpr float kPi = 3.14159265358979323846F;
 // WindowManager.LayoutParams values accepted by ANativeActivity_setWindowFlags.
 constexpr std::uint32_t kWindowFlagKeepScreenOn = 0x00000080U;
 constexpr std::uint32_t kWindowFlagFullscreen = 0x00000400U;
+constexpr std::uint64_t kWorldSeed = 0x53544f4e4557494cULL;
+constexpr int kAndroidRenderRadius = 1;
+constexpr int kAndroidQuality = 0;
 
 struct Mat4 {
     std::array<float, 16> value{};
@@ -249,6 +252,7 @@ public:
         surface_ = EGL_NO_SURFACE;
         context_ = EGL_NO_CONTEXT;
         ready_ = false;
+        firstFramePresented_ = false;
     }
 
     ~Renderer() { destroy(); }
@@ -288,6 +292,9 @@ public:
         renderOverlay(game.selectedSlot());
         if (eglSwapBuffers(display_, surface_) == EGL_FALSE) {
             SW_LOGE("eglSwapBuffers failed: 0x%x", eglGetError());
+        } else if (!firstFramePresented_) {
+            firstFramePresented_ = true;
+            SW_LOGI("first interactive frame presented");
         }
     }
 
@@ -425,13 +432,22 @@ void main() { fragColor = vColor; }
     }
 
     void syncMeshes(const Game& game) {
+        struct Candidate {
+            const Chunk* chunk;
+            float distanceSquared;
+        };
         std::set<ChunkPos> current;
+        std::vector<Candidate> candidates;
+        const Vec3 player = game.player().position;
         for (const Chunk* chunk : game.world().loadedChunks()) {
             current.insert(chunk->position());
-            GpuMesh& gpu = meshes_[chunk->position()];
-            if (gpu.revision != chunk->revision()) {
-                uploadMesh(gpu, buildChunkMesh(game.world(), *chunk), chunk->revision());
-            }
+            const auto existing = meshes_.find(chunk->position());
+            if (existing != meshes_.end() && existing->second.revision == chunk->revision()) continue;
+            const float centerX = (static_cast<float>(chunk->position().x) + 0.5F) * stonewild::kChunkWidth;
+            const float centerZ = (static_cast<float>(chunk->position().z) + 0.5F) * stonewild::kChunkDepth;
+            const float dx = centerX - player.x;
+            const float dz = centerZ - player.z;
+            candidates.push_back({chunk, dx * dx + dz * dz});
         }
         for (auto iterator = meshes_.begin(); iterator != meshes_.end();) {
             if (current.count(iterator->first) == 0) {
@@ -440,6 +456,15 @@ void main() { fragColor = vColor; }
             } else {
                 ++iterator;
             }
+        }
+        std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+            return a.distanceSquared < b.distanceSquared;
+        });
+        const std::size_t meshBudget = game.quality() == 0 ? 1U : 2U;
+        const std::size_t count = std::min(meshBudget, candidates.size());
+        for (std::size_t index = 0; index < count; ++index) {
+            const Chunk& chunk = *candidates[index].chunk;
+            uploadMesh(meshes_[chunk.position()], buildChunkMesh(game.world(), chunk), chunk.revision());
         }
     }
 
@@ -529,6 +554,7 @@ void main() { fragColor = vColor; }
     EGLSurface surface_ = EGL_NO_SURFACE;
     EGLContext context_ = EGL_NO_CONTEXT;
     bool ready_ = false;
+    bool firstFramePresented_ = false;
     int width_ = 1;
     int height_ = 1;
     GLuint worldProgram_ = 0;
@@ -680,7 +706,9 @@ private:
 
 struct EngineState {
     explicit EngineState(android_app* application)
-        : app(application), savePath(std::string(application->activity->internalDataPath) + "/stonewild-world.sav") {}
+        : app(application),
+          game(kWorldSeed, kAndroidRenderRadius, kAndroidQuality),
+          savePath(std::string(application->activity->internalDataPath) + "/stonewild-world.sav") {}
 
     void save() {
         std::string error;
@@ -699,9 +727,13 @@ struct EngineState {
 void handleAppCommand(android_app* app, int32_t command) {
     auto* state = static_cast<EngineState*>(app->userData);
     if (state == nullptr) return;
+    SW_LOGI("lifecycle command: %d", command);
     switch (command) {
     case APP_CMD_INIT_WINDOW:
-        if (app->window != nullptr) state->renderer.initialize(app->window);
+        if (app->window != nullptr && !state->renderer.initialize(app->window)) {
+            SW_LOGE("renderer startup failed; closing activity instead of hanging on a black screen");
+            ANativeActivity_finish(app->activity);
+        }
         break;
     case APP_CMD_TERM_WINDOW:
         state->renderer.destroy();
@@ -817,7 +849,12 @@ void android_main(android_app* app) {
     app->onInputEvent = handleInput;
 
     std::string loadError;
-    if (SaveSystem::load(state.savePath, state.game, &loadError)) {
+    if (SaveSystem::load(
+            state.savePath,
+            state.game,
+            &loadError,
+            kAndroidRenderRadius,
+            kAndroidQuality)) {
         SW_LOGI("loaded saved world");
     } else {
         SW_LOGI("starting world without save: %s", loadError.c_str());
@@ -826,18 +863,33 @@ void android_main(android_app* app) {
     auto previous = std::chrono::steady_clock::now();
     auto lastSave = previous;
     while (app->destroyRequested == 0) {
-        const bool active = state.focused && state.renderer.ready();
         int events = 0;
         android_poll_source* source = nullptr;
-        int identifier = 0;
-        while ((identifier = ALooper_pollOnce(active ? 0 : -1, nullptr, &events, reinterpret_cast<void**>(&source))) >= 0) {
-            (void)identifier;
+        const bool wasActive = state.focused && state.renderer.ready();
+        int identifier = ALooper_pollOnce(
+            wasActive ? 0 : -1,
+            nullptr,
+            &events,
+            reinterpret_cast<void**>(&source));
+        if (identifier >= 0 && source != nullptr) source->process(app, source);
+
+        // Drain only already-queued events. Never reuse a blocking timeout after a lifecycle
+        // command changes focus or creates the window; doing so deadlocks startup on a black frame.
+        while (app->destroyRequested == 0) {
+            source = nullptr;
+            identifier = ALooper_pollOnce(0, nullptr, &events, reinterpret_cast<void**>(&source));
+            if (identifier < 0) break;
             if (source != nullptr) source->process(app, source);
-            if (app->destroyRequested != 0) break;
         }
-        if (!active || app->destroyRequested != 0) continue;
+        if (app->destroyRequested != 0) break;
 
         const auto now = std::chrono::steady_clock::now();
+        const bool active = state.focused && state.renderer.ready();
+        if (!active) {
+            previous = now;
+            continue;
+        }
+
         const float delta = std::chrono::duration<float>(now - previous).count();
         previous = now;
         const int selected = state.touch.consumeSelectedSlot();

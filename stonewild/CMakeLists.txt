@@ -59,7 +59,7 @@ else()
             DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
         )
         install(
-            FILES README.md ROADMAP.md
+            FILES README.md ROADMAP.md CHANGELOG.md
             DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/stonewild
         )
 
