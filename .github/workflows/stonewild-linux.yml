@@ -45,7 +45,16 @@ jobs:
             -DCMAKE_CXX_FLAGS="-Werror"
 
       - name: Compile with a two-job low-memory budget
-        run: cmake --build /tmp/stonewild-linux-build --parallel 2
+        run: |
+          set +e
+          cmake --build /tmp/stonewild-linux-build --parallel 2 2>&1 | tee /tmp/stonewild-linux-build.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            diagnostic=$(grep -E -i '(^|[[:space:]])(error:|fatal error:)|undefined reference|FAILED|ninja:' /tmp/stonewild-linux-build.log | tail -n 60 | python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')
+            echo "::error title=Linux compiler output::$diagnostic"
+            exit "$status"
+          fi
 
       - name: Run portable core tests
         run: ctest --test-dir /tmp/stonewild-linux-build --output-on-failure
