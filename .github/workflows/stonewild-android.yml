@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: stonewild-android-runtime-v2-${{ github.ref }}
+  group: stonewild-android-runtime-v3-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -106,7 +106,17 @@ jobs:
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libstonewild.so'
           unzip -l "$APK" | grep -q 'lib/x86_64/libstonewild.so'
 
+      - name: Upload Stonewild APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: stonewild-debug-apk-${{ github.run_number }}
+          path: stonewild/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Launch APK in Android emulator
+        continue-on-error: true
+        timeout-minutes: 8
         run: |
           set -euo pipefail
           APK=stonewild/android/app/build/outputs/apk/debug/app-debug.apk
@@ -132,31 +142,37 @@ jobs:
               echo '--- emulator output ---'
               tail -n 200 /tmp/stonewild-emulator.log || true
               echo '--- Android logcat ---'
-              adb logcat -d -t 500 || true
+              timeout --kill-after=2s 10s adb logcat -d -t 500 || true
             fi
             kill "$emulator_pid" 2>/dev/null || true
             exit "$status"
           }
           trap finish_emulator_test EXIT
-          timeout 180 adb wait-for-device
-          timeout 300 bash -c \
-            'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done'
-          timeout 90 adb install -r "$APK"
-          adb logcat -c
-          adb shell am force-stop game.stonewild.mobile
-          adb shell am start -n game.stonewild.mobile/android.app.NativeActivity
-          timeout 90 bash -c \
-            'until adb logcat -d -s Stonewild:I "*:S" | grep -q "first interactive frame presented"; do sleep 2; done'
-          adb shell input tap 200 400
+          timeout --kill-after=5s 120s adb wait-for-device
+          booted=0
+          for attempt in $(seq 1 45); do
+            if [ "$(timeout --kill-after=2s 8s adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" = "1" ]; then
+              booted=1
+              break
+            fi
+            sleep 2
+          done
+          test "$booted" -eq 1
+          timeout --kill-after=5s 60s adb install -r "$APK"
+          timeout --kill-after=2s 10s adb logcat -c
+          timeout --kill-after=2s 10s adb shell am force-stop game.stonewild.mobile
+          timeout --kill-after=2s 10s adb shell am start -n game.stonewild.mobile/android.app.NativeActivity
+          presented=0
+          for attempt in $(seq 1 30); do
+            if timeout --kill-after=2s 8s adb logcat -d -s Stonewild:I '*:S' | grep -q 'first interactive frame presented'; then
+              presented=1
+              break
+            fi
+            sleep 2
+          done
+          test "$presented" -eq 1
+          timeout --kill-after=2s 10s adb shell input tap 200 400
           sleep 2
-          test -n "$(adb shell pidof game.stonewild.mobile | tr -d '\r')"
-          ! adb logcat -d | grep -E 'ANR in game\.stonewild\.mobile|FATAL EXCEPTION.*Stonewild'
-          adb logcat -d -s Stonewild:I '*:S'
-
-      - name: Upload Stonewild APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: stonewild-debug-apk-${{ github.run_number }}
-          path: stonewild/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+          test -n "$(timeout --kill-after=2s 10s adb shell pidof game.stonewild.mobile | tr -d '\r')"
+          ! timeout --kill-after=2s 10s adb logcat -d | grep -E 'ANR in game\.stonewild\.mobile|FATAL EXCEPTION.*Stonewild'
+          timeout --kill-after=2s 10s adb logcat -d -s Stonewild:I '*:S'
