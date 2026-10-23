@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "repository": "https://github.com/Jakeschincariol/console-skill",
+    "commit": "a508929f1e8f5dd6f54afe489fd74340df3b6f74"
+  },
+  "skills": [
+    {
+      "name": "console-reverse",
+      "description": "Reverse engineer a user-owned PS2 disc, inspect its ISO and ELF, create the function map and PS2Recomp configuration, and maintain port state.",
+      "priority": 10,
+      "skill_path": "../vendor/console-skill/console-reverse/SKILL.md",
+      "triggers": [
+        "reverse engineering",
+        "reverse engineer",
+        "port my ps2 game",
+        "recompile my game",
+        "inspect iso",
+        "open my iso",
+        "analyze elf",
+        "boot elf",
+        "function map",
+        "set up ps2recomp",
+        "continue the port"
+      ]
+    },
+    {
+      "name": "console-backend",
+      "description": "Diagnose and implement PS2Recomp runtime services such as syscalls, stubs, file and disc I/O, and IOP/RPC behavior.",
+      "priority": 20,
+      "skill_path": "../vendor/console-skill/console-backend/SKILL.md",
+      "triggers": [
+        "backend",
+        "fix the backend",
+        "unimplemented stub",
+        "syscall todo",
+        "missing syscall",
+        "iop rpc",
+        "disc io",
+        "disc i o",
+        "runtime stub",
+        "runtime backend"
+      ]
+    },
+    {
+      "name": "console-graphics",
+      "description": "Inspect and replace TIM2 textures, find widescreen candidates, and decode PS2 DMA, VIF, GIF, and GS packet data.",
+      "priority": 30,
+      "skill_path": "../vendor/console-skill/console-graphics/SKILL.md",
+      "triggers": [
+        "graphics",
+        "dump the textures",
+        "replace texture",
+        "tim2 texture",
+        "tm2 texture",
+        "widescreen",
+        "16 9",
+        "gs packet",
+        "gif packet",
+        "black screen",
+        "garbage textures"
+      ]
+    },
+    {
+      "name": "console-controller",
+      "description": "Generate and safely install controller, keyboard, replay, and Android touch mappings for the PS2Recomp runtime.",
+      "priority": 40,
+      "skill_path": "../vendor/console-skill/console-controller/SKILL.md",
+      "triggers": [
+        "controller",
+        "controllers",
+        "controller mapping",
+        "remap the buttons",
+        "gamepad",
+        "dualsense",
+        "xbox controller",
+        "switch pro",
+        "keyboard controls",
+        "touch controls",
+        "input replay"
+      ]
+    },
+    {
+      "name": "console-mod",
+      "description": "Create game-specific patches and overrides, and translate supported PCSX2 PNACH patches into PS2Recomp changes.",
+      "priority": 50,
+      "skill_path": "../vendor/console-skill/console-mod/SKILL.md",
+      "triggers": [
+        "mod",
+        "mods",
+        "mod the game",
+        "make a mod",
+        "cheat",
+        "pnach",
+        "game override",
+        "infinite health",
+        "patch the game",
+        "new behavior",
+        "new behaviour"
+      ]
+    },
+    {
+      "name": "console-levels",
+      "description": "Inventory disc data, detect and unpack archives, compare level data, and safely repack supported level archives.",
+      "priority": 60,
+      "skill_path": "../vendor/console-skill/console-levels/SKILL.md",
+      "triggers": [
+        "levels",
+        "level data",
+        "level designer",
+        "unpack archive",
+        "repack archive",
+        "afs archive",
+        "data bin",
+        "map the disc",
+        "which files does the level load"
+      ]
+    },
+    {
+      "name": "console-sound",
+      "description": "Decode, inspect, extract, and rebuild supported PS2 VAG and SPU2 ADPCM audio using WAV working files.",
+      "priority": 70,
+      "skill_path": "../vendor/console-skill/console-sound/SKILL.md",
+      "triggers": [
+        "sound",
+        "audio",
+        "music",
+        "sound effects",
+        "soundtrack",
+        "vag audio",
+        "convert vag",
+        "replace the soundtrack",
+        "rip the music"
+      ]
+    },
+    {
+      "name": "console-physics",
+      "description": "Find and tune physics, movement, camera, and frame-timing constants in a PS2 ELF without editing it.",
+      "priority": 80,
+      "skill_path": "../vendor/console-skill/console-physics/SKILL.md",
+      "triggers": [
+        "physics",
+        "physics tuning",
+        "gravity",
+        "jump height",
+        "top speed",
+        "more grip",
+        "frame rate",
+        "fps unlock",
+        "find the speed value"
+      ]
+    },
+    {
+      "name": "console-saves",
+      "description": "Inspect and transfer PS2 memory-card saves, import or export PSU files, and perform backed-up local-folder synchronization.",
+      "priority": 90,
+      "skill_path": "../vendor/console-skill/console-saves/SKILL.md",
+      "triggers": [
+        "saves",
+        "save manager",
+        "save game",
+        "memory card",
+        "memcard",
+        "mcd file",
+        "psu save",
+        "bring my saves over",
+        "sync my saves",
+        "cloud sync"
+      ]
+    },
+    {
+      "name": "console-anywhere",
+      "description": "Check target toolchains, plan cross-platform builds, package private player folders, and guard packages against game data.",
+      "priority": 100,
+      "skill_path": "../vendor/console-skill/console-anywhere/SKILL.md",
+      "triggers": [
+        "packaging",
+        "package the port",
+        "package it",
+        "release folder",
+        "play anywhere",
+        "build for android",
+        "android build",
+        "steam deck",
+        "vita build",
+        "build for linux",
+        "build for windows",
+        "build for macos"
+      ]
+    },
+    {
+      "name": "console-tester",
+      "description": "Run a port with hard timeouts, classify and triage logs, compare regressions, and diff PCSX2 and port state dumps.",
+      "priority": 110,
+      "skill_path": "../vendor/console-skill/console-tester/SKILL.md",
+      "triggers": [
+        "testing",
+        "test the port",
+        "playtest",
+        "run it",
+        "crash log",
+        "triage the crash",
+        "regression test",
+        "soak test",
+        "compare logs",
+        "what do i fix next"
+      ]
+    }
+  ]
+}
