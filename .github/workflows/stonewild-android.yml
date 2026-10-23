@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: stonewild-android-${{ github.ref }}
+  group: stonewild-android-runtime-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
