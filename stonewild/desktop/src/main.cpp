@@ -713,7 +713,7 @@ int runGame(const LaunchOptions& options) {
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
     SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 0);
     const Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
-                         (options.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0U);
+                         (options.fullscreen ? static_cast<Uint32>(SDL_WINDOW_FULLSCREEN_DESKTOP) : 0U);
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
         SDL_CreateWindow(
             "Stonewild",
@@ -862,7 +862,9 @@ int runGame(const LaunchOptions& options) {
                     game->setRenderRadius(next);
                 } else if (key == SDLK_F11) {
                     fullscreen = !fullscreen;
-                    SDL_SetWindowFullscreen(window.get(), fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0U);
+                    SDL_SetWindowFullscreen(
+                        window.get(),
+                        fullscreen ? static_cast<Uint32>(SDL_WINDOW_FULLSCREEN_DESKTOP) : 0U);
                 }
             }
         }
