@@ -42,6 +42,9 @@ using stonewild::dot;
 using stonewild::normalize;
 
 constexpr float kPi = 3.14159265358979323846F;
+// WindowManager.LayoutParams values accepted by ANativeActivity_setWindowFlags.
+constexpr std::uint32_t kWindowFlagKeepScreenOn = 0x00000080U;
+constexpr std::uint32_t kWindowFlagFullscreen = 0x00000400U;
 
 struct Mat4 {
     std::array<float, 16> value{};
@@ -806,7 +809,7 @@ void android_main(android_app* app) {
     app_dummy();
     ANativeActivity_setWindowFlags(
         app->activity,
-        AWINDOW_FLAG_FULLSCREEN | AWINDOW_FLAG_KEEP_SCREEN_ON,
+        kWindowFlagFullscreen | kWindowFlagKeepScreenOn,
         0);
     EngineState state(app);
     app->userData = &state;
