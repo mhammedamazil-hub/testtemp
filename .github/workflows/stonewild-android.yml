@@ -85,7 +85,7 @@ jobs:
               tail -n 180 /tmp/stonewild-gradle.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            diagnostic=$(tail -n 120 /tmp/stonewild-gradle.log | python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')
+            diagnostic=$(grep -E -i '(^|[[:space:]])(error:|fatal error:)|undefined reference|FAILED|FAILURE:|What went wrong|ninja:' /tmp/stonewild-gradle.log | tail -n 60 | python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')
             echo "::error title=Android build output::$diagnostic"
             exit "$status"
           fi
