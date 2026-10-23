@@ -52,7 +52,13 @@ APK output:
 stonewild/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The sandbox used to create this foundation has no Android SDK, so Android compilation is delegated to `.github/workflows/stonewild-android.yml`. The workflow contains no signing secret and publishes a debug APK artifact.
+The sandbox used to create this foundation has no Android SDK, so Android compilation is delegated to `.github/workflows/stonewild-android.yml`. The workflow contains no signing secret and publishes an Android debug-key-signed APK artifact. CI compiles both native ABIs, checks the APK signature, and verifies that both native libraries were packaged.
+
+## Validation status
+
+- The portable core passes 5,248 assertions under `-Wall -Wextra -Wpedantic -Werror` locally and in GitHub Actions.
+- The GitHub Actions Android build has completed successfully for both arm64-v8a and x86_64 and uploaded the debug APK.
+- Installation and hands-on play testing still require a physical Android device or emulator; neither is available in the local sandbox, so runtime behavior is not claimed as device-tested yet.
 
 ## Controls
 

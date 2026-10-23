@@ -90,8 +90,13 @@ jobs:
             exit "$status"
           fi
 
-      - name: Verify APK exists
-        run: test -s stonewild/android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Verify signed APK and native ABIs
+        run: |
+          APK=stonewild/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libstonewild.so'
+          unzip -l "$APK" | grep -q 'lib/x86_64/libstonewild.so'
 
       - name: Upload Stonewild APK
         uses: actions/upload-artifact@v7
