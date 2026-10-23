@@ -1,0 +1,86 @@
+name: Stonewild Linux Mint DEB
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "stonewild/**"
+      - ".github/workflows/stonewild-linux.yml"
+  pull_request:
+    paths:
+      - "stonewild/**"
+      - ".github/workflows/stonewild-linux.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stonewild-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-mint-package:
+    name: Linux Mint 21+ package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            cmake ninja-build g++ dpkg-dev file \
+            libsdl2-dev libgl1-mesa-dev libgl1-mesa-dri \
+            xvfb xauth desktop-file-utils
+
+      - name: Configure release build
+        run: |
+          cmake -S stonewild -B /tmp/stonewild-linux-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=ON \
+            -DSTONEWILD_BUILD_DESKTOP=ON \
+            -DCMAKE_CXX_FLAGS="-Werror"
+
+      - name: Compile with a two-job low-memory budget
+        run: cmake --build /tmp/stonewild-linux-build --parallel 2
+
+      - name: Run portable core tests
+        run: ctest --test-dir /tmp/stonewild-linux-build --output-on-failure
+
+      - name: Validate desktop renderer under software OpenGL
+        run: |
+          export XDG_DATA_HOME=/tmp/stonewild-smoke-data
+          timeout 45s xvfb-run -a -s '-screen 0 1280x720x24' \
+            env LIBGL_ALWAYS_SOFTWARE=1 /tmp/stonewild-linux-build/stonewild --low --smoke-test
+
+      - name: Build Debian package
+        run: |
+          mkdir -p /tmp/stonewild-deb
+          cpack --config /tmp/stonewild-linux-build/CPackConfig.cmake \
+            -G DEB -B /tmp/stonewild-deb
+
+      - name: Inspect and test Debian package
+        run: |
+          DEB=$(find /tmp/stonewild-deb -maxdepth 1 -name '*.deb' -print -quit)
+          test -n "$DEB" && test -s "$DEB"
+          dpkg-deb --info "$DEB"
+          dpkg-deb --contents "$DEB"
+          rm -rf /tmp/stonewild-deb-root
+          dpkg-deb --extract "$DEB" /tmp/stonewild-deb-root
+          /tmp/stonewild-deb-root/usr/bin/stonewild --version
+          desktop-file-validate \
+            /tmp/stonewild-deb-root/usr/share/applications/game.stonewild.Stonewild.desktop
+          file /tmp/stonewild-deb-root/usr/bin/stonewild | grep -q 'ELF 64-bit'
+          ldd /tmp/stonewild-deb-root/usr/bin/stonewild | tee /tmp/stonewild-ldd.txt
+          ! grep -q 'not found' /tmp/stonewild-ldd.txt
+
+      - name: Upload Linux Mint DEB
+        uses: actions/upload-artifact@v7
+        with:
+          name: stonewild-linux-mint-amd64-${{ github.run_number }}
+          path: /tmp/stonewild-deb/*.deb
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#79b7dc"/>
+      <stop offset="1" stop-color="#315c78"/>
+    </linearGradient>
+    <linearGradient id="stone" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#788088"/>
+      <stop offset="1" stop-color="#353b42"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="46" fill="url(#sky)"/>
+  <path d="M8 160 71 118l57 34 55-51 65 43v58c0 25-21 46-46 46H54c-25 0-46-21-46-46Z" fill="#315f38"/>
+  <path d="m41 178 87-50 87 50-87 50Z" fill="#6f9045"/>
+  <path d="m41 178 87 50v19H54c-25 0-46-20-46-45v-7Z" fill="#51402f"/>
+  <path d="m215 178-87 50v19h74c25 0 46-20 46-45v-7Z" fill="#382f29"/>
+  <path d="m90 91 38-22 38 22-38 22Z" fill="#9ba4aa"/>
+  <path d="m90 91 38 22v42L90 133Z" fill="#515a62"/>
+  <path d="m166 91-38 22v42l38-22Z" fill="url(#stone)"/>
+  <path d="m74 173 54-31 54 31-54 31Z" fill="#5d8e42" opacity=".95"/>
+  <path d="M128 69v86" stroke="#dbe2e6" stroke-width="4" opacity=".34"/>
+  <rect x="8" y="8" width="240" height="240" rx="46" fill="none" stroke="#202a30" stroke-width="10"/>
+</svg>

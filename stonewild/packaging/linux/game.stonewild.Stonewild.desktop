@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Stonewild
+GenericName=Voxel Exploration Game
+Comment=Explore, build, and shape an original procedural world
+Exec=stonewild
+TryExec=stonewild
+Icon=game.stonewild.Stonewild
+Terminal=false
+Categories=Game;AdventureGame;
+Keywords=voxel;building;exploration;survival;procedural;
+StartupNotify=true
+StartupWMClass=Stonewild

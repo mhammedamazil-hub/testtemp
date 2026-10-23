@@ -35,7 +35,9 @@ bool fail(std::string* error, const std::string& message) {
 
 }  // namespace
 
-Game::Game(std::uint64_t seed) : world_(seed) {
+Game::Game(std::uint64_t seed, int initialRenderRadius, int initialQuality) : world_(seed) {
+    setRenderRadius(initialRenderRadius);
+    setQuality(initialQuality);
     world_.ensureAround(player_.position, renderRadius_ + 1);
     for (int y = kChunkHeight - 2; y > 1; --y) {
         if (blockInfo(world_.blockAt(0, y, 0)).solid) {
@@ -123,7 +125,12 @@ bool SaveSystem::save(const std::string& path, const Game& game, std::string* er
     return true;
 }
 
-bool SaveSystem::load(const std::string& path, Game& game, std::string* error) {
+bool SaveSystem::load(
+    const std::string& path,
+    Game& game,
+    std::string* error,
+    int maximumRenderRadius,
+    int maximumQuality) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) return fail(error, "save does not exist: " + path);
     std::array<char, 8> magic{};
@@ -165,8 +172,8 @@ bool SaveSystem::load(const std::string& path, Game& game, std::string* error) {
 
     game.player() = loadedPlayer;
     game.player().velocity = {};
-    game.setQuality(quality);
-    game.setRenderRadius(radius);
+    game.setQuality(std::min(quality, std::clamp(maximumQuality, 0, 2)));
+    game.setRenderRadius(std::min(radius, std::clamp(maximumRenderRadius, 1, 6)));
     game.chooseHotbarSlot(selected);
     game.world().replaceEdits(edits);
     game.world().ensureAround(game.player().position, game.renderRadius() + 1);

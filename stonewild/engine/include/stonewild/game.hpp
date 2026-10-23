@@ -12,7 +12,10 @@ namespace stonewild {
 
 class Game {
 public:
-    explicit Game(std::uint64_t seed = 0x53544f4e4557494cULL);
+    explicit Game(
+        std::uint64_t seed = 0x53544f4e4557494cULL,
+        int initialRenderRadius = 2,
+        int initialQuality = 1);
 
     void update(const InputState& input, float deltaSeconds);
     void chooseHotbarSlot(std::size_t slot);
@@ -22,6 +25,7 @@ public:
     Player& player() { return player_; }
     const Player& player() const { return player_; }
     Block selectedBlock() const { return hotbar_[selectedSlot_]; }
+    Block hotbarBlock(std::size_t slot) const { return slot < hotbar_.size() ? hotbar_[slot] : Block::Air; }
     std::size_t selectedSlot() const { return selectedSlot_; }
     int renderRadius() const { return renderRadius_; }
     void setRenderRadius(int radius);
@@ -51,7 +55,12 @@ private:
 class SaveSystem {
 public:
     static bool save(const std::string& path, const Game& game, std::string* error = nullptr);
-    static bool load(const std::string& path, Game& game, std::string* error = nullptr);
+    static bool load(
+        const std::string& path,
+        Game& game,
+        std::string* error = nullptr,
+        int maximumRenderRadius = 6,
+        int maximumQuality = 2);
 };
 
 }  // namespace stonewild

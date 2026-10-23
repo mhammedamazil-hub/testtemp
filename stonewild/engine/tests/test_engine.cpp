@@ -27,6 +27,7 @@ void testCoordinateMath() {
     expect(floorDiv(-17, 16) == -2, "negative previous chunk");
     expect(floorMod(-1, 16) == 15, "negative floor modulus");
     expect(chunkForBlock(-1, 16) == ChunkPos{-1, 1}, "negative block to chunk");
+    expect(sizeof(Block) == 1, "block storage must remain byte-sized for low-memory systems");
 }
 
 void testDeterministicTerrain() {
@@ -114,7 +115,10 @@ void testPlayerPhysics() {
 void testSaveRoundTrip() {
     using namespace stonewild;
     constexpr std::uint64_t seed = 0x1234abcdULL;
-    Game source(seed);
+    Game source(seed, 1, 0);
+    expect(source.renderRadius() == 1, "initial low-memory render radius should apply before streaming");
+    expect(source.quality() == 0, "initial low-memory quality should apply before rendering");
+    expect(source.world().loadedChunkCount() == 25, "low-memory startup should load only a 5x5 staging area");
     source.player().position = {12.25F, 67.0F, -8.75F};
     source.player().yaw = 1.25F;
     source.setQuality(2);

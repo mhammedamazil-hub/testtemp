@@ -29,7 +29,9 @@ Mechanics, values, names, art direction, UI, recipes, creatures, structures, and
 - save/load of player state and edits;
 - face-culled meshing;
 - GLES 3 renderer and touch/gamepad controls;
-- debug APK workflow.
+- SDL2/OpenGL Linux desktop renderer with keyboard, mouse, and gamepad controls;
+- adaptive 4 GB low-memory profile and frame-budgeted mesh uploads;
+- debug APK and Linux Mint `.deb` workflows.
 
 ## Phase 2 — playable survival loop
 
