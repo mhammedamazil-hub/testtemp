@@ -57,17 +57,23 @@ jobs:
           test -s "$DEB"
           dpkg-deb --info "$DEB"
           dpkg-deb --contents "$DEB" | tee /tmp/deb-files.txt
-          grep -q './opt/stonewild-realms/games/stonewild/game.conf' /tmp/deb-files.txt
-          grep -q './usr/bin/stonewild-realms' /tmp/deb-files.txt
-          grep -q './usr/share/doc/stonewild-realms/LUANTI-LGPL-2.1.txt' /tmp/deb-files.txt
           rm -rf /tmp/stonewild-deb-root
           dpkg-deb --extract "$DEB" /tmp/stonewild-deb-root
-          BIN=/tmp/stonewild-deb-root/opt/stonewild-realms/bin/luanti
+          ROOT=/tmp/stonewild-deb-root
+          BIN="$ROOT/opt/stonewild-realms/bin/luanti"
+          test -x "$BIN"
+          test -f "$ROOT/opt/stonewild-realms/games/stonewild/game.conf"
+          test -x "$ROOT/usr/bin/stonewild-realms"
+          test -f "$ROOT/usr/share/doc/stonewild-realms/LUANTI-LGPL-2.1.txt"
           "$BIN" --version
-          LUANTI_USER_PATH=/tmp/stonewild-package-user "$BIN" --gameid list | grep -q stonewild
+          LUANTI_USER_PATH=/tmp/stonewild-package-user "$BIN" --gameid list \
+            > /tmp/stonewild-games.txt 2>&1
+          cat /tmp/stonewild-games.txt
+          grep -q stonewild /tmp/stonewild-games.txt
           desktop-file-validate \
-            /tmp/stonewild-deb-root/usr/share/applications/org.stonewild.realms.desktop
-          file "$BIN" | grep -q 'ELF 64-bit'
+            "$ROOT/usr/share/applications/org.stonewild.realms.desktop"
+          file "$BIN" | tee /tmp/stonewild-file.txt
+          grep -q 'ELF 64-bit' /tmp/stonewild-file.txt
           ldd "$BIN" | tee /tmp/stonewild-ldd.txt
           ! grep -q 'not found' /tmp/stonewild-ldd.txt
 
