@@ -1,0 +1,10 @@
+# Obscura binaries are large (~70 MB each) and machine-specific.
+# Install them with scripts/install_obscura.sh; do not commit them.
+vendor/obscura/*
+!vendor/obscura/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
