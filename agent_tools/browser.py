@@ -28,7 +28,7 @@ import shutil
 import signal
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 from urllib.parse import urlparse
 
 __all__ = [
@@ -166,6 +166,7 @@ class ObscuraClient:
         stealth: bool = False,
         default_timeout: int = 45,
         ca_bundle: Optional[str] = None,
+        trace: Optional[Callable[[List[str]], None]] = None,
     ) -> None:
         self.binary = find_obscura(binary)
         self.allow_private_network = bool(allow_private_network)
@@ -176,6 +177,8 @@ class ObscuraClient:
         # only do it when the environment requires extra CAs (for example a
         # TLS-inspecting proxy).
         self.ca_bundle = ca_bundle or os.environ.get("SSL_CERT_FILE")
+        # Receives each argv before it runs, for auditability.
+        self.trace = trace
 
     # -- process plumbing -------------------------------------------------
     def _global_args(self) -> List[str]:
@@ -194,6 +197,8 @@ class ObscuraClient:
 
     def _run(self, argv: Sequence[str], timeout: int) -> subprocess.CompletedProcess:
         """Run a command, killing the whole process group on timeout."""
+        if self.trace is not None:
+            self.trace(list(argv))
         try:
             process = subprocess.Popen(
                 list(argv),
@@ -487,6 +492,7 @@ class BrowserTools:
         stealth: bool = False,
         default_timeout: int = 45,
         ca_bundle: Optional[str] = None,
+        trace: Optional[Callable[[List[str]], None]] = None,
     ) -> None:
         self._client_kwargs = {
             "binary": binary,
@@ -494,6 +500,7 @@ class BrowserTools:
             "stealth": stealth,
             "default_timeout": default_timeout,
             "ca_bundle": ca_bundle,
+            "trace": trace,
         }
         self._client: Optional[ObscuraClient] = None
 
