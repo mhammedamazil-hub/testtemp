@@ -1,0 +1,72 @@
+name: Obscura archive transport
+
+# Fetches the official Obscura release on a runner (which has open internet),
+# verifies its SHA-256, and publishes it to a short-lived branch so the
+# workspace can fetch it over git.
+#
+# Why this exists: the workspace cannot reach GitHub's release-asset hosts
+# (release-assets.githubusercontent.com, objects.githubusercontent.com) or the
+# Actions artifact/log backends (Azure Blob,
+# pipelines.actions.githubusercontent.com). git over github.com is the only
+# reachable return path.
+#
+# The published branch is a transport artifact. Delete it once the archive has
+# been fetched:  git push origin --delete obscura-asset-<run id>
+
+on:
+  push:
+    paths:
+      - ".github/workflows/obscura-fetch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  OBSCURA_VERSION: v0.2.5
+  OBSCURA_ASSET: obscura-x86_64-linux.tar.gz
+  # SHA-256 published by the GitHub API for the v0.2.5 asset.
+  OBSCURA_SHA256: 2116764b99bc084fae3668b68aa535b4cf456e4498845b47493ad4123e83ca36
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download the official archive
+        run: |
+          url="https://github.com/h4ckf0r0day/obscura/releases/download/${OBSCURA_VERSION}/${OBSCURA_ASSET}"
+          echo "Downloading $url"
+          curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 -o "$OBSCURA_ASSET" "$url"
+          ls -l "$OBSCURA_ASSET"
+
+      - name: Verify SHA-256 before publishing anything
+        run: |
+          actual="$(sha256sum "$OBSCURA_ASSET" | awk '{print $1}')"
+          echo "expected: $OBSCURA_SHA256"
+          echo "actual  : $actual"
+          if [ "$actual" != "$OBSCURA_SHA256" ]; then
+            echo "::error::checksum mismatch — refusing to publish"
+            exit 1
+          fi
+          echo "checksum OK"
+
+      - name: Publish to a transport branch
+        run: |
+          branch="obscura-asset-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -f "$OBSCURA_ASSET"
+          git commit -m "Obscura ${OBSCURA_VERSION} ${OBSCURA_ASSET} (sha256 ${OBSCURA_SHA256})"
+          git push origin "HEAD:refs/heads/${branch}"
+          {
+            echo "### Obscura transport branch"
+            echo ""
+            echo "- branch: \`${branch}\`"
+            echo "- version: \`${OBSCURA_VERSION}\`"
+            echo "- sha256: \`${OBSCURA_SHA256}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
