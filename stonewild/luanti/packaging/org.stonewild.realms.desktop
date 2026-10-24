@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Stonewild Realms
+GenericName=Voxel Survival Game
+Comment=Explore a living wilderness, gather resources, craft tools, and survive
+Exec=stonewild-realms
+Icon=org.stonewild.realms
+Terminal=false
+Categories=Game;AdventureGame;
+Keywords=voxel;survival;crafting;exploration;
+StartupNotify=true
+StartupWMClass=stonewild-realms

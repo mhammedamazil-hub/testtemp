@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+STONEWILD_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/stonewild-realms"
+export LUANTI_USER_PATH="${STONEWILD_HOME}"
+mkdir -p "${STONEWILD_HOME}"
+if [ ! -e "${STONEWILD_HOME}/minetest.conf" ]; then
+    cp /opt/stonewild-realms/stonewild.conf "${STONEWILD_HOME}/minetest.conf"
+fi
+exec /opt/stonewild-realms/bin/luanti --gameid stonewild "$@"

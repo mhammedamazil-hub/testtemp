@@ -1,95 +1,109 @@
-name: Stonewild Linux Mint DEB
+name: Stonewild Realms Linux Mint DEB
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "stonewild/**"
+      - "stonewild/luanti/**"
       - ".github/workflows/stonewild-linux.yml"
   pull_request:
     paths:
-      - "stonewild/**"
+      - "stonewild/luanti/**"
       - ".github/workflows/stonewild-linux.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: stonewild-linux-${{ github.ref }}
+  group: stonewild-luanti-linux-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   linux-mint-package:
-    name: Linux Mint 21+ package
+    name: Luanti 5.17 Linux Mint 21+ package
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
-      - name: Check out source
+      - name: Check out Stonewild overlay
         uses: actions/checkout@v7
 
-      - name: Install desktop build dependencies
+      - name: Install Luanti build and validation dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            cmake ninja-build g++ dpkg-dev file \
-            libsdl2-dev libgl1-mesa-dev libgl1-mesa-dri \
-            xvfb xauth desktop-file-utils
+            cmake ninja-build g++ libc6-dev dpkg-dev file gettext \
+            libpng-dev libjpeg-dev libgl1-mesa-dev libgl1-mesa-dri \
+            libsqlite3-dev libogg-dev libvorbis-dev libopenal-dev \
+            libcurl4-gnutls-dev libfreetype6-dev zlib1g-dev libgmp-dev \
+            libjsoncpp-dev libzstd-dev libluajit-5.1-dev libsdl2-dev \
+            desktop-file-utils xvfb xauth lua5.1
 
-      - name: Configure release build
+      - name: Verify original Lua syntax
         run: |
-          cmake -S stonewild -B /tmp/stonewild-linux-build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr \
-            -DBUILD_TESTING=ON \
-            -DSTONEWILD_BUILD_DESKTOP=ON \
-            -DCMAKE_CXX_FLAGS="-Werror"
+          find stonewild/luanti/games/stonewild -name '*.lua' -print0 \
+            | xargs -0 -n1 luac5.1 -p
+          lua5.1 stonewild/luanti/tests/load_game.lua \
+            stonewild/luanti/games/stonewild
 
-      - name: Compile with a two-job low-memory budget
+      - name: Build, launch headless world, and package
+        env:
+          STONEWILD_BUILD_JOBS: "2"
+        run: stonewild/luanti/scripts/build_linux_deb.sh /tmp/stonewild-linux-output
+
+      - name: Inspect Debian package
         run: |
-          set +e
-          cmake --build /tmp/stonewild-linux-build --parallel 2 2>&1 | tee /tmp/stonewild-linux-build.log
-          status=${PIPESTATUS[0]}
-          set -e
-          if [ "$status" -ne 0 ]; then
-            diagnostic=$(grep -E -i '(^|[[:space:]])(error:|fatal error:)|undefined reference|FAILED|ninja:' /tmp/stonewild-linux-build.log | tail -n 60 | python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')
-            echo "::error title=Linux compiler output::$diagnostic"
-            exit "$status"
-          fi
-
-      - name: Run portable core tests
-        run: ctest --test-dir /tmp/stonewild-linux-build --output-on-failure
+          set -euo pipefail
+          DEB=/tmp/stonewild-linux-output/stonewild-realms_0.3.0_amd64.deb
+          test -s "$DEB"
+          dpkg-deb --info "$DEB"
+          dpkg-deb --contents "$DEB" | tee /tmp/deb-files.txt
+          grep -q './opt/stonewild-realms/games/stonewild/game.conf' /tmp/deb-files.txt
+          grep -q './usr/bin/stonewild-realms' /tmp/deb-files.txt
+          grep -q './usr/share/doc/stonewild-realms/LUANTI-LGPL-2.1.txt' /tmp/deb-files.txt
+          rm -rf /tmp/stonewild-deb-root
+          dpkg-deb --extract "$DEB" /tmp/stonewild-deb-root
+          BIN=/tmp/stonewild-deb-root/opt/stonewild-realms/bin/luanti
+          "$BIN" --version
+          LUANTI_USER_PATH=/tmp/stonewild-package-user "$BIN" --gameid list | grep -q stonewild
+          desktop-file-validate \
+            /tmp/stonewild-deb-root/usr/share/applications/org.stonewild.realms.desktop
+          file "$BIN" | grep -q 'ELF 64-bit'
+          ldd "$BIN" | tee /tmp/stonewild-ldd.txt
+          ! grep -q 'not found' /tmp/stonewild-ldd.txt
 
       - name: Validate desktop renderer under software OpenGL
         run: |
-          export XDG_DATA_HOME=/tmp/stonewild-smoke-data
-          timeout 45s xvfb-run -a -s '-screen 0 1280x720x24' \
-            env LIBGL_ALWAYS_SOFTWARE=1 /tmp/stonewild-linux-build/stonewild --low --smoke-test
-
-      - name: Build Debian package
-        run: |
-          mkdir -p /tmp/stonewild-deb
-          cpack --config /tmp/stonewild-linux-build/CPackConfig.cmake \
-            -G DEB -B /tmp/stonewild-deb
-
-      - name: Inspect and test Debian package
-        run: |
-          DEB=$(find /tmp/stonewild-deb -maxdepth 1 -name '*.deb' -print -quit)
-          test -n "$DEB" && test -s "$DEB"
-          dpkg-deb --info "$DEB"
-          dpkg-deb --contents "$DEB"
-          rm -rf /tmp/stonewild-deb-root
-          dpkg-deb --extract "$DEB" /tmp/stonewild-deb-root
-          /tmp/stonewild-deb-root/usr/bin/stonewild --version
-          desktop-file-validate \
-            /tmp/stonewild-deb-root/usr/share/applications/game.stonewild.Stonewild.desktop
-          file /tmp/stonewild-deb-root/usr/bin/stonewild | grep -q 'ELF 64-bit'
-          ldd /tmp/stonewild-deb-root/usr/bin/stonewild | tee /tmp/stonewild-ldd.txt
-          ! grep -q 'not found' /tmp/stonewild-ldd.txt
+          set -euo pipefail
+          ROOT=/tmp/stonewild-deb-root/opt/stonewild-realms
+          BIN="$ROOT/bin/luanti"
+          USER=/tmp/stonewild-visual-user
+          WORLD=/tmp/stonewild-visual-world
+          rm -rf "$USER" "$WORLD"
+          mkdir -p "$USER"
+          set +e
+          LUANTI_USER_PATH="$USER" timeout --signal=INT --kill-after=5s 10s \
+            "$BIN" --server --world "$WORLD" --gameid stonewild \
+            --config "$ROOT/stonewild.conf" > /tmp/stonewild-server.log 2>&1
+          server_status=$?
+          set -e
+          cat /tmp/stonewild-server.log
+          test "$server_status" -eq 0 -o "$server_status" -eq 124
+          test -f "$WORLD/world.mt"
+          set +e
+          timeout --signal=INT --kill-after=5s 20s xvfb-run -a -s '-screen 0 1280x720x24' \
+            env LIBGL_ALWAYS_SOFTWARE=1 LUANTI_USER_PATH="$USER" \
+            "$BIN" --world "$WORLD" --gameid stonewild --config "$ROOT/stonewild.conf" --go \
+            > /tmp/stonewild-visual.log 2>&1
+          visual_status=$?
+          set -e
+          cat /tmp/stonewild-visual.log
+          test "$visual_status" -eq 0 -o "$visual_status" -eq 124
+          ! grep -E 'ERROR\[Main\]|ModError|LuaError|ServerError' /tmp/stonewild-visual.log
 
       - name: Upload Linux Mint DEB
         uses: actions/upload-artifact@v7
         with:
-          name: stonewild-linux-mint-amd64-${{ github.run_number }}
-          path: /tmp/stonewild-deb/*.deb
+          name: stonewild-realms-linux-mint-amd64-${{ github.run_number }}
+          path: /tmp/stonewild-linux-output/stonewild-realms_0.3.0_amd64.deb
           if-no-files-found: error
           retention-days: 14
