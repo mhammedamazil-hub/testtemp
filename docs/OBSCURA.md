@@ -5,10 +5,14 @@ written in Rust. It executes real JavaScript through V8 and implements the Chrom
 DevTools Protocol, without bundling Chromium. This project uses it as the engine
 behind the agent's browser tools.
 
-> **Status: not yet running.** The official binary could not be downloaded in
-> this sandbox. See [Blocker](#blocker-why-the-binary-is-not-installed). The
-> integration code and installer are complete and unit-tested against a
-> stand-in; the live smoke test has **not** been performed.
+> **Status: adapter complete, binary pending.** The official binary could not
+> be downloaded in this sandbox (see
+> [Blocker](#blocker-why-the-binary-is-not-installed)); the archive is expected
+> to be supplied manually. The adapter, installer and mocked tests are
+> complete and verified. The live checks — `--version`, the `example.com`
+> smoke test, JavaScript on a second site — have **not** been run, because
+> there is no binary to run them against. Nothing in this document claims
+> otherwise.
 
 ---
 
@@ -216,26 +220,129 @@ raised, so the agent can read the message and adapt.
   argument. Only `http:`/`https:` URLs are accepted, so `file://` cannot be used
   to read local files.
 
-## 6. Tests
+### Configuration
+
+Constructor arguments (`agent_tools.BrowserTools`):
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `binary` | auto-detected | Path to the `obscura` executable |
+| `allow_private_network` | `False` | Forward `--allow-private-network` (local dev servers) |
+| `stealth` | `False` | Forward `--stealth` (tracker blocking; TLS impersonation only in a stealth build) |
+| `default_timeout` | `45` | Navigation timeout in seconds when a call omits `timeout` |
+
+Binary lookup order: explicit `binary=`, then `$OBSCURA_BIN`, then
+`vendor/obscura/obscura`, then `obscura` on `$PATH`.
+
+Installer environment variables:
+
+| Variable | Effect |
+|---|---|
+| `OBSCURA_INSTALL_DIR` | Install target (default `vendor/obscura`) |
+| `OBSCURA_ARCHIVE` | Use this archive instead of downloading |
+| `OBSCURA_SHA256` | Reject the archive unless its SHA-256 matches |
+
+## 6. Limitations
+
+* **Stateless.** Each tool call is one process that navigates and acts. Cookies,
+  `localStorage` and page state do not carry between calls. A multi-step flow
+  (log in, then click) needs `obscura serve` plus a CDP client, which is not
+  implemented here. Do not assume a session exists.
+* **One navigation per call.** `browser_fetch` and `browser_evaluate` each
+  reload the page. There is no "current page" to re-query cheaply.
+* **`--eval` output is JSON.** Non-JSON output is returned as raw text rather
+  than raising, so a malformed expression may surface as a string instead of an
+  error.
+* **The engine is not Chromium.** Obscura implements its own layout and paint;
+  its README notes that long-tail CSS, some Web APIs and media playback may
+  differ. A page that works in Chrome may render differently.
+* **No bot-detection guarantee.** Nothing here has been tested against
+  Cloudflare or any protected site. The `-stealth` archive adds TLS
+  impersonation but does not guarantee access.
+* **SSRF guard stays on.** Loopback, RFC1918 and link-local targets are refused
+  unless the host process opts in. `file://` is rejected outright.
+* **No MCP.** Tools are called in-process; no MCP server is started.
+
+## 7. Integrating into a future agent
+
+The adapter is deliberately framework-free: it returns JSON-schema tool
+definitions and accepts a tool name plus a dict.
+
+```python
+from agent_tools import BrowserTools
+
+browser = BrowserTools()
+
+# 1. Advertise the tools to the model.
+tool_definitions = browser.list_tools()
+#    Anthropic-style APIs take this shape directly.
+#    OpenAI-style APIs expect the same object under the key "parameters".
+#    for schema in tool_definitions: schema["parameters"] = schema.pop("input_schema")
+
+# 2. In the agent's tool loop.
+envelope = browser.call(tool_name, tool_arguments)
+
+# 3. Failures are data, not exceptions, so the model can see and adapt.
+if envelope["ok"]:
+    observation = envelope
+else:
+    observation = {"error": envelope["error"]}
+```
+
+Two integration notes:
+
+* Tool results can be large. `browser_fetch` reports `length` so a caller can
+  truncate or switch to `dump="markdown"` before feeding the text to a model.
+* Wrap `BrowserTools` per agent session if you need different settings (for
+  example `stealth=True` for one workflow and not another).
+
+## 8. Tests
+
+### Mocked suite — runs anywhere, no binary needed
 
 ```bash
 python3 -m unittest discover -s tests -t . -v
 ```
 
-21 tests pass. They run against `tests/fixtures/fake_obscura.py`, a stand-in
-that mimics the CLI contract (version output, JSON-encoded `--eval`, dumps,
-exit codes, a hanging URL for the timeout path). They verify argument
-construction, JSON decoding, error propagation, timeout killing and tool
-dispatch. **They do not verify Obscura's engine.**
+**21 tests, all passing.** They run against `tests/fixtures/fake_obscura.py`, a
+labelled stand-in that mimics the CLI contract (version output, JSON-encoded
+`--eval`, dumps, exit codes, a hanging URL for the timeout path). They verify
+argument construction, JSON decoding, error propagation, timeout killing and
+tool dispatch. **They do not verify Obscura's engine** — passing them says
+nothing about whether a real page renders.
 
-Not yet run, because they need the real binary:
+### Live suite — runs only when a binary is installed
 
-- `./vendor/obscura/obscura --version`
-- `./vendor/obscura/obscura fetch https://example.com --eval "document.title"`
-- JavaScript execution and title extraction on a second, JS-heavy site
+```bash
+python3 -m unittest tests.test_live -v
+```
+
+`tests/test_live.py` skips itself when `find_obscura()` or `--version` fails, so
+it is inert until the binary exists. Once installed it checks: version output,
+`example.com` title, `document.querySelector('h1').textContent`, a text dump,
+a second site (`news.ycombinator.com`) — title plus a live DOM query — and the
+error path for an unresolvable host.
+
+### Smoke script — records raw evidence
+
+```bash
+./scripts/smoke_test.sh
+```
+
+Prints the environment, then runs each official command separately with its exit
+status, and ends with a pass/fail summary. This is the script that produces the
+evidence for the definition of done.
+
+### Not run
+
+- `obscura --version`
+- `obscura fetch https://example.com --eval "document.title"`
+- JavaScript execution and title extraction on a second site
 - Any Cloudflare or bot-detection behaviour
 
-## 7. Source-level facts verified
+All of these are blocked by the missing binary, not by the adapter.
+
+## 9. Source-level facts verified
 
 Taken from the v0.2.5 source tarball (fetched via `codeload`, which is reachable)
 rather than from the README alone:
@@ -246,7 +353,7 @@ rather than from the README alone:
 * `crates/obscura-cli/Cargo.toml` — features `stealth` and `render`; binaries `obscura` and `obscura-worker`.
 * Runtime defaults: `OBSCURA_NAV_TIMEOUT_MS=30000`, `OBSCURA_SCRIPT_DEADLINE_MS=30000`, `OBSCURA_CDP_COMMAND_TIMEOUT_MS=60000`.
 
-## 8. Files
+## 10. Files
 
 | Path | Purpose |
 |---|---|
@@ -254,7 +361,9 @@ rather than from the README alone:
 | `agent_tools/__init__.py` | package exports |
 | `agent_tools/__main__.py` | `list` / `call` / `doctor` entry point |
 | `scripts/install_obscura.sh` | platform-aware installer with checks |
-| `tests/test_browser.py` | 21 unit tests |
-| `tests/fixtures/fake_obscura.py` | stand-in binary for tests |
+| `tests/test_browser.py` | 21 mocked unit tests |
+| `tests/test_live.py` | live smoke tests, auto-skipped without a binary |
+| `tests/fixtures/fake_obscura.py` | stand-in binary for the mocked suite |
+| `scripts/smoke_test.sh` | records raw command output and exit status |
 | `vendor/obscura/` | install target (git-ignored) |
 | `.gitignore` | excludes binaries and caches |

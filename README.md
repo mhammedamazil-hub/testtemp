@@ -30,7 +30,9 @@ tools.call("browser_fetch", {"url": "https://example.com", "dump": "text"})
 Tests:
 
 ```bash
-python3 -m unittest discover -s tests -t . -v
+python3 -m unittest discover -s tests -t . -v   # 21 mocked tests
+python3 -m unittest tests.test_live -v          # live; skipped without a binary
+./scripts/smoke_test.sh                         # raw evidence, exit status per command
 ```
 
 See [docs/OBSCURA.md](docs/OBSCURA.md) for the install details, the design
