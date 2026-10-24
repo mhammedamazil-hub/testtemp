@@ -12,6 +12,10 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${OBSCURA_BIN:-$REPO_ROOT/vendor/obscura/obscura}"
+# Sites are configurable: sandboxes often allowlist hosts, so the official
+# example.com targets may be unreachable even when Obscura works.
+URL_1="${OBSCURA_SMOKE_URL:-https://example.com}"
+URL_2="${OBSCURA_SMOKE_URL_2:-https://news.ycombinator.com}"
 
 PASS=0
 FAIL=0
@@ -62,6 +66,9 @@ echo "    libc          : $(getconf GNU_LIBC_VERSION 2>/dev/null || echo 'n/a')"
 echo "    disk (repo)   : $(df -h "$REPO_ROOT" | awk 'NR==2 {print $4 " free of " $2}')"
 echo "    memory        : $(free -h 2>/dev/null | awk '/^Mem:/ {print $7 " available of " $2}')"
 echo "    binary        : $BIN"
+echo "    site 1        : $URL_1"
+echo "    site 2        : $URL_2"
+echo "    SSL_CERT_FILE : ${SSL_CERT_FILE:-(unset)}"
 
 if [[ ! -x "$BIN" ]]; then
     hr
@@ -74,11 +81,11 @@ echo "    worker        : $( [[ -x "$(dirname "$BIN")/obscura-worker" ]] && echo
 hr
 
 run_case "version"                  "$BIN" --version
-run_case "example.com title"        "$BIN" fetch https://example.com --eval "document.title" -q
-run_case "example.com JS DOM query" "$BIN" fetch https://example.com --eval "document.querySelector('h1').textContent" -q
-run_case "example.com text dump"    "$BIN" fetch https://example.com --dump text -q
-run_case "second site: title"       "$BIN" fetch https://news.ycombinator.com --eval "document.title" -q
-run_case "second site: JS link count" "$BIN" fetch https://news.ycombinator.com --eval "document.querySelectorAll('a[href]').length" -q
+run_case "site 1: title"            "$BIN" fetch "$URL_1" --eval "document.title" -q
+run_case "site 1: JS DOM query"     "$BIN" fetch "$URL_1" --eval "document.querySelector('h1') ? document.querySelector('h1').textContent.trim() : 'no h1'" -q
+run_case "site 1: text dump"        "$BIN" fetch "$URL_1" --dump text -q
+run_case "site 2: title"            "$BIN" fetch "$URL_2" --eval "document.title" -q
+run_case "site 2: JS link count"    "$BIN" fetch "$URL_2" --eval "document.querySelectorAll('a[href]').length" -q
 run_case_expect_fail "error path (bad host)" "$BIN" fetch https://this-host-should-not-exist.invalid -q
 
 hr

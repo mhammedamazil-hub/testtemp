@@ -13,10 +13,9 @@ name: Obscura archive transport
 # The published branch is a transport artifact. Delete it once the archive has
 # been fetched:  git push origin --delete obscura-asset-<run id>
 
+# Manual dispatch only: a push trigger would re-run this (and re-publish a
+# ~71 MB branch) every time the workflow file itself changed.
 on:
-  push:
-    paths:
-      - ".github/workflows/obscura-fetch.yml"
   workflow_dispatch:
 
 permissions:

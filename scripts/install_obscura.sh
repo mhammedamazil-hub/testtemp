@@ -235,6 +235,15 @@ if SMOKE_OUT="$("$DEST/obscura" fetch https://example.com --eval 'document.title
 else
     warn "smoke test failed:"
     printf '    %s\n' "$SMOKE_OUT" >&2
+    if grep -q "UnknownIssuer" <<<"$SMOKE_OUT"; then
+        warn "the site's certificate is not trusted by Obscura's bundled roots."
+        warn "That usually means a TLS-inspecting proxy. Retry with the system"
+        warn "bundle:  SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt $0"
+    elif grep -q "tls handshake eof\|SendRequest\|dns error" <<<"$SMOKE_OUT"; then
+        warn "the host could not be reached. Sandboxes often allowlist hosts;"
+        warn "set OBSCURA_SMOKE_URL to a reachable site and re-run:"
+        warn "  ./scripts/smoke_test.sh"
+    fi
     warn "the binary installed but could not fetch a page (network or engine issue)"
     exit 1
 fi

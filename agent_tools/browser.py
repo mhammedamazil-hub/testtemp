@@ -89,20 +89,37 @@ class ToolError(RuntimeError):
         return payload
 
 
+def _is_executable(path: Path) -> bool:
+    try:
+        return path.is_file() and os.access(path, os.X_OK)
+    except OSError:
+        return False
+
+
 def find_obscura(explicit: Optional[str] = None) -> Path:
     """Locate the ``obscura`` executable.
 
-    Search order: explicit argument, ``$OBSCURA_BIN``, the vendored copy under
-    ``vendor/obscura/``, then ``$PATH``.
-    """
-    candidates: List[Path] = []
-    if explicit:
-        candidates.append(Path(explicit))
-    from_env = os.environ.get("OBSCURA_BIN")
-    if from_env:
-        candidates.append(Path(from_env))
-    candidates.append(_VENDORED_BINARY)
+    Candidates are tried in order: the explicit argument, ``$OBSCURA_BIN``, the
+    vendored copy under ``vendor/obscura/``, then ``obscura`` on ``$PATH``.
 
+    The first two are *authoritative*: if either is given but does not point at
+    an executable file, that is an error rather than a cue to silently use a
+    different binary. Only the search locations (vendored copy, ``$PATH``) fall
+    through when absent.
+    """
+    for label, value in (("the binary= argument", explicit),
+                         ("$OBSCURA_BIN", os.environ.get("OBSCURA_BIN"))):
+        if value:
+            path = Path(value).expanduser()
+            if not _is_executable(path):
+                raise ToolError(
+                    f"{label} points at {path}, which is not an executable file. "
+                    "Fix the path or unset it to let the search continue.",
+                    kind="binary_not_found",
+                )
+            return path.resolve()
+
+    candidates: List[Path] = [_VENDORED_BINARY]
     on_path = shutil.which("obscura")
     if on_path:
         candidates.append(Path(on_path))
@@ -114,7 +131,7 @@ def find_obscura(explicit: Optional[str] = None) -> Path:
         except OSError:
             continue
 
-    checked = ", ".join(str(c) for c in candidates)
+    checked = ", ".join(str(c) for c in candidates) or "(no candidates)"
     raise ToolError(
         "obscura executable not found. Install it with "
         "`scripts/install_obscura.sh` or point $OBSCURA_BIN at the binary. "
@@ -148,11 +165,17 @@ class ObscuraClient:
         allow_private_network: bool = False,
         stealth: bool = False,
         default_timeout: int = 45,
+        ca_bundle: Optional[str] = None,
     ) -> None:
         self.binary = find_obscura(binary)
         self.allow_private_network = bool(allow_private_network)
         self.stealth = bool(stealth)
         self.default_timeout = int(default_timeout)
+        # Obscura trusts bundled webpki roots by default and additionally honours
+        # SSL_CERT_FILE / SSL_CERT_DIR. Setting a bundle REPLACES those roots, so
+        # only do it when the environment requires extra CAs (for example a
+        # TLS-inspecting proxy).
+        self.ca_bundle = ca_bundle or os.environ.get("SSL_CERT_FILE")
 
     # -- process plumbing -------------------------------------------------
     def _global_args(self) -> List[str]:
@@ -163,6 +186,12 @@ class ObscuraClient:
             args.append("--allow-private-network")
         return args
 
+    def _child_env(self) -> Dict[str, str]:
+        env = os.environ.copy()
+        if self.ca_bundle:
+            env["SSL_CERT_FILE"] = self.ca_bundle
+        return env
+
     def _run(self, argv: Sequence[str], timeout: int) -> subprocess.CompletedProcess:
         """Run a command, killing the whole process group on timeout."""
         try:
@@ -171,6 +200,7 @@ class ObscuraClient:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=self._child_env(),
                 start_new_session=True,
             )
         except OSError as exc:
@@ -456,12 +486,14 @@ class BrowserTools:
         allow_private_network: bool = False,
         stealth: bool = False,
         default_timeout: int = 45,
+        ca_bundle: Optional[str] = None,
     ) -> None:
         self._client_kwargs = {
             "binary": binary,
             "allow_private_network": allow_private_network,
             "stealth": stealth,
             "default_timeout": default_timeout,
+            "ca_bundle": ca_bundle,
         }
         self._client: Optional[ObscuraClient] = None
 
@@ -558,6 +590,7 @@ class BrowserTools:
             "stealth": client.stealth,
             "allow_private_network": client.allow_private_network,
             "default_timeout": client.default_timeout,
+            "ca_bundle": client.ca_bundle,
         }
 
 

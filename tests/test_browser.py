@@ -13,6 +13,7 @@ import stat
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -61,9 +62,26 @@ class TestBinaryDiscovery(FakeObscuraTestCase):
         self.assertEqual(find_obscura(str(self.binary)), self.binary.resolve())
 
     def test_missing_binary_reports_clearly(self):
-        os.environ["OBSCURA_BIN"] = str(self.tmpdir / "does-not-exist")
+        missing = self.tmpdir / "does-not-exist"
+        os.environ["OBSCURA_BIN"] = str(missing)
         with self.assertRaises(ToolError) as ctx:
             find_obscura()
+        self.assertEqual(ctx.exception.kind, "binary_not_found")
+        self.assertIn(str(missing), str(ctx.exception))
+
+    def test_explicit_path_is_authoritative(self):
+        # An explicit but missing path must not silently fall back to another binary.
+        with self.assertRaises(ToolError) as ctx:
+            find_obscura(str(self.tmpdir / "nope"))
+        self.assertEqual(ctx.exception.kind, "binary_not_found")
+
+    def test_search_exhausted_mentions_installer(self):
+        os.environ.pop("OBSCURA_BIN", None)
+        with unittest.mock.patch.object(browser_module, "_VENDORED_BINARY",
+                                        self.tmpdir / "no-vendored"), \
+             unittest.mock.patch.object(browser_module.shutil, "which", return_value=None):
+            with self.assertRaises(ToolError) as ctx:
+                find_obscura()
         self.assertEqual(ctx.exception.kind, "binary_not_found")
         self.assertIn("install_obscura.sh", str(ctx.exception))
 

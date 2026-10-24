@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Obscura JS Fixture</title>
+</head>
+<body>
+  <h1 id="heading">static</h1>
+  <ul id="list"></ul>
+  <p id="fetched">pending</p>
+
+  <script>
+    // 1. synchronous DOM mutation
+    document.getElementById('heading').textContent = 'mutation-ok';
+
+    // 2. asynchronous work: timers must actually be driven by the engine
+    setTimeout(function () {
+      var list = document.getElementById('list');
+      for (var i = 1; i <= 3; i++) {
+        var li = document.createElement('li');
+        li.textContent = 'item-' + i;
+        list.appendChild(li);
+      }
+      window.__timerFired = true;
+    }, 50);
+
+    // 3. network round-trip from inside the page
+    fetch('data.json')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        document.getElementById('fetched').textContent = 'fetched:' + data.value;
+        window.__fetchDone = true;
+      })
+      .catch(function (e) {
+        document.getElementById('fetched').textContent = 'fetched:error';
+      });
+  </script>
+</body>
+</html>
