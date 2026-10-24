@@ -100,7 +100,8 @@ jobs:
           fi
           test -f "$WORLD/world.mt"
           set +e
-          timeout --signal=INT --kill-after=5s 20s xvfb-run -a -s '-screen 0 1280x720x24' \
+          xvfb-run -a -s '-screen 0 1280x720x24' \
+            timeout --signal=INT --kill-after=5s 20s \
             env LIBGL_ALWAYS_SOFTWARE=1 ALSOFT_DRIVERS=null LUANTI_USER_PATH="$USER" \
             "$BIN" --world "$WORLD" --gameid stonewild --config "$ROOT/stonewild.conf" --go \
             > /tmp/stonewild-visual.log 2>&1
