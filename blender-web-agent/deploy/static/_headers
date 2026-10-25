@@ -1,0 +1,12 @@
+# Cloudflare Pages / Netlify. Cross-origin isolation is mandatory for Blender's
+# pthreads (SharedArrayBuffer). GitHub Pages ignores this file — use the
+# coi-serviceworker shim there instead (verified working).
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin
+  X-Content-Type-Options: nosniff
+
+/bin/*
+  Cross-Origin-Resource-Policy: same-origin
+  Cache-Control: public, max-age=31536000, immutable

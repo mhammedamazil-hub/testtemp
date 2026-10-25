@@ -1,0 +1,39 @@
+{
+  "url": "http://127.0.0.1:8088/probe_static.html",
+  "runs": [
+    {
+      "label": "A: first visit, no worker yet",
+      "before": {
+        "hasController": true,
+        "coi": true,
+        "sab": "function"
+      },
+      "after": null,
+      "final": {
+        "coi": true,
+        "sab": "function",
+        "stage": "resolved",
+        "blender": "BW_STATIC_PROBE blender=5.2.0 LTS objs=3"
+      },
+      "errors": [],
+      "seconds": "6.0"
+    },
+    {
+      "label": "B: reload with worker active",
+      "before": {
+        "hasController": true,
+        "coi": true,
+        "sab": "function"
+      },
+      "after": null,
+      "final": {
+        "coi": true,
+        "sab": "function",
+        "stage": "exited",
+        "blender": "BW_STATIC_PROBE blender=5.2.0 LTS objs=3"
+      },
+      "errors": [],
+      "seconds": "7.6"
+    }
+  ]
+}

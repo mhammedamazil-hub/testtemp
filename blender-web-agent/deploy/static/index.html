@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blender Web — static build</title>
+<!-- Restores cross-origin isolation on hosts that cannot send COOP/COEP
+     (GitHub Pages). Verified: real Blender 5.2 boots behind this shim. -->
+<script src="coi-serviceworker.min.js"></script>
+<link rel="stylesheet" href="static/static.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo"></span>Blender Web <span class="ver">static build</span></div>
+  <div class="chips">
+    <span class="chip" id="chipCoi" data-s="warn">isolating…</span>
+    <span class="chip" id="chipEngine" data-s="warn">engine idle</span>
+    <span class="chip" id="chipHost">no server · runs locally</span>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn primary" id="runBtn">Run plan</button>
+</header>
+
+<main class="workspace">
+  <aside class="panel panel-left">
+    <div class="ph">Plans <span class="pill">3 presets</span></div>
+    <div class="plan-list" id="planList"></div>
+    <div class="ph" style="margin-top:14px">Artifacts</div>
+    <div id="artifacts" class="mats"><p class="hint">None yet. Run a plan.</p></div>
+  </aside>
+
+  <section class="center">
+    <div class="vp-toolbar">
+      <div class="seg">
+        <button class="segbtn active" data-mode="wire">Wireframe</button>
+        <button class="segbtn" data-mode="points">Points</button>
+      </div>
+      <button class="segbtn" id="fitBtn">Fit</button>
+      <div class="spacer"></div>
+      <span class="badge" id="vpLabel">no geometry</span>
+    </div>
+    <div class="vp-wrap">
+      <canvas id="preview" width="900" height="600"></canvas>
+      <div class="vp-empty" id="vpEmpty">
+        <h3>Nothing rendered yet</h3>
+        <p>Pick a plan and press <b>Run plan</b>. Real Blender executes in this
+           tab, exports a GLB, and the bytes are decoded here for the preview.</p>
+        <p class="tiny">The preview is a wireframe of the <i>exported file</i>,
+           not Blender's own viewport. It is labelled that way on purpose.</p>
+      </div>
+    </div>
+    <div class="console">
+      <div class="con-head"><span>Execution log</span><span id="logCount">0 events</span></div>
+      <div class="con-body" id="log"></div>
+    </div>
+  </section>
+
+  <aside class="panel panel-right">
+    <div class="ph">Result</div>
+    <div id="result" class="insp"><p class="hint">No run yet. Fields come from
+      Blender's real execution result, never fabricated.</p></div>
+    <div class="ph">This build</div>
+    <ul class="facts">
+      <li>Zero backend. Blender wasm + assets are static files.</li>
+      <li>One plan per page boot: Blender's runtime cannot be re-entered, so
+          each run reloads the tab.</li>
+      <li>Artifacts are reassembled in-page and offered as downloads.</li>
+      <li>Needs a current desktop browser; WebGPU is not required for this build
+          (it is background/headless), WebGL2 is not used for output.</li>
+    </ul>
+    <div class="ph">Honest limits</div>
+    <ul class="facts warnlist">
+      <li>This is not Blender's interactive viewport. Edit-mode interaction,
+          EEVEE and physics are out of scope of this build.</li>
+      <li>Cycles CPU only; no GPU path.</li>
+      <li>FBX is compiled out of this Blender build.</li>
+    </ul>
+  </aside>
+</main>
+<script src="/bin/blender_browser.js"></script>
+<script src="static/glb.js"></script>
+<script src="static/static-app.js"></script>
+</body>
+</html>

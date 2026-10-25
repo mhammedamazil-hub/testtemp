@@ -1,0 +1,72 @@
+{
+  "url": "http://127.0.0.1:8089/",
+  "results": [
+    {
+      "name": "cross-origin isolated on a header-less host",
+      "ok": true,
+      "detail": {
+        "sab": "function",
+        "sw": true
+      }
+    },
+    {
+      "name": "no backend endpoints exist in the static bundle",
+      "ok": true,
+      "detail": {
+        "status": 404,
+        "ok": false
+      }
+    },
+    {
+      "name": "real Blender produced a GLB in the browser, no server",
+      "ok": true,
+      "detail": [
+        [
+          "widget.glb",
+          8840
+        ]
+      ]
+    },
+    {
+      "name": "GLB decoded into renderable meshes",
+      "ok": true,
+      "detail": {
+        "meshes": 1,
+        "generator": "Khronos glTF Blender I/O v5.2.39"
+      }
+    },
+    {
+      "name": "preview reports real edge counts",
+      "ok": true,
+      "detail": "1 meshes · 270 edges"
+    },
+    {
+      "name": "execution log captured Blender output",
+      "ok": true,
+      "detail": 27
+    },
+    {
+      "name": "result panel rendered execution facts",
+      "ok": true,
+      "detail": 10
+    },
+    {
+      "name": "geometry actually painted on the canvas",
+      "ok": true,
+      "detail": 261
+    },
+    {
+      "name": "downloadable artifacts offered",
+      "ok": true,
+      "detail": [
+        "widget.glb"
+      ]
+    },
+    {
+      "name": "no uncaught page errors",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "errs": []
+}

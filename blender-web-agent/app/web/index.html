@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blender Web — AI workspace</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"></span>
+    <div>
+      <h1>Blender Web</h1>
+      <p class="sub" id="runtimeLine">checking runtime…</p>
+    </div>
+  </div>
+  <div class="topbar-mid">
+    <span class="chip" id="chipEngine">Blender —</span>
+    <span class="chip" id="chipSchema">schema —</span>
+    <span class="chip chip-ok" id="chipRuntime">runtime</span>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn btn-ghost" id="btnNewSession" title="Start a new modelling session">New session</button>
+    <button class="btn btn-ghost" id="btnRefresh" title="Re-read scene state">Refresh</button>
+    <button class="btn btn-primary" id="btnExport" title="Export the current scene">Export…</button>
+  </div>
+</header>
+
+<main class="workspace">
+  <!-- LEFT: scene hierarchy --------------------------------------------- -->
+  <aside class="panel panel-left" aria-label="Scene hierarchy">
+    <div class="panel-head">
+      <h2>Scene</h2>
+      <span class="count" id="objCount">0</span>
+    </div>
+    <div class="panel-body" id="hierarchy">
+      <p class="empty">No session yet.<br><span>Start one to talk to Blender.</span></p>
+    </div>
+    <div class="panel-head panel-head-sub">
+      <h2>Materials</h2>
+      <span class="count" id="matCount">0</span>
+    </div>
+    <div class="panel-body panel-body-sm" id="materials">
+      <p class="empty">—</p>
+    </div>
+  </aside>
+
+  <!-- CENTER: preview + console ---------------------------------------- -->
+  <section class="center">
+    <div class="viewport" id="viewport">
+      <div class="viewport-toolbar">
+        <div class="seg" role="group" aria-label="Preview mode">
+          <button class="seg-btn active" data-mode="wire" title="Wireframe from exported geometry">Wireframe</button>
+          <button class="seg-btn" data-mode="points" title="Vertices from exported geometry">Points</button>
+        </div>
+        <button class="btn btn-tiny" id="btnFrame" title="Fit the model in view">Fit</button>
+        <span class="vp-label" id="vpLabel">no geometry</span>
+      </div>
+
+      <canvas id="preview" width="1200" height="800"></canvas>
+
+      <!-- Truthful empty/blocked state. This is NOT a Blender viewport. -->
+      <div class="vp-empty" id="vpEmpty">
+        <h3>Geometry preview</h3>
+        <p>This panel draws the <strong>real vertex data from an exported GLB</strong>
+           — it is a preview of your model, not Blender's interactive viewport.</p>
+        <p class="muted">Blender's WebGPU viewport does not present frames on this
+           host (GPU-less). The modelling engine is fully functional; only the
+           interactive 3D view is unavailable. <a href="#" id="linkViewportDoc">Details</a></p>
+        <p class="hint">Create or export something to see it here.</p>
+      </div>
+
+      <div class="vp-badge" title="Rendering source">preview: exported GLB · not Blender viewport</div>
+    </div>
+
+    <div class="console" id="console">
+      <div class="console-head">
+        <h2>Execution log</h2>
+        <div class="console-tools">
+          <span class="muted" id="logCount">0 events</span>
+          <button class="btn btn-tiny" id="btnClearLog">Clear</button>
+          <button class="btn btn-tiny" id="btnToggleLog" aria-expanded="true">Collapse</button>
+        </div>
+      </div>
+      <div class="console-body" id="log" role="log" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <!-- RIGHT: inspector + AI ---------------------------------------------- -->
+  <aside class="panel panel-right" aria-label="Inspector and assistant">
+    <div class="panel-head"><h2>Inspector</h2></div>
+    <div class="panel-body" id="inspector">
+      <p class="empty">Select an object.<br><span>Fields are read from Blender.</span></p>
+    </div>
+
+    <div class="panel-head"><h2>Add</h2></div>
+    <div class="panel-body addgrid" id="addGrid">
+      <button class="btn btn-tile" data-add="cube">Cube</button>
+      <button class="btn btn-tile" data-add="sphere">Sphere</button>
+      <button class="btn btn-tile" data-add="cylinder">Cylinder</button>
+      <button class="btn btn-tile" data-add="cone">Cone</button>
+      <button class="btn btn-tile" data-add="torus">Torus</button>
+      <button class="btn btn-tile" data-add="plane">Plane</button>
+    </div>
+
+    <div class="panel-head"><h2>AI assistant</h2></div>
+    <div class="panel-body ai">
+      <label class="lbl" for="taskInput">Task</label>
+      <textarea id="taskInput" rows="3" placeholder="e.g. A low-poly spacecraft: fuselage, two swept wings, cockpit…"></textarea>
+      <button class="btn btn-primary btn-block" id="btnTask">Start session</button>
+      <p class="note">
+        Plans are produced by the <strong>Arena orchestrator</strong> (the model),
+        then validated and executed here against real Blender.
+        <a href="#" id="linkLoopDoc">How the loop works</a>
+      </p>
+      <div class="ai-plan">
+        <div class="ai-plan-head">
+          <span>Next model turn</span>
+          <button class="btn btn-tiny" id="btnCopyState">Copy</button>
+        </div>
+        <pre id="modelState" class="code">—</pre>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/static/glb.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

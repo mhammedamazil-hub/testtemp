@@ -1,0 +1,107 @@
+{
+  "results": [
+    {
+      "name": "app boots and exposes window.BW",
+      "ok": true,
+      "detail": "1.0"
+    },
+    {
+      "name": "workspace layout present (hierarchy, preview, inspector, log, AI)",
+      "ok": true,
+      "detail": {
+        "left": true,
+        "center": true,
+        "right": true,
+        "console": true,
+        "ai": true
+      }
+    },
+    {
+      "name": "session created from the UI",
+      "ok": true,
+      "detail": "20261025-122432-a4dcda"
+    },
+    {
+      "name": "ops executed against real Blender via window.BW",
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "ops": 5,
+        "errors": 0
+      }
+    },
+    {
+      "name": "scene reports the created object with the new material",
+      "ok": true,
+      "detail": {
+        "verts": 56,
+        "materials": [
+          "UiMat"
+        ]
+      }
+    },
+    {
+      "name": "hierarchy renders objects from Blender",
+      "ok": true,
+      "detail": [
+        "Camera",
+        "Cube",
+        "Light",
+        "UiCube"
+      ]
+    },
+    {
+      "name": "material list renders from Blender",
+      "ok": true,
+      "detail": [
+        "Dots Stroke",
+        "Material",
+        "UiMat"
+      ]
+    },
+    {
+      "name": "export through the UI produced a GLB",
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "artifacts": [
+          "uicube.glb"
+        ]
+      }
+    },
+    {
+      "name": "preview renders real GLB geometry (pixels drawn)",
+      "ok": true,
+      "detail": {
+        "label": "2 meshes · 300 edges",
+        "hidden": true,
+        "painted": 165
+      }
+    },
+    {
+      "name": "unknown operation rejected before execution",
+      "ok": true,
+      "detail": {
+        "ok": false,
+        "code": "UNKNOWN_OP",
+        "rejected": true
+      }
+    },
+    {
+      "name": "execution log records the run",
+      "ok": true,
+      "detail": 22
+    },
+    {
+      "name": "no unexpected page errors",
+      "ok": true,
+      "detail": {
+        "unexpected": [],
+        "expected_http_4xx": 1
+      }
+    }
+  ],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)"
+  ]
+}

@@ -112,3 +112,27 @@ Modelling through `bpy`, materials, lights, cameras, inspection, and
 export/import of GLB, glTF, OBJ, STL, PLY, USDA and `.blend` — verified.
 The **interactive viewport is not verified**: see `docs/BLENDER_AGENT_LOOP.md` §6,
 where the runtime's own frame counters stay at zero on this hardware.
+
+---
+
+## Application
+
+`app/` is the product layer on top of the harness: a supervisor, a browser
+workspace, and an agent-facing API. See [`../docs/APP.md`](../docs/APP.md).
+
+```bash
+python3 app/server.py --host 127.0.0.1 --port 8077   # then open http://127.0.0.1:8077
+node app/test_ui.mjs                                 # 12/12 checks in a real browser
+```
+
+`deploy/` produces a **zero-backend static build** that runs real Blender in the
+tab and works on hosts that cannot send COOP/COEP (GitHub Pages). See
+[`../docs/DEPLOY.md`](../docs/DEPLOY.md).
+
+```bash
+./deploy/stage-static.sh /path/to/blender-web-local /tmp/bw-static
+node deploy/test_static.mjs                          # 10/10 checks, ~11 s
+```
+
+The static build executes one plan per page boot: Blender's wasm runtime cannot
+be re-entered after it exits. That limit is real and is stated in the UI.
