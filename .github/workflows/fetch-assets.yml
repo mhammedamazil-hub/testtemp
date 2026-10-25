@@ -39,8 +39,19 @@ jobs:
             https://github.com/gessa-ai/blender-web/releases/download/v0.1.1/blender-web-local-v0.1.1.tar.gz
           echo "::endgroup::"
 
+          sha256sum out/*.tar.gz | tee out/SHA256SUMS
+
+          # GitHub rejects any single file over 100 MB. Split large archives
+          # into <90 MB chunks; the workspace reassembles them.
+          for f in out/*.tar.gz; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -gt 90000000 ]; then
+              echo "splitting $f ($size bytes)"
+              split -b 90M -d "$f" "$f.part"
+              rm "$f"
+            fi
+          done
           ls -l out
-          sha256sum out/* | tee out/SHA256SUMS
 
       - name: Publish transport branch
         run: |
