@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>bw-agent</title></head>
+<body>
+<canvas id="canvas" width="64" height="64" style="display:none"></canvas>
+<pre id="state">idle</pre><pre id="log"></pre>
+<script src="/bin/blender_browser.js"></script>
+<script>
+(async () => {
+  const setState = (s) => { document.getElementById('state').textContent = s; };
+  const log = (l) => { console.log(l); };
+  setState('fetching agent script');
+  // Load the versioned op-plan and the in-Blender executor. The plan is passed
+  // base64-encoded so no quoting can break the --python-expr argument.
+  const src = await (await fetch('/bw_ops.py', {cache: 'no-store'})).text();
+  const planFile = new URLSearchParams(location.search).get('plan') || 'plan.json';
+  const all = await (await fetch('/' + planFile, {cache: 'no-store'})).json();
+  const want = new URLSearchParams(location.search).get('task');
+  const plan = want ? {...all, tasks: all.tasks.filter(t => t.id === want)} : all;
+  const planB64 = btoa(unescape(encodeURIComponent(JSON.stringify(plan))));
+  const script = src + "\n\nimport base64 as _b64\nBW_PLAN_JSON = _b64.b64decode('" + planB64 + "').decode()\nmain()\n";
+  const ARGV = ['--background', '--factory-startup', '--python-expr', script];
+  const ENV_VARS = {
+    BLENDER_SYSTEM_RESOURCES: '/bw',
+    BLENDER_SYSTEM_PYTHON: '/bw/python',
+    BLENDER_SYSTEM_SCRIPTS: '/bw/scripts',
+    BLENDER_SYSTEM_DATAFILES: '/bw/datafiles',
+  };
+  setState('loading module');
+  const config = {
+    arguments: ARGV,
+    canvas: document.getElementById('canvas'),
+    locateFile: (p) => '/bin/' + p,
+    print: log,
+    printErr: (l) => console.error(l),
+    preRun: [(mod) => { const env = mod.ENV || (mod.ENV = {}); Object.assign(env, ENV_VARS); }],
+    onRuntimeInitialized: () => { setState('runtime initialized'); console.log('[shell] runtime initialized'); },
+    onAbort: (w) => { setState('aborted'); console.log('[shell] ABORT ' + w); },
+    onExit: (c) => { setState('exited ' + c); console.log('[shell] EXIT ' + c); },
+  };
+  try {
+    const mod = await createBlenderModule(config);
+    window.__bwModule = mod;
+    setState('booted');
+  } catch (e) {
+    if (e && typeof e.status === 'number') { setState('exited ' + e.status); console.log('[shell] EXIT ' + e.status); }
+    else { setState('aborted'); console.log('[shell] ABORT ' + (e && e.message ? e.message : e)); }
+  }
+})();
+</script></body></html>

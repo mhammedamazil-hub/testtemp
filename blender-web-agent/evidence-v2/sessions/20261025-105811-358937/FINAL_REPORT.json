@@ -1,0 +1,183 @@
+{
+  "summary": "Low-poly spacecraft: beveled fuselage (56 v), two swept wings (8 v each, roots flush with the hull), 12x6-segment cockpit (62 v). HullWhite and CockpitGlass node materials, camera and sun key light. Exported GLB + OBJ + .blend; GLB and OBJ re-imported into Blender and independently re-parsed. Two defects found by inspecting step 1 and corrected in step 2: cockpit was 482 verts (not low-poly) and the wing roots had a 5.4 cm gap to the hull.",
+  "delivered_artifacts": [
+    "spacecraft.glb",
+    "spacecraft.obj",
+    "spacecraft_final.blend",
+    "spacecraft_final.glb",
+    "spacecraft_final.obj"
+  ],
+  "artifact_index": {
+    "spacecraft.glb": {
+      "bytes": 17556,
+      "sha256": "76555bca829d1a5e49a80163e02e0b10bb2be2f3e2663f57cc430b4d6a4c2c61",
+      "from_blender": true,
+      "independent_verification": {
+        "magic": "glTF",
+        "version": 2,
+        "declared_length": 17556,
+        "actual_length": 17556,
+        "chunks": [
+          {
+            "type": "JSON",
+            "bytes": 3416
+          },
+          {
+            "type": "BIN",
+            "bytes": 14112
+          }
+        ],
+        "meshes": 4,
+        "materials": [
+          "CockpitGlass",
+          "HullWhite"
+        ],
+        "nodes": 4,
+        "accessors": 11,
+        "primitives": 4,
+        "vertices": 528,
+        "generator": "Khronos glTF Blender I/O v5.2.39",
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-105811-358937/artifacts/s3-spacecraft.glb"
+    },
+    "spacecraft.obj": {
+      "bytes": 11883,
+      "sha256": "2884fe1ea4c809a2108aa0fb2178fbef9f7e20a6b67a96410dc92053da63927d",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "vertices": 134,
+        "faces": 138
+      },
+      "kept_as": "sessions/20261025-105811-358937/artifacts/s3-spacecraft.obj"
+    },
+    "spacecraft_final.blend": {
+      "bytes": 98639,
+      "sha256": "61e10f1f80382dba3e08ef286e9d3a773d8cf62ae465cf6eb16f355c8f2c6d99",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "compression": "zstd",
+        "magic": "28b52ffd"
+      },
+      "kept_as": "sessions/20261025-105811-358937/artifacts/s5-spacecraft_final.blend"
+    },
+    "spacecraft_final.glb": {
+      "bytes": 17644,
+      "sha256": "d7bdda332eb0a90af699a5800832e7bbdbaa80a66794cfd9b0259f43da8df2c3",
+      "from_blender": true,
+      "independent_verification": {
+        "magic": "glTF",
+        "version": 2,
+        "declared_length": 17644,
+        "actual_length": 17644,
+        "chunks": [
+          {
+            "type": "JSON",
+            "bytes": 3432
+          },
+          {
+            "type": "BIN",
+            "bytes": 14184
+          }
+        ],
+        "meshes": 4,
+        "materials": [
+          "CockpitGlass",
+          "HullWhite"
+        ],
+        "nodes": 4,
+        "accessors": 12,
+        "primitives": 4,
+        "vertices": 528,
+        "generator": "Khronos glTF Blender I/O v5.2.39",
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-105811-358937/artifacts/s5-spacecraft_final.glb"
+    },
+    "spacecraft_final.obj": {
+      "bytes": 11889,
+      "sha256": "e2da16b956e50329c15d196d72fb46f68e7c5f97be46bb86bec335bf0e7d8c5d",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "vertices": 134,
+        "faces": 138
+      },
+      "kept_as": "sessions/20261025-105811-358937/artifacts/s5-spacecraft_final.obj"
+    }
+  },
+  "steps_used": 5,
+  "scene": {
+    "objects": [
+      {
+        "name": "Cockpit",
+        "bw_id": null,
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "verts": 62,
+        "faces": 72,
+        "materials": [
+          "CockpitGlass"
+        ]
+      },
+      {
+        "name": "Fuselage",
+        "bw_id": null,
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "verts": 56,
+        "faces": 54,
+        "materials": [
+          "HullWhite"
+        ]
+      },
+      {
+        "name": "Wing_L",
+        "bw_id": null,
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "HullWhite"
+        ]
+      },
+      {
+        "name": "Wing_R",
+        "bw_id": null,
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "HullWhite"
+        ]
+      }
+    ],
+    "materials": [
+      "CockpitGlass",
+      "CockpitGlass.001",
+      "HullWhite",
+      "HullWhite.001"
+    ]
+  },
+  "finished_at": "2026-10-25T10:59:45Z"
+}

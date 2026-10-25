@@ -1,0 +1,43 @@
+Failed to load resource: the server responded with a status of 404 (Not Found)
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!
+<string>:493: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+WARNING Unsupported platform emscripten, Draco is unavailable
+INFO Draco compression is unavailable on this platform
+WARNING Unsupported platform emscripten, MeshOptimizer is unavailable
+INFO MeshOptimizer compression is unavailable on this platform
+10:57:32 | INFO: Starting glTF 2.0 export
+10:57:32 | INFO: Extracting primitive: Sphere
+10:57:32 | INFO: Primitives created: 1
+10:57:32 | INFO: Extracting primitive: Sphere.001
+10:57:32 | INFO: Primitives created: 1
+10:57:32 | INFO: Extracting primitive: Cube
+10:57:32 | INFO: Primitives created: 1
+10:57:32 | INFO: Finished glTF 2.0 export in 0.1790001392364502 s
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t2_robot.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Timer 'STL Export' took 24.70 ms
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t2_robot.stl'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Info: File exported successfully
+10:57:32 | INFO: Data are loaded, start creating Blender stuff
+10:57:32 | INFO: Blender create Mesh node Sphere
+10:57:32 | INFO: Blender create Mesh node Sphere.001
+10:57:32 | INFO: Blender create Mesh node Cube
+10:57:32 | INFO: glTF import finished in 0.16s
+Timer 'STL Import' took 13.39 ms
+<string>:193: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t2_robot.stl'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+BW_RESULT {"schema": "bw.agent.ops/v2", "blender": "5.2.0 LTS", "plan_ok": true, "tasks": [{"id": "t2_robot", "goal": "Robot head: beveled cube head with two spherical eyes", "ops": [{"op": "scene.reset", "op_id": null, "ok": true, "result": {"objects": 0}, "scene": {"objects": {}, "object_count": 0, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "o018316c01d", "name": "Head", "created": true, "verts": 8, "dimensions": [2.0, 2.0, 2.0]}, "scene": {"objects": {"Head": {"bw_id": "o018316c01d", "name": "Head", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.0], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "mesh.bevel", "op_id": null, "ok": true, "result": {"bw_id": "o018316c01d", "verts_before": 8, "verts": 96}, "scene": {"objects": {"Head": {"bw_id": "o018316c01d", "name": "Head", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.0], "verts": 96, "faces": 98, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "ob70e160bfc", "name": "Eye_L", "created": true, "verts": 482, "dimensions": [0.56, 0.56, 0.56]}, "scene": {"objects": {"Eye_L": {"bw_id": "ob70e160bfc", "name": "Eye_L", "type": "MESH", "location": [-0.38, -0.86, 1.25], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [0.56, 0.56, 0.56], "verts": 482, "faces": 512, "materials": []}, "Head": {"bw_id": "o018316c01d", "name": "Head", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.0], "verts": 96, "faces": 98, "materials": []}}, "object_count": 2, "m
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t2_robot.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[shell] artifact t2_robot.glb -> 200
+BW_DONE
+[shell] artifact upload failed: TypeError: Cannot read properties of null (reading 'name')
+
+Blender quit
+[shell] EXIT 0

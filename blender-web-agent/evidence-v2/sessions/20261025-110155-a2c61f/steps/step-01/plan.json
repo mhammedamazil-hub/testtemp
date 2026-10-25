@@ -1,0 +1,176 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "room",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Floor",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            -0.05
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Floor",
+          "dimensions": [
+            6.0,
+            5.0,
+            0.1
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Wall_N",
+          "size": 2.0,
+          "location": [
+            0,
+            2.5,
+            1.4
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Wall_N",
+          "dimensions": [
+            6.0,
+            0.2,
+            2.8
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Wall_W",
+          "size": 2.0,
+          "location": [
+            -3.0,
+            0,
+            1.4
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Wall_W",
+          "dimensions": [
+            0.2,
+            5.0,
+            2.8
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Column",
+          "radius": 0.15,
+          "depth": 2.8,
+          "location": [
+            1.6,
+            -1.2,
+            1.4
+          ],
+          "vertices": 16
+        },
+        {
+          "op": "material.create",
+          "name": "Concrete",
+          "base_color": [
+            0.72,
+            0.71,
+            0.68
+          ],
+          "roughness": 0.9
+        },
+        {
+          "op": "material.create",
+          "name": "FloorOak",
+          "base_color": [
+            0.42,
+            0.28,
+            0.16
+          ],
+          "roughness": 0.55
+        },
+        {
+          "op": "material.assign",
+          "material": "FloorOak",
+          "target": "Floor"
+        },
+        {
+          "op": "material.assign",
+          "material": "Concrete",
+          "target": "Wall_N"
+        },
+        {
+          "op": "material.assign",
+          "material": "Concrete",
+          "target": "Wall_W"
+        },
+        {
+          "op": "material.assign",
+          "material": "Concrete",
+          "target": "Column"
+        },
+        {
+          "op": "camera.create",
+          "name": "Cam",
+          "location": [
+            4.2,
+            -4.6,
+            2.4
+          ],
+          "look_at": [
+            0,
+            0,
+            1.2
+          ],
+          "lens": 35
+        },
+        {
+          "op": "light.create",
+          "type": "SUN",
+          "name": "Daylight",
+          "location": [
+            4,
+            -3,
+            7
+          ],
+          "energy": 5.0
+        },
+        {
+          "op": "light.create",
+          "type": "AREA",
+          "name": "Fill",
+          "location": [
+            0,
+            1.5,
+            2.4
+          ],
+          "energy": 120.0
+        },
+        {
+          "op": "export",
+          "prefix": "room",
+          "formats": [
+            "glb",
+            "usda"
+          ]
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-110155-a2c61f-s1-30da76",
+  "limits": {}
+}

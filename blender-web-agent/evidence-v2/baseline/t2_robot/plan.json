@@ -1,0 +1,138 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "trace_id": "baseline-t2_robot",
+  "tasks": [
+    {
+      "id": "t2_robot",
+      "goal": "Robot head: beveled cube head with two spherical eyes",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Head",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            1.0
+          ]
+        },
+        {
+          "op": "mesh.bevel",
+          "target": "Head",
+          "width": 0.18,
+          "segments": 3
+        },
+        {
+          "op": "object.create",
+          "type": "sphere",
+          "name": "Eye_L",
+          "radius": 0.28,
+          "location": [
+            -0.38,
+            -0.86,
+            1.25
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "sphere",
+          "name": "Eye_R",
+          "radius": 0.28,
+          "location": [
+            0.38,
+            -0.86,
+            1.25
+          ]
+        },
+        {
+          "op": "material.create",
+          "name": "Shell",
+          "base_color": [
+            0.15,
+            0.45,
+            0.85
+          ],
+          "roughness": 0.35,
+          "metallic": 0.4
+        },
+        {
+          "op": "material.create",
+          "name": "EyeGlow",
+          "base_color": [
+            1.0,
+            0.85,
+            0.2
+          ],
+          "roughness": 0.1
+        },
+        {
+          "op": "material.assign",
+          "material": "Shell",
+          "target": "Head"
+        },
+        {
+          "op": "material.assign",
+          "material": "EyeGlow",
+          "target": "Eye_L"
+        },
+        {
+          "op": "material.assign",
+          "material": "EyeGlow",
+          "target": "Eye_R"
+        },
+        {
+          "op": "camera.create",
+          "name": "Cam",
+          "location": [
+            3.2,
+            -3.6,
+            2.4
+          ],
+          "look_at": [
+            0,
+            0,
+            1.2
+          ]
+        },
+        {
+          "op": "light.create",
+          "type": "SUN",
+          "name": "Sun",
+          "location": [
+            2,
+            2,
+            5
+          ],
+          "energy": 4.0
+        },
+        {
+          "op": "scene.inspect"
+        },
+        {
+          "op": "export",
+          "prefix": "t2_robot",
+          "formats": [
+            "glb",
+            "stl"
+          ]
+        },
+        {
+          "op": "validate.roundtrip",
+          "prefix": "t2_robot",
+          "formats": [
+            "glb",
+            "stl"
+          ]
+        }
+      ],
+      "expect": {
+        "meshes": 3,
+        "materials": 2
+      }
+    }
+  ]
+}

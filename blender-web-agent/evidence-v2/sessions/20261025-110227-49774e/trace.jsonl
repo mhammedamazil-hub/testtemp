@@ -1,0 +1,4 @@
+{"ts": "2026-10-25T11:02:27Z", "event": "session_started", "task": "Export, independently inspect and re-import every supported format"}
+{"ts": "2026-10-25T11:02:27Z", "event": "execution_started", "step": 1, "trace_id": "20261025-110227-49774e-s1-1a31f4", "ops": 10, "restored_scene": false}
+{"ts": "2026-10-25T11:02:38Z", "event": "execution_finished", "step": 1, "trace_id": "20261025-110227-49774e-s1-1a31f4", "ok": true, "errors": 0, "artifacts": ["multi.blend", "multi.glb", "multi.gltf", "multi.obj", "multi.ply", "multi.stl", "multi.usda"]}
+{"ts": "2026-10-25T11:02:38Z", "event": "session_finished", "summary": "s5_all_formats: 1 step(s), 3 checks passed", "artifacts": ["multi.blend", "multi.glb", "multi.gltf", "multi.obj", "multi.ply", "multi.stl", "multi.usda"]}

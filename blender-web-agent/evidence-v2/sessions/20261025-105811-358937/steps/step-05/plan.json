@@ -1,0 +1,38 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "final_delivery",
+      "goal": "Remove the retry-test antenna and export the delivered spacecraft",
+      "ops": [
+        {
+          "op": "object.delete",
+          "target": "Antenna"
+        },
+        {
+          "op": "export",
+          "prefix": "spacecraft_final",
+          "formats": [
+            "glb",
+            "obj",
+            "blend"
+          ]
+        },
+        {
+          "op": "validate.roundtrip",
+          "prefix": "spacecraft_final",
+          "formats": [
+            "glb",
+            "obj",
+            "blend"
+          ]
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-105811-358937-s5-637a26",
+  "limits": {}
+}

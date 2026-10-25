@@ -1,0 +1,4 @@
+{"ts": "2026-10-25T11:01:34Z", "event": "session_started", "task": "A precisely dimensioned bracket (0.30 x 0.18 x 0.05 m) with a named material"}
+{"ts": "2026-10-25T11:01:34Z", "event": "execution_started", "step": 1, "trace_id": "20261025-110134-e807db-s1-546ac3", "ops": 8, "restored_scene": false}
+{"ts": "2026-10-25T11:01:44Z", "event": "execution_finished", "step": 1, "trace_id": "20261025-110134-e807db-s1-546ac3", "ok": true, "errors": 0, "artifacts": ["bracket.glb", "bracket.stl"]}
+{"ts": "2026-10-25T11:01:44Z", "event": "session_finished", "summary": "s1_dimensioned_object: 1 step(s), 4 checks passed", "artifacts": ["bracket.glb", "bracket.stl"]}

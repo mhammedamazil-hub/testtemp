@@ -1,0 +1,6 @@
+{"ts": "2026-10-25T11:02:06Z", "event": "session_started", "task": "Edit an existing generated scene without duplicating objects"}
+{"ts": "2026-10-25T11:02:06Z", "event": "execution_started", "step": 1, "trace_id": "20261025-110206-52ec5e-s1-3477cb", "ops": 6, "restored_scene": false}
+{"ts": "2026-10-25T11:02:16Z", "event": "execution_finished", "step": 1, "trace_id": "20261025-110206-52ec5e-s1-3477cb", "ok": true, "errors": 0, "artifacts": ["crate_v1.glb"]}
+{"ts": "2026-10-25T11:02:16Z", "event": "execution_started", "step": 2, "trace_id": "20261025-110206-52ec5e-s2-04eefe", "ops": 6, "restored_scene": true}
+{"ts": "2026-10-25T11:02:27Z", "event": "execution_finished", "step": 2, "trace_id": "20261025-110206-52ec5e-s2-04eefe", "ok": true, "errors": 0, "artifacts": ["crate_v2.glb"]}
+{"ts": "2026-10-25T11:02:27Z", "event": "session_finished", "summary": "s4_edit_without_duplication: 2 step(s), 4 checks passed", "artifacts": ["crate_v1.glb", "crate_v2.glb"]}

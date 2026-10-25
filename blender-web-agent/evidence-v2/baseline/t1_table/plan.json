@@ -1,0 +1,177 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "trace_id": "baseline-t1_table",
+  "tasks": [
+    {
+      "id": "t1_table",
+      "goal": "Table: slab top on four cylindrical legs, wood and steel materials",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "TableTop",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            1.2
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "TableTop",
+          "dimensions": [
+            2.4,
+            1.4,
+            0.12
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Leg_FL",
+          "radius": 0.08,
+          "depth": 1.2,
+          "location": [
+            -0.9,
+            -0.5,
+            0.6
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Leg_FR",
+          "radius": 0.08,
+          "depth": 1.2,
+          "location": [
+            0.9,
+            -0.5,
+            0.6
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Leg_BL",
+          "radius": 0.08,
+          "depth": 1.2,
+          "location": [
+            -0.9,
+            0.5,
+            0.6
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Leg_BR",
+          "radius": 0.08,
+          "depth": 1.2,
+          "location": [
+            0.9,
+            0.5,
+            0.6
+          ]
+        },
+        {
+          "op": "material.create",
+          "name": "Wood",
+          "base_color": [
+            0.45,
+            0.26,
+            0.12
+          ],
+          "roughness": 0.6
+        },
+        {
+          "op": "material.create",
+          "name": "Steel",
+          "base_color": [
+            0.7,
+            0.72,
+            0.75
+          ],
+          "roughness": 0.25,
+          "metallic": 0.9
+        },
+        {
+          "op": "material.assign",
+          "material": "Wood",
+          "target": "TableTop"
+        },
+        {
+          "op": "material.assign",
+          "material": "Steel",
+          "target": "Leg_FL"
+        },
+        {
+          "op": "material.assign",
+          "material": "Steel",
+          "target": "Leg_FR"
+        },
+        {
+          "op": "material.assign",
+          "material": "Steel",
+          "target": "Leg_BL"
+        },
+        {
+          "op": "material.assign",
+          "material": "Steel",
+          "target": "Leg_BR"
+        },
+        {
+          "op": "camera.create",
+          "name": "Cam",
+          "location": [
+            4.5,
+            -4.5,
+            3.5
+          ],
+          "look_at": [
+            0,
+            0,
+            0.9
+          ]
+        },
+        {
+          "op": "light.create",
+          "type": "SUN",
+          "name": "Sun",
+          "location": [
+            3,
+            3,
+            6
+          ],
+          "energy": 3.0
+        },
+        {
+          "op": "scene.inspect"
+        },
+        {
+          "op": "export",
+          "prefix": "t1_table",
+          "formats": [
+            "glb",
+            "obj"
+          ]
+        },
+        {
+          "op": "validate.roundtrip",
+          "prefix": "t1_table",
+          "formats": [
+            "glb",
+            "obj"
+          ]
+        }
+      ],
+      "expect": {
+        "meshes": 5,
+        "materials": 2
+      }
+    }
+  ]
+}

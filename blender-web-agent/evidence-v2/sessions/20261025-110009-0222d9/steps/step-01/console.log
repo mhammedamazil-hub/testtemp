@@ -1,0 +1,33 @@
+Failed to load resource: the server responded with a status of 404 (Not Found)
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!
+<string>:493: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+WARNING Unsupported platform emscripten, Draco is unavailable
+INFO Draco compression is unavailable on this platform
+WARNING Unsupported platform emscripten, MeshOptimizer is unavailable
+INFO MeshOptimizer compression is unavailable on this platform
+11:00:20 | INFO: Starting glTF 2.0 export
+11:00:20 | INFO: Extracting primitive: Cube
+11:00:20 | INFO: Primitives created: 1
+11:00:20 | INFO: Finished glTF 2.0 export in 0.15700006484985352 s
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/bracket.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Timer 'STL Export' took 2.56 ms
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/bracket.stl'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:193: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/bracket.stl'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Info: File exported successfully
+BW_RESULT {"schema": "bw.agent.ops/v2", "blender": "5.2.0 LTS", "plan_ok": true, "tasks": [{"id": "bracket", "goal": "", "ops": [{"op": "scene.reset", "op_id": null, "ok": true, "result": {"objects": 0}, "scene": {"objects": {}, "object_count": 0, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "o18d138b05d", "name": "Bracket", "created": true, "verts": 8, "dimensions": [2.0, 2.0, 2.0]}, "scene": {"objects": {"Bracket": {"bw_id": "o18d138b05d", "name": "Bracket", "type": "MESH", "location": [0.0, 0.0, 0.025], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.0], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.set_dimensions", "op_id": null, "ok": true, "result": {"bw_id": "o18d138b05d", "dimensions": [0.3, 0.18, 0.05], "scale_applied": true}, "scene": {"objects": {"Bracket": {"bw_id": "o18d138b05d", "name": "Bracket", "type": "MESH", "location": [0.0, 0.0, 0.025], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [0.3, 0.18, 0.05], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "mesh.bevel", "op_id": null, "ok": true, "result": {"bw_id": "o18d138b05d", "verts_before": 8, "verts": 56}, "scene": {"objects": {"Bracket": {"bw_id": "o18d138b05d", "name": "Bracket", "type": "MESH", "location": [0.0, 0.0, 0.025], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [0.3, 0.18, 0.05], "verts": 56, "faces": 54, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "material.create", "op_id": null, "ok": true, "result": {"material": "AnodizedAluminium", "created": true, "base_color": [0.62, 0.64, 0.67], "roughness": 0.3, "metallic": 0.85}, "scene": {"objects": {"B
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/bracket.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[shell] artifact bracket.glb -> 200
+BW_DONE
+[shell] artifact upload failed: TypeError: Cannot read properties of null (reading 'name')
+
+Blender quit
+[shell] EXIT 0

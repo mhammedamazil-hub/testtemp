@@ -1,0 +1,56 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "edit",
+      "ops": [
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Lid",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            0.85
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Lid",
+          "dimensions": [
+            0.84,
+            0.64,
+            0.06
+          ]
+        },
+        {
+          "op": "material.assign",
+          "material": "Pine",
+          "target": "Lid"
+        },
+        {
+          "op": "object.transform",
+          "target": "Crate",
+          "location": [
+            0,
+            0,
+            0.4
+          ]
+        },
+        {
+          "op": "export",
+          "prefix": "crate_v2",
+          "formats": [
+            "glb"
+          ]
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-110206-52ec5e-s2-04eefe",
+  "limits": {}
+}

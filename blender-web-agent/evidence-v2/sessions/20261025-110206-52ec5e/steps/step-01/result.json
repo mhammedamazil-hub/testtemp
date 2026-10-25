@@ -1,0 +1,385 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "blender": "5.2.0 LTS",
+  "plan_ok": true,
+  "tasks": [
+    {
+      "id": "crate",
+      "goal": "",
+      "ops": [
+        {
+          "op": "scene.reset",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": 0
+          },
+          "scene": {
+            "objects": {},
+            "object_count": 0,
+            "materials": [],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "od738d21696",
+            "name": "Crate",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Crate": {
+                "bw_id": "od738d21696",
+                "name": "Crate",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  0.4
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "od738d21696",
+            "dimensions": [
+              0.8,
+              0.6,
+              0.8
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Crate": {
+                "bw_id": "od738d21696",
+                "name": "Crate",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  0.4
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  0.6,
+                  0.8
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "Pine",
+            "created": true,
+            "base_color": [
+              0.55,
+              0.38,
+              0.2
+            ],
+            "roughness": 0.7,
+            "metallic": 0
+          },
+          "scene": {
+            "objects": {
+              "Crate": {
+                "bw_id": "od738d21696",
+                "name": "Crate",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  0.4
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  0.6,
+                  0.8
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Pine"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "od738d21696",
+            "materials": [
+              "Pine"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Crate": {
+                "bw_id": "od738d21696",
+                "name": "Crate",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  0.4
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  0.6,
+                  0.8
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Pine"
+                ]
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Pine"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "export",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "bytes": 2096,
+              "file": "crate_v1.glb",
+              "sha256": "a74d4dc7f0686d9cdb00d5e292f36c2bbec468dd7ca9ca23285fbe24a187c5cc"
+            }
+          }
+        }
+      ],
+      "artifacts": {}
+    }
+  ],
+  "trace_id": "20261025-110206-52ec5e-s1-3477cb",
+  "elapsed_s": 1.26,
+  "snapshot": {
+    "format": "bw.scene.snapshot/v1",
+    "objects": [
+      {
+        "bw_id": "od738d21696",
+        "name": "Crate",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0.4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -0.4,
+            -0.3,
+            -0.4
+          ],
+          [
+            -0.4,
+            -0.3,
+            0.4
+          ],
+          [
+            -0.4,
+            0.3,
+            -0.4
+          ],
+          [
+            -0.4,
+            0.3,
+            0.4
+          ],
+          [
+            0.4,
+            -0.3,
+            -0.4
+          ],
+          [
+            0.4,
+            -0.3,
+            0.4
+          ],
+          [
+            0.4,
+            0.3,
+            -0.4
+          ],
+          [
+            0.4,
+            0.3,
+            0.4
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            1,
+            0
+          ],
+          [
+            2,
+            6,
+            4,
+            0
+          ],
+          [
+            7,
+            3,
+            1,
+            5
+          ]
+        ],
+        "material_names": [
+          "Pine"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "materials": [
+      {
+        "name": "Pine",
+        "base_color": [
+          0.55,
+          0.38,
+          0.2,
+          1
+        ],
+        "roughness": 0.7,
+        "metallic": 0
+      }
+    ]
+  },
+  "artifacts": [
+    "crate_v1.glb"
+  ],
+  "wall_clock_s": 10.07,
+  "runtime_exit": "ok"
+}

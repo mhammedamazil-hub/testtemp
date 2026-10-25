@@ -1,0 +1,350 @@
+[
+  {
+    "scenario": "s1_dimensioned_object",
+    "session_id": "20261025-110134-e807db",
+    "task": "A precisely dimensioned bracket (0.30 x 0.18 x 0.05 m) with a named material",
+    "ok": true,
+    "steps": [
+      {
+        "step": 1,
+        "label": "build",
+        "ok": true,
+        "elapsed_s": 10.25,
+        "ops": 8,
+        "errors": []
+      }
+    ],
+    "checks": [
+      {
+        "check": "dimensions are exactly 0.30 x 0.18 x 0.05 m",
+        "ok": true,
+        "detail": [
+          0.3,
+          0.18,
+          0.05
+        ]
+      },
+      {
+        "check": "named material AnodizedAluminium is on the object",
+        "ok": true,
+        "detail": [
+          "AnodizedAluminium"
+        ]
+      },
+      {
+        "check": "bevel added real geometry",
+        "ok": true,
+        "detail": 56
+      },
+      {
+        "check": "GLB and STL produced",
+        "ok": true,
+        "detail": {
+          "glb": 8864,
+          "stl": 5484
+        }
+      }
+    ],
+    "artifacts": {
+      "bracket.glb": {
+        "bytes": 8864,
+        "sha256": "76c1347952bbcf5ccf6f538036344da1446c8e117ab702c8f9e9a00fd0059dc1",
+        "independent_ok": true
+      },
+      "bracket.stl": {
+        "bytes": 5484,
+        "sha256": "9d9c6132a129249f3665f71966c44e01245ffb8c26b80bd100e3468315fea06f",
+        "independent_ok": true
+      }
+    },
+    "evidence": "sessions/20261025-110134-e807db"
+  },
+  {
+    "scenario": "s2_lowpoly_robot",
+    "session_id": "20261025-110144-9db70a",
+    "task": "A low-poly robot assembled from six separate real mesh objects",
+    "ok": true,
+    "steps": [
+      {
+        "step": 1,
+        "label": "build",
+        "ok": true,
+        "elapsed_s": 10.77,
+        "ops": 23,
+        "errors": []
+      }
+    ],
+    "checks": [
+      {
+        "check": "six separate mesh objects",
+        "ok": true,
+        "detail": [
+          "Arm_L",
+          "Arm_R",
+          "Head",
+          "Leg_L",
+          "Leg_R",
+          "Torso"
+        ]
+      },
+      {
+        "check": "low-poly budget (< 400 verts total)",
+        "ok": true,
+        "detail": 80
+      },
+      {
+        "check": "head sits above torso and does not intersect it",
+        "ok": true,
+        "detail": "derived from locations+dimensions"
+      },
+      {
+        "check": "two named materials assigned",
+        "ok": true,
+        "detail": [
+          "RobotShell",
+          "Visor"
+        ]
+      }
+    ],
+    "artifacts": {
+      "robot.glb": {
+        "bytes": 13084,
+        "sha256": "4b021d0564f4ce22a3a6db9b8a48b7633d30d52b059335bc2d9f2d214adca11e",
+        "independent_ok": true
+      },
+      "robot.obj": {
+        "bytes": 9528,
+        "sha256": "bd6a7567ef9307a599e1adee5212b5cbf5b5475971958e13aa546a0eddde335e",
+        "independent_ok": true
+      }
+    },
+    "evidence": "sessions/20261025-110144-9db70a"
+  },
+  {
+    "scenario": "s3_architecture",
+    "session_id": "20261025-110155-a2c61f",
+    "task": "A small architectural scene: floor, walls, column, two lights, a camera",
+    "ok": true,
+    "steps": [
+      {
+        "step": 1,
+        "label": "build",
+        "ok": true,
+        "elapsed_s": 10.75,
+        "ops": 19,
+        "errors": []
+      }
+    ],
+    "checks": [
+      {
+        "check": "floor, two walls and a column exist",
+        "ok": true,
+        "detail": [
+          "Cam",
+          "Column",
+          "Daylight",
+          "Fill",
+          "Floor",
+          "Wall_N",
+          "Wall_W"
+        ]
+      },
+      {
+        "check": "two lights (sun + area fill)",
+        "ok": true,
+        "detail": [
+          {
+            "name": "Daylight",
+            "energy": 5
+          },
+          {
+            "name": "Fill",
+            "energy": 120
+          }
+        ]
+      },
+      {
+        "check": "camera exists and is the scene camera",
+        "ok": true,
+        "detail": "Cam"
+      },
+      {
+        "check": "GLB + USDA exported",
+        "ok": true,
+        "detail": {
+          "glb": 9404,
+          "usda": 17761
+        }
+      }
+    ],
+    "artifacts": {
+      "room.glb": {
+        "bytes": 9404,
+        "sha256": "2283bed2d87e72ea4b1ad21bbd9793143b593a9ea86f68bf8a5e6f523ff87dcf",
+        "independent_ok": true
+      },
+      "room.usda": {
+        "bytes": 17761,
+        "sha256": "3124106b14ffbbbe2dac699d42ac279fa441397d2d271b8eafd29b255df6757b",
+        "independent_ok": true
+      }
+    },
+    "evidence": "sessions/20261025-110155-a2c61f"
+  },
+  {
+    "scenario": "s4_edit_without_duplication",
+    "session_id": "20261025-110206-52ec5e",
+    "task": "Edit an existing generated scene without duplicating objects",
+    "ok": true,
+    "steps": [
+      {
+        "step": 1,
+        "label": "build",
+        "ok": true,
+        "elapsed_s": 10.27,
+        "ops": 6,
+        "errors": []
+      },
+      {
+        "step": 2,
+        "label": "edit",
+        "ok": true,
+        "elapsed_s": 10.79,
+        "ops": 6,
+        "errors": []
+      }
+    ],
+    "checks": [
+      {
+        "check": "exactly two objects after the edit",
+        "ok": true,
+        "detail": [
+          "Crate",
+          "Lid"
+        ]
+      },
+      {
+        "check": "no '.001' duplicates created",
+        "ok": true,
+        "detail": [
+          "Crate",
+          "Lid"
+        ]
+      },
+      {
+        "check": "Crate survived the edit with its material",
+        "ok": true,
+        "detail": "Crate/Pine"
+      },
+      {
+        "check": "both export steps produced a GLB",
+        "ok": true,
+        "detail": "crate_v1.glb + crate_v2.glb"
+      }
+    ],
+    "artifacts": {
+      "crate_v1.glb": {
+        "bytes": 2096,
+        "sha256": "a74d4dc7f0686d9cdb00d5e292f36c2bbec468dd7ca9ca23285fbe24a187c5cc",
+        "independent_ok": true
+      },
+      "crate_v2.glb": {
+        "bytes": 3224,
+        "sha256": "197b38bda7c1094d10b7b9f09b170a38424b3f8f977573439439a5bb01544d2a",
+        "independent_ok": true
+      }
+    },
+    "evidence": "sessions/20261025-110206-52ec5e"
+  },
+  {
+    "scenario": "s5_all_formats",
+    "session_id": "20261025-110227-49774e",
+    "task": "Export, independently inspect and re-import every supported format",
+    "ok": true,
+    "steps": [
+      {
+        "step": 1,
+        "label": "formats",
+        "ok": true,
+        "elapsed_s": 11.25,
+        "ops": 10,
+        "errors": []
+      }
+    ],
+    "checks": [
+      {
+        "check": "all 7 formats exported",
+        "ok": true,
+        "detail": {
+          "glb": 19780,
+          "gltf": 3101,
+          "obj": 15771,
+          "stl": 11884,
+          "ply": 5703,
+          "usda": 35612,
+          "blend": 99366
+        }
+      },
+      {
+        "check": "glb/gltf/obj/stl/ply/usda re-import with geometry",
+        "ok": true,
+        "detail": {
+          "glb": 504,
+          "gltf": 504,
+          "obj": 122,
+          "stl": 122,
+          "ply": 165,
+          "usda": 122
+        }
+      },
+      {
+        "check": ".blend validates by header only (documented limitation)",
+        "ok": true,
+        "detail": {
+          "ok": true,
+          "mode": "header-check",
+          "compression": "zstd",
+          "note": "not re-opened: open_mainfile destabilises this build"
+        }
+      }
+    ],
+    "artifacts": {
+      "multi.blend": {
+        "bytes": 99366,
+        "sha256": "c15ca238cca4b3a282ffb878617270c9563eba705ba38f23c3eff4612ec619f3",
+        "independent_ok": true
+      },
+      "multi.glb": {
+        "bytes": 19780,
+        "sha256": "c82429a7dcd8be08e982f75b0f0e08e4bc35dc6cafb3f4498bcb74a6b7e3714f",
+        "independent_ok": true
+      },
+      "multi.gltf": {
+        "bytes": 3101,
+        "sha256": "c8cd22f5a4e301299ee8af898a3dd3293f1bbe3efd703e209393c2a09b845fc9",
+        "independent_ok": true
+      },
+      "multi.obj": {
+        "bytes": 15771,
+        "sha256": "33e3c87acd656d4c50a9b30657a2688242ebc4545c1c56853a92fc34c3acbad6",
+        "independent_ok": true
+      },
+      "multi.ply": {
+        "bytes": 5703,
+        "sha256": "e5e76fe2b6072226bd894cc3a9e9da94d6b3d93952426014e1fe9dcf006d7e9e",
+        "independent_ok": true
+      },
+      "multi.stl": {
+        "bytes": 11884,
+        "sha256": "c3a28dedb966feb1db1c208fd17e7eca969bb9ea3412f573dd58af2aa917b846",
+        "independent_ok": true
+      },
+      "multi.usda": {
+        "bytes": 35612,
+        "sha256": "30f575a1dae113e3df20ab4f5045985ff70ee89774bcdd9178b5a4f673e5f0f5",
+        "independent_ok": true
+      }
+    },
+    "evidence": "sessions/20261025-110227-49774e"
+  }
+]

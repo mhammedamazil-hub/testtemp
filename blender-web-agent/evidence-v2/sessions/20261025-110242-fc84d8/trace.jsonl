@@ -1,0 +1,5 @@
+{"ts": "2026-10-25T11:02:42Z", "event": "session_started", "task": "recovery test: runtime timeout must not fabricate success"}
+{"ts": "2026-10-25T11:02:43Z", "event": "execution_started", "step": 1, "trace_id": "20261025-110242-fc84d8-s1-a577e0", "ops": 3, "restored_scene": false}
+{"ts": "2026-10-25T11:02:49Z", "event": "execution_finished", "step": 1, "trace_id": "20261025-110242-fc84d8-s1-a577e0", "ok": false, "errors": 1, "artifacts": []}
+{"ts": "2026-10-25T11:02:54Z", "event": "execution_started", "step": 2, "trace_id": "20261025-110242-fc84d8-s2-269ad2", "ops": 3, "restored_scene": false}
+{"ts": "2026-10-25T11:03:01Z", "event": "execution_finished", "step": 2, "trace_id": "20261025-110242-fc84d8-s2-269ad2", "ok": false, "errors": 1, "artifacts": []}

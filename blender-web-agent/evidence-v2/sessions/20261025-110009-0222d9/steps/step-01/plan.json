@@ -1,0 +1,68 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "bracket",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Bracket",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            0.025
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Bracket",
+          "dimensions": [
+            0.3,
+            0.18,
+            0.05
+          ]
+        },
+        {
+          "op": "mesh.bevel",
+          "target": "Bracket",
+          "width": 0.004,
+          "segments": 2
+        },
+        {
+          "op": "material.create",
+          "name": "AnodizedAluminium",
+          "base_color": [
+            0.62,
+            0.64,
+            0.67
+          ],
+          "roughness": 0.3,
+          "metallic": 0.85
+        },
+        {
+          "op": "material.assign",
+          "material": "AnodizedAluminium",
+          "target": "Bracket"
+        },
+        {
+          "op": "export",
+          "prefix": "bracket",
+          "formats": [
+            "glb",
+            "stl"
+          ]
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-110009-0222d9-s1-b4534b",
+  "limits": {}
+}

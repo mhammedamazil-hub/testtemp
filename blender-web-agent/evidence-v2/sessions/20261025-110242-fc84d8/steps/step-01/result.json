@@ -1,0 +1,11 @@
+{
+  "schema": null,
+  "plan_ok": false,
+  "wall_clock_s": 6.26,
+  "runtime_exit": "timeout-or-crash",
+  "error": {
+    "code": "RUNTIME_TIMEOUT",
+    "message": "runtime produced no result within 6.26s"
+  },
+  "tasks": []
+}

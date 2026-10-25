@@ -1,0 +1,60 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "correct_from_inspection",
+      "goal": "Fix the two defects found in step 1: cockpit is 482 verts (not low-poly) and the wing roots do not meet the hull",
+      "ops": [
+        {
+          "op": "object.delete",
+          "target": "Cockpit"
+        },
+        {
+          "op": "object.create",
+          "type": "sphere",
+          "name": "Cockpit",
+          "radius": 0.45,
+          "segments": 12,
+          "rings": 6,
+          "location": [
+            0,
+            -1.35,
+            1.3
+          ]
+        },
+        {
+          "op": "material.assign",
+          "material": "CockpitGlass",
+          "target": "Cockpit"
+        },
+        {
+          "op": "object.transform",
+          "target": {
+            "bw_id": "ode131bf254"
+          },
+          "location": [
+            -1.446,
+            0.1,
+            1.0
+          ]
+        },
+        {
+          "op": "object.transform",
+          "target": {
+            "bw_id": "o757453bb3f"
+          },
+          "location": [
+            1.446,
+            0.1,
+            1.0
+          ]
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-105811-358937-s2-b28a81",
+  "limits": {}
+}

@@ -1,0 +1,30 @@
+[
+  {
+    "name": "multi.gltf",
+    "bytes": 3101
+  },
+  {
+    "name": "multi.ply",
+    "bytes": 5703
+  },
+  {
+    "name": "multi.stl",
+    "bytes": 11884
+  },
+  {
+    "name": "multi.obj",
+    "bytes": 15774
+  },
+  {
+    "name": "multi.glb",
+    "bytes": 19780
+  },
+  {
+    "name": "multi.usda",
+    "bytes": 35612
+  },
+  {
+    "name": "multi.blend",
+    "bytes": 99327
+  }
+]

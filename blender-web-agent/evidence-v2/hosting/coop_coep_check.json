@@ -1,0 +1,14 @@
+{
+  "requirement": "Blender wasm uses pthreads -> SharedArrayBuffer -> cross-origin isolation",
+  "required_headers": {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp"
+  },
+  "served": {
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-embedder-policy": "require-corp",
+    "cross-origin-resource-policy": "same-origin"
+  },
+  "satisfied": true,
+  "note": "GitHub Pages cannot emit response headers, so this cannot be satisfied there. Verified only against a locally controlled server; no public deployment was made or is claimed."
+}

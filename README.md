@@ -54,16 +54,24 @@ python3 -m agent.reason state
 python3 -m agent.reason act --json '{"action":"navigate","url":"https://pypi.org/project/requests/","reason":"start"}'
 ```
 
-# Real Blender WebAssembly driven by a JSON operation API (see docs/BLENDER_WEB.md)
-python3 blender-web-agent/harness/server.py &          # COOP/COEP server on :8090
-LD_LIBRARY_PATH=/tmp/lib node blender-web-agent/harness/runall.mjs   # 5 E2E tasks
-python3 blender-web-agent/harness/verify_artifacts.py runs/t5_full/t5_full.glb
+# Real Blender WebAssembly driven by an LLM through a versioned op API
+# (see docs/BLENDER_AGENT_LOOP.md)
+cd blender-web-agent
+python3 -m controller.cli preflight          # is the runtime usable?
+python3 run_baseline.py                      # the five established E2E tasks
+python3 run_delivery.py                      # five asset-delivery scenarios
+python3 -m controller.cli start --task "Build a low-poly spacecraft ..."
+python3 -m controller.cli state --session <id>          # what the model sees
+python3 -m controller.cli plan  --session <id> --file plan.json
 ```
 
-See [docs/BLENDER_WEB.md](docs/BLENDER_WEB.md) for the Blender-wasm mission
-report: what really runs (5/5 tasks, 7 export formats round-tripped), why the
-windowed UI cannot be verified without hardware WebGPU, why Obscura cannot host
-this runtime, and why GitHub Pages is incompatible with it.
+See [docs/BLENDER_AGENT_LOOP.md](docs/BLENDER_AGENT_LOOP.md) for the autonomous
+workflow report: the resumable model loop, the strengthened `bw.agent.ops/v2`
+API, five delivery scenarios, failure recovery, and the measured reasons the
+interactive viewport and public deployment remain blocked.
+See [docs/BLENDER_WEB.md](docs/BLENDER_WEB.md) for the earlier milestone (real
+Blender wasm boots and exports; Obscura cannot host it; GitHub Pages cannot
+serve it).
 
 See [docs/OBSCURA.md](docs/OBSCURA.md) for the install details, the design
 notes, and the current status of the binary download in this sandbox.

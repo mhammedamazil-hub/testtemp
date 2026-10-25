@@ -1,0 +1,5 @@
+Failed to load resource: the server responded with a status of 404 (Not Found)
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!

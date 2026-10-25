@@ -1,0 +1,208 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "robot",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Torso",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            1.2
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Torso",
+          "dimensions": [
+            0.7,
+            0.4,
+            0.9
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Head",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            1.85
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Head",
+          "dimensions": [
+            0.45,
+            0.4,
+            0.35
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Arm_L",
+          "size": 2.0,
+          "location": [
+            -0.5,
+            0,
+            1.25
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Arm_L",
+          "dimensions": [
+            0.16,
+            0.16,
+            0.75
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Arm_R",
+          "size": 2.0,
+          "location": [
+            0.5,
+            0,
+            1.25
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Arm_R",
+          "dimensions": [
+            0.16,
+            0.16,
+            0.75
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Leg_L",
+          "radius": 0.09,
+          "depth": 0.7,
+          "location": [
+            -0.19,
+            0,
+            0.35
+          ],
+          "vertices": 12
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Leg_R",
+          "radius": 0.09,
+          "depth": 0.7,
+          "location": [
+            0.19,
+            0,
+            0.35
+          ],
+          "vertices": 12
+        },
+        {
+          "op": "material.create",
+          "name": "RobotShell",
+          "base_color": [
+            0.75,
+            0.78,
+            0.8
+          ],
+          "roughness": 0.35,
+          "metallic": 0.6
+        },
+        {
+          "op": "material.create",
+          "name": "Visor",
+          "base_color": [
+            0.05,
+            0.1,
+            0.15
+          ],
+          "roughness": 0.05
+        },
+        {
+          "op": "material.assign",
+          "material": "RobotShell",
+          "target": "Torso"
+        },
+        {
+          "op": "material.assign",
+          "material": "Visor",
+          "target": "Head"
+        },
+        {
+          "op": "material.assign",
+          "material": "RobotShell",
+          "target": "Arm_L"
+        },
+        {
+          "op": "material.assign",
+          "material": "RobotShell",
+          "target": "Arm_R"
+        },
+        {
+          "op": "material.assign",
+          "material": "RobotShell",
+          "target": "Leg_L"
+        },
+        {
+          "op": "material.assign",
+          "material": "RobotShell",
+          "target": "Leg_R"
+        },
+        {
+          "op": "camera.create",
+          "name": "Cam",
+          "location": [
+            2.6,
+            -3.0,
+            2.2
+          ],
+          "look_at": [
+            0,
+            0,
+            1.1
+          ]
+        },
+        {
+          "op": "light.create",
+          "type": "SUN",
+          "name": "Key",
+          "location": [
+            3,
+            -2,
+            5
+          ],
+          "energy": 4.0
+        },
+        {
+          "op": "export",
+          "prefix": "robot",
+          "formats": [
+            "glb",
+            "obj"
+          ]
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-110144-9db70a-s1-e3f199",
+  "limits": {}
+}

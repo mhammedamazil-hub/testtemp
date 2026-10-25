@@ -1,0 +1,2524 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "blender": "5.2.0 LTS",
+  "plan_ok": true,
+  "tasks": [
+    {
+      "id": "t3_house",
+      "goal": "House: walls, conical roof, chimney made by extruding a face",
+      "ops": [
+        {
+          "op": "scene.reset",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": 0
+          },
+          "scene": {
+            "objects": {},
+            "object_count": 0,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4c98ab5c9a",
+            "name": "Walls",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4c98ab5c9a",
+            "dimensions": [
+              2.8,
+              2,
+              2
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o150efccedc",
+            "name": "Roof",
+            "created": true,
+            "verts": 33,
+            "dimensions": [
+              3.8,
+              3.8,
+              1.2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": []
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 2,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oc5e8de4d4d",
+            "name": "Chimney",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              0.5,
+              0.5,
+              0.5
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  0.5
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": []
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "mesh.extrude",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oc5e8de4d4d",
+            "verts_before": 8,
+            "verts": 12,
+            "faces_before": 6,
+            "faces": 10,
+            "axes": "Z"
+          },
+          "scene": {
+            "objects": {
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": []
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": []
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "Plaster",
+            "created": true,
+            "base_color": [
+              0.92,
+              0.9,
+              0.84
+            ],
+            "roughness": 0.8,
+            "metallic": 0
+          },
+          "scene": {
+            "objects": {
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": []
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": []
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material",
+              "Plaster"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "RoofTile",
+            "created": true,
+            "base_color": [
+              0.55,
+              0.12,
+              0.1
+            ],
+            "roughness": 0.65,
+            "metallic": 0
+          },
+          "scene": {
+            "objects": {
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": []
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": []
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material",
+              "Plaster",
+              "RoofTile"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4c98ab5c9a",
+            "materials": [
+              "Plaster"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": []
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": []
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Plaster"
+                ]
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material",
+              "Plaster",
+              "RoofTile"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o150efccedc",
+            "materials": [
+              "RoofTile"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": []
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": [
+                  "RoofTile"
+                ]
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Plaster"
+                ]
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material",
+              "Plaster",
+              "RoofTile"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oc5e8de4d4d",
+            "materials": [
+              "Plaster"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": [
+                  "Plaster"
+                ]
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": [
+                  "RoofTile"
+                ]
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Plaster"
+                ]
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material",
+              "Plaster",
+              "RoofTile"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "camera.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o16ad895457",
+            "camera": "Cam",
+            "lens": 50,
+            "is_scene_camera": true
+          },
+          "scene": {
+            "objects": {
+              "Cam": {
+                "bw_id": "o16ad895457",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  5.5,
+                  -5.5,
+                  4.2
+                ],
+                "rotation": [
+                  1.248204,
+                  0,
+                  0.785398
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": [
+                  "Plaster"
+                ]
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": [
+                  "RoofTile"
+                ]
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Plaster"
+                ]
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "Material",
+              "Plaster",
+              "RoofTile"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "light.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oe606b6db92",
+            "light": "Sun",
+            "type": "SUN",
+            "energy": 5
+          },
+          "scene": {
+            "objects": {
+              "Cam": {
+                "bw_id": "o16ad895457",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  5.5,
+                  -5.5,
+                  4.2
+                ],
+                "rotation": [
+                  1.248204,
+                  0,
+                  0.785398
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              "Chimney": {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": [
+                  "Plaster"
+                ]
+              },
+              "Roof": {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": [
+                  "RoofTile"
+                ]
+              },
+              "Sun": {
+                "bw_id": "oe606b6db92",
+                "name": "Sun",
+                "type": "LIGHT",
+                "location": [
+                  4,
+                  2,
+                  6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 5
+              },
+              "Walls": {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Plaster"
+                ]
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material",
+              "Plaster",
+              "RoofTile"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "scene.inspect",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": [
+              {
+                "bw_id": "o16ad895457",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  5.5,
+                  -5.5,
+                  4.2
+                ],
+                "rotation": [
+                  1.248204,
+                  0,
+                  0.785398
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              {
+                "bw_id": "oc5e8de4d4d",
+                "name": "Chimney",
+                "type": "MESH",
+                "location": [
+                  0.7,
+                  0.3,
+                  2.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.5,
+                  0.5,
+                  1.4
+                ],
+                "verts": 12,
+                "faces": 10,
+                "materials": [
+                  "Plaster"
+                ],
+                "bound_box": [
+                  [
+                    -0.25,
+                    -0.25,
+                    -0.25
+                  ],
+                  [
+                    -0.25,
+                    -0.25,
+                    1.15
+                  ],
+                  [
+                    -0.25,
+                    0.25,
+                    1.15
+                  ],
+                  [
+                    -0.25,
+                    0.25,
+                    -0.25
+                  ],
+                  [
+                    0.25,
+                    -0.25,
+                    -0.25
+                  ],
+                  [
+                    0.25,
+                    -0.25,
+                    1.15
+                  ],
+                  [
+                    0.25,
+                    0.25,
+                    1.15
+                  ],
+                  [
+                    0.25,
+                    0.25,
+                    -0.25
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o150efccedc",
+                "name": "Roof",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  2.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  3.8,
+                  3.8,
+                  1.2
+                ],
+                "verts": 33,
+                "faces": 33,
+                "materials": [
+                  "RoofTile"
+                ],
+                "bound_box": [
+                  [
+                    -1.9,
+                    -1.9,
+                    -0.6
+                  ],
+                  [
+                    -1.9,
+                    -1.9,
+                    0.6
+                  ],
+                  [
+                    -1.9,
+                    1.9,
+                    0.6
+                  ],
+                  [
+                    -1.9,
+                    1.9,
+                    -0.6
+                  ],
+                  [
+                    1.9,
+                    -1.9,
+                    -0.6
+                  ],
+                  [
+                    1.9,
+                    -1.9,
+                    0.6
+                  ],
+                  [
+                    1.9,
+                    1.9,
+                    0.6
+                  ],
+                  [
+                    1.9,
+                    1.9,
+                    -0.6
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "oe606b6db92",
+                "name": "Sun",
+                "type": "LIGHT",
+                "location": [
+                  4,
+                  2,
+                  6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 5
+              },
+              {
+                "bw_id": "o4c98ab5c9a",
+                "name": "Walls",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.8,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Plaster"
+                ],
+                "bound_box": [
+                  [
+                    -1.4,
+                    -1,
+                    -1
+                  ],
+                  [
+                    -1.4,
+                    -1,
+                    1
+                  ],
+                  [
+                    -1.4,
+                    1,
+                    1
+                  ],
+                  [
+                    -1.4,
+                    1,
+                    -1
+                  ],
+                  [
+                    1.4,
+                    -1,
+                    -1
+                  ],
+                  [
+                    1.4,
+                    -1,
+                    1
+                  ],
+                  [
+                    1.4,
+                    1,
+                    1
+                  ],
+                  [
+                    1.4,
+                    1,
+                    -1
+                  ]
+                ],
+                "selected": false
+              }
+            ],
+            "materials": [
+              "Material",
+              "Plaster",
+              "RoofTile"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE",
+            "selection": [
+              "Sun"
+            ]
+          }
+        },
+        {
+          "op": "export",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "bytes": 9432,
+              "file": "t3_house.glb",
+              "sha256": "b4f13ac9980c8418641282d742f4707a44a0e3b41e1a6c1575f5ac321ecb8d0f"
+            },
+            "ply": {
+              "ok": true,
+              "bytes": 3028,
+              "file": "t3_house.ply",
+              "sha256": "3e2c30d4d764a2a7e445ab75dd8dab598e7131092170ef3a43735bcbb87660d8"
+            }
+          }
+        },
+        {
+          "op": "validate.roundtrip",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "objects": 3,
+              "meshes": 3,
+              "verts": 184,
+              "materials": 4
+            },
+            "ply": {
+              "ok": true,
+              "objects": 1,
+              "meshes": 1,
+              "verts": 98,
+              "materials": 2
+            }
+          }
+        }
+      ],
+      "artifacts": {}
+    }
+  ],
+  "trace_id": "baseline-t3_house",
+  "elapsed_s": 1.52,
+  "snapshot": {
+    "format": "bw.scene.snapshot/v1",
+    "objects": [
+      {
+        "bw_id": null,
+        "name": "t3_house",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -1.4,
+            -1,
+            0
+          ],
+          [
+            -1.4,
+            -1,
+            2
+          ],
+          [
+            -1.4,
+            1,
+            2
+          ],
+          [
+            -1.4,
+            1,
+            0
+          ],
+          [
+            1.4,
+            1,
+            2
+          ],
+          [
+            1.4,
+            1,
+            0
+          ],
+          [
+            1.4,
+            -1,
+            2
+          ],
+          [
+            1.4,
+            -1,
+            0
+          ],
+          [
+            -1.4,
+            -1,
+            2
+          ],
+          [
+            -1.4,
+            -1,
+            0
+          ],
+          [
+            -1.4,
+            1,
+            0
+          ],
+          [
+            -1.4,
+            -1,
+            0
+          ],
+          [
+            -1.4,
+            1,
+            2
+          ],
+          [
+            -1.4,
+            -1,
+            2
+          ],
+          [
+            0,
+            1.9,
+            2
+          ],
+          [
+            0,
+            0,
+            3.2
+          ],
+          [
+            0.370672,
+            1.863492,
+            2
+          ],
+          [
+            0.727099,
+            1.755371,
+            2
+          ],
+          [
+            1.055583,
+            1.579792,
+            2
+          ],
+          [
+            1.343503,
+            1.343503,
+            2
+          ],
+          [
+            1.579792,
+            1.055583,
+            2
+          ],
+          [
+            1.755371,
+            0.727099,
+            2
+          ],
+          [
+            1.863492,
+            0.370672,
+            2
+          ],
+          [
+            1.9,
+            0,
+            2
+          ],
+          [
+            1.863492,
+            -0.370672,
+            2
+          ],
+          [
+            1.755371,
+            -0.727099,
+            2
+          ],
+          [
+            1.579792,
+            -1.055583,
+            2
+          ],
+          [
+            1.343503,
+            -1.343503,
+            2
+          ],
+          [
+            1.055583,
+            -1.579792,
+            2
+          ],
+          [
+            0.727099,
+            -1.755371,
+            2
+          ],
+          [
+            0.370672,
+            -1.863492,
+            2
+          ],
+          [
+            0,
+            -1.9,
+            2
+          ],
+          [
+            -0.370672,
+            -1.863492,
+            2
+          ],
+          [
+            -0.727099,
+            -1.755371,
+            2
+          ],
+          [
+            -1.055583,
+            -1.579792,
+            2
+          ],
+          [
+            -1.343503,
+            -1.343503,
+            2
+          ],
+          [
+            -1.579792,
+            -1.055583,
+            2
+          ],
+          [
+            -1.755371,
+            -0.727099,
+            2
+          ],
+          [
+            -1.863492,
+            -0.370672,
+            2
+          ],
+          [
+            -1.9,
+            0,
+            2
+          ],
+          [
+            -1.863492,
+            0.370672,
+            2
+          ],
+          [
+            -1.755371,
+            0.727099,
+            2
+          ],
+          [
+            -1.579792,
+            1.055583,
+            2
+          ],
+          [
+            -1.343503,
+            1.343503,
+            2
+          ],
+          [
+            -1.055583,
+            1.579792,
+            2
+          ],
+          [
+            -0.727099,
+            1.755371,
+            2
+          ],
+          [
+            0,
+            1.9,
+            2
+          ],
+          [
+            0.370672,
+            1.863492,
+            2
+          ],
+          [
+            0.727099,
+            1.755371,
+            2
+          ],
+          [
+            1.055583,
+            1.579792,
+            2
+          ],
+          [
+            1.343503,
+            1.343503,
+            2
+          ],
+          [
+            1.579792,
+            1.055583,
+            2
+          ],
+          [
+            1.755371,
+            0.727099,
+            2
+          ],
+          [
+            1.863492,
+            0.370672,
+            2
+          ],
+          [
+            1.9,
+            0,
+            2
+          ],
+          [
+            1.863492,
+            -0.370672,
+            2
+          ],
+          [
+            1.755371,
+            -0.727099,
+            2
+          ],
+          [
+            1.579792,
+            -1.055583,
+            2
+          ],
+          [
+            1.343503,
+            -1.343503,
+            2
+          ],
+          [
+            1.055583,
+            -1.579792,
+            2
+          ],
+          [
+            0.727099,
+            -1.755371,
+            2
+          ],
+          [
+            0.370672,
+            -1.863492,
+            2
+          ],
+          [
+            0,
+            -1.9,
+            2
+          ],
+          [
+            -0.370672,
+            -1.863492,
+            2
+          ],
+          [
+            -0.727099,
+            -1.755371,
+            2
+          ],
+          [
+            -1.055583,
+            -1.579792,
+            2
+          ],
+          [
+            -1.343503,
+            -1.343503,
+            2
+          ],
+          [
+            -1.579792,
+            -1.055583,
+            2
+          ],
+          [
+            -1.755371,
+            -0.727099,
+            2
+          ],
+          [
+            -1.863492,
+            -0.370672,
+            2
+          ],
+          [
+            -1.9,
+            0,
+            2
+          ],
+          [
+            -1.863492,
+            0.370672,
+            2
+          ],
+          [
+            -1.755371,
+            0.727099,
+            2
+          ],
+          [
+            -1.579792,
+            1.055583,
+            2
+          ],
+          [
+            -1.343503,
+            1.343503,
+            2
+          ],
+          [
+            -1.055583,
+            1.579792,
+            2
+          ],
+          [
+            -0.727099,
+            1.755371,
+            2
+          ],
+          [
+            -0.370672,
+            1.863492,
+            2
+          ],
+          [
+            -0.370672,
+            1.863492,
+            2
+          ],
+          [
+            0.45,
+            0.05,
+            1.95
+          ],
+          [
+            0.45,
+            0.05,
+            2.45
+          ],
+          [
+            0.45,
+            0.55,
+            2.45
+          ],
+          [
+            0.45,
+            0.55,
+            1.95
+          ],
+          [
+            0.95,
+            0.55,
+            2.45
+          ],
+          [
+            0.95,
+            0.55,
+            1.95
+          ],
+          [
+            0.95,
+            0.05,
+            2.45
+          ],
+          [
+            0.95,
+            0.05,
+            1.95
+          ],
+          [
+            0.45,
+            0.05,
+            2.45
+          ],
+          [
+            0.45,
+            0.05,
+            1.95
+          ],
+          [
+            0.45,
+            0.55,
+            1.95
+          ],
+          [
+            0.45,
+            0.05,
+            1.95
+          ],
+          [
+            0.45,
+            0.05,
+            3.35
+          ],
+          [
+            0.45,
+            0.55,
+            3.35
+          ],
+          [
+            0.95,
+            0.55,
+            3.35
+          ],
+          [
+            0.45,
+            0.55,
+            3.35
+          ],
+          [
+            0.45,
+            0.05,
+            3.35
+          ],
+          [
+            0.95,
+            0.05,
+            3.35
+          ],
+          [
+            0.45,
+            0.05,
+            3.35
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            2,
+            3
+          ],
+          [
+            3,
+            2,
+            4,
+            5
+          ],
+          [
+            5,
+            4,
+            6,
+            7
+          ],
+          [
+            7,
+            6,
+            8,
+            9
+          ],
+          [
+            10,
+            5,
+            7,
+            11
+          ],
+          [
+            4,
+            12,
+            13,
+            6
+          ],
+          [
+            14,
+            15,
+            16
+          ],
+          [
+            16,
+            15,
+            17
+          ],
+          [
+            17,
+            15,
+            18
+          ],
+          [
+            18,
+            15,
+            19
+          ],
+          [
+            19,
+            15,
+            20
+          ],
+          [
+            20,
+            15,
+            21
+          ],
+          [
+            21,
+            15,
+            22
+          ],
+          [
+            22,
+            15,
+            23
+          ],
+          [
+            23,
+            15,
+            24
+          ],
+          [
+            24,
+            15,
+            25
+          ],
+          [
+            25,
+            15,
+            26
+          ],
+          [
+            26,
+            15,
+            27
+          ],
+          [
+            27,
+            15,
+            28
+          ],
+          [
+            28,
+            15,
+            29
+          ],
+          [
+            29,
+            15,
+            30
+          ],
+          [
+            30,
+            15,
+            31
+          ],
+          [
+            31,
+            15,
+            32
+          ],
+          [
+            32,
+            15,
+            33
+          ],
+          [
+            33,
+            15,
+            34
+          ],
+          [
+            34,
+            15,
+            35
+          ],
+          [
+            35,
+            15,
+            36
+          ],
+          [
+            36,
+            15,
+            37
+          ],
+          [
+            37,
+            15,
+            38
+          ],
+          [
+            38,
+            15,
+            39
+          ],
+          [
+            39,
+            15,
+            40
+          ],
+          [
+            40,
+            15,
+            41
+          ],
+          [
+            41,
+            15,
+            42
+          ],
+          [
+            42,
+            15,
+            43
+          ],
+          [
+            43,
+            15,
+            44
+          ],
+          [
+            44,
+            15,
+            45
+          ],
+          [
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75,
+            76,
+            77
+          ],
+          [
+            45,
+            15,
+            78
+          ],
+          [
+            78,
+            15,
+            14
+          ],
+          [
+            79,
+            80,
+            81,
+            82
+          ],
+          [
+            82,
+            81,
+            83,
+            84
+          ],
+          [
+            84,
+            83,
+            85,
+            86
+          ],
+          [
+            86,
+            85,
+            87,
+            88
+          ],
+          [
+            89,
+            84,
+            86,
+            90
+          ],
+          [
+            81,
+            80,
+            91,
+            92
+          ],
+          [
+            93,
+            94,
+            95,
+            96
+          ],
+          [
+            87,
+            85,
+            96,
+            97
+          ],
+          [
+            85,
+            83,
+            93,
+            96
+          ],
+          [
+            83,
+            81,
+            92,
+            93
+          ]
+        ],
+        "material_names": [],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "materials": [
+      {
+        "name": "Plaster.001",
+        "base_color": [
+          0.92,
+          0.9,
+          0.84,
+          1
+        ],
+        "roughness": 0.8,
+        "metallic": 0
+      },
+      {
+        "name": "RoofTile.001",
+        "base_color": [
+          0.55,
+          0.12,
+          0.1,
+          1
+        ],
+        "roughness": 0.65,
+        "metallic": 0
+      }
+    ]
+  },
+  "artifacts": [
+    "t3_house.glb",
+    "t3_house.ply"
+  ],
+  "wall_clock_s": 10.54,
+  "runtime_exit": "ok"
+}

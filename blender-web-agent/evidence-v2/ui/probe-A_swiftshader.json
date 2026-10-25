@@ -1,0 +1,39 @@
+{
+  "label": "A_swiftshader",
+  "extraFlags": [
+    "--enable-unsafe-webgpu"
+  ],
+  "supported": false,
+  "reason": "driver error: TargetCloseError: Protocol error (Input.dispatchMouseEvent): Session closed. Most likely the page has been closed.",
+  "samples": [
+    {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 0,
+      "canvasSize": "900x600",
+      "pngHash": "ab0bae03:12931",
+      "nonBlack": true
+    },
+    {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 0,
+      "canvasSize": "900x600",
+      "pngHash": "ab0bae03:12931",
+      "nonBlack": true
+    },
+    {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 1,
+      "canvasSize": "900x600",
+      "pngHash": "0:0",
+      "nonBlack": false
+    },
+    {
+      "error": "TargetCloseError: Protocol error (Runtime.callFunctionOn): Target closed"
+    }
+  ],
+  "input": null,
+  "booted_main_loop": true
+}

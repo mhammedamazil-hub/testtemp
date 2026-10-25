@@ -1,0 +1,88 @@
+Failed to load resource: the server responded with a status of 404 (Not Found)
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!
+<string>:504: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+WARNING Unsupported platform emscripten, Draco is unavailable
+INFO Draco compression is unavailable on this platform
+WARNING Unsupported platform emscripten, MeshOptimizer is unavailable
+INFO MeshOptimizer compression is unavailable on this platform
+11:02:36 | INFO: Starting glTF 2.0 export
+11:02:36 | INFO: Extracting primitive: Sphere
+11:02:36 | INFO: Primitives created: 1
+11:02:36 | INFO: Extracting primitive: Cube
+11:02:36 | INFO: Primitives created: 1
+11:02:36 | INFO: Finished glTF 2.0 export in 0.18000006675720215 s
+<string>:613: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+11:02:36 | INFO: Starting glTF 2.0 export
+11:02:36 | INFO: Extracting primitive: Sphere
+11:02:36 | INFO: Primitives created: 1
+11:02:36 | INFO: Extracting primitive: Cube
+11:02:36 | INFO: Primitives created: 1
+11:02:36 | INFO: Finished glTF 2.0 export in 0.0279996395111084 s
+<string>:613: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.gltf'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Writing to /tmp/bw_export/multi.obj
+OBJ export of 'multi.obj' took 16.33 ms
+<string>:613: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.obj'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Timer 'STL Export' took 3.36 ms
+<string>:613: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.stl'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+PLY export of 'multi.ply' took 4.17 ms
+<string>:613: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.ply'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+USD export of '/tmp/bw_export/multi.usda' took 373.45 ms
+<string>:613: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.usda'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:613: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Info: File exported successfully
+Info: File exported successfully
+Info: File exported successfully
+Info: Saved as "multi.blend"
+11:02:37 | INFO: Data are loaded, start creating Blender stuff
+11:02:37 | INFO: Blender create Mesh node Sphere
+11:02:37 | INFO: Blender create Mesh node Cube
+11:02:37 | INFO: glTF import finished in 0.08s
+11:02:37 | INFO: Data are loaded, start creating Blender stuff
+11:02:37 | INFO: Blender create Mesh node Sphere
+11:02:37 | INFO: Blender create Mesh node Cube
+11:02:37 | INFO: glTF import finished in 0.04s
+OBJ import of 'multi.obj' took 13.24 ms
+Timer 'STL Import' took 2.60 ms
+PLY import of 'multi.ply' took 28.97 ms
+USD import of '/tmp/bw_export/multi.usda' took 113.25 ms
+<string>:641: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:196: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+<string>:842: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.gltf'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:842: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.ply'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+BW_RESULT {"schema": "bw.agent.ops/v2", "blender": "5.2.0 LTS", "plan_ok": true, "tasks": [{"id": "formats", "goal": "", "ops": [{"op": "scene.reset", "op_id": null, "ok": true, "result": {"objects": 0}, "scene": {"objects": {}, "object_count": 0, "materials": [], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "o260c97c165", "name": "Slab", "created": true, "verts": 8, "dimensions": [2.0, 2.0, 2.0]}, "scene": {"objects": {"Slab": {"bw_id": "o260c97c165", "name": "Slab", "type": "MESH", "location": [0.0, 0.0, 0.5], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.0], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": [], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.set_dimensions", "op_id": null, "ok": true, "result": {"bw_id": "o260c97c165", "dimensions": [1.2, 0.8, 0.2], "scale_applied": true}, "scene": {"objects": {"Slab": {"bw_id": "o260c97c165", "name": "Slab", "type": "MESH", "location": [0.0, 0.0, 0.5], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [1.2, 0.8, 0.2], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": [], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "o84b9ad17db", "name": "Ball", "created": true, "verts": 114, "dimensions": [0.6, 0.6, 0.6]}, "scene": {"objects": {"Ball": {"bw_id": "o84b9ad17db", "name": "Ball", "type": "MESH", "location": [0.0, 0.0, 0.9], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [0.6, 0.6, 0.6], "verts": 114, "faces": 128, "materials": []}, "Slab": {"bw_id": "o260c97c165", "name": "Slab", "type": "MESH", "location": [0.0, 0.0, 0.5], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [1.2, 0.8, 0.2], "verts": 8, "faces": 6, "materials": []}}, "object_count": 2, "materials": [], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "m
+<string>:842: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.stl'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:842: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.obj'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:842: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:842: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.usda'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[shell] artifact multi.usda -> 200
+<string>:842: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/multi.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[shell] artifact multi.blend -> 200
+[shell] artifact multi.blend -> 200
+[shell] artifact multi.blend -> 200
+[shell] artifact multi.blend -> 200
+[shell] artifact multi.blend -> 200
+BW_DONE
+[shell] artifact upload failed: TypeError: Cannot read properties of null (reading 'name')
+
+Blender quit
+[shell] EXIT 0

@@ -1,0 +1,398 @@
+{
+  "session_id": "20261025-110009-0222d9",
+  "task": "A precisely dimensioned bracket (0.30 x 0.18 x 0.05 m) with a named material",
+  "created_at": 1792926009.3966327,
+  "state": "finished",
+  "decided_by": "arena-llm (external orchestrator)",
+  "budget": {
+    "max_steps": 2,
+    "steps_used": 1
+  },
+  "timeout_s": 300.0,
+  "steps": [
+    {
+      "step": 1,
+      "trace_id": "20261025-110009-0222d9-s1-b4534b",
+      "decided_by": "arena-llm (external orchestrator)",
+      "submitted_at": "2026-10-25T11:00:09Z",
+      "elapsed_s": 11.83,
+      "ok": true,
+      "plan_ok": true,
+      "runtime": {
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_clock_s": 11.82,
+        "stale_processes_killed": 0,
+        "preflight": {
+          "runner": {
+            "where": "/home/user/testtemp/blender-web-agent/harness/run_plan.mjs",
+            "ok": true
+          },
+          "node": {
+            "where": "/usr/local/bin/node",
+            "ok": true
+          },
+          "chromium": {
+            "where": "/tmp/chromium",
+            "ok": true
+          },
+          "libs": {
+            "where": "/tmp/lib",
+            "ok": true
+          },
+          "wasm": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.wasm",
+            "ok": true
+          },
+          "data": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.data",
+            "ok": true
+          }
+        }
+      },
+      "tasks": [
+        "bracket"
+      ],
+      "ops": [
+        {
+          "task": "bracket",
+          "op": "scene.reset",
+          "ok": true,
+          "result": {
+            "objects": 0
+          }
+        },
+        {
+          "task": "bracket",
+          "op": "object.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o18d138b05d",
+            "name": "Bracket",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        {
+          "task": "bracket",
+          "op": "object.set_dimensions",
+          "ok": true,
+          "result": {
+            "bw_id": "o18d138b05d",
+            "dimensions": [
+              0.3,
+              0.18,
+              0.05
+            ],
+            "scale_applied": true
+          }
+        },
+        {
+          "task": "bracket",
+          "op": "mesh.bevel",
+          "ok": true,
+          "result": {
+            "bw_id": "o18d138b05d",
+            "verts_before": 8,
+            "verts": 56
+          }
+        },
+        {
+          "task": "bracket",
+          "op": "material.create",
+          "ok": true,
+          "result": {
+            "material": "AnodizedAluminium",
+            "created": true,
+            "base_color": [
+              0.62,
+              0.64,
+              0.67
+            ],
+            "roughness": 0.3,
+            "metallic": 0.85
+          }
+        },
+        {
+          "task": "bracket",
+          "op": "material.assign",
+          "ok": true,
+          "result": {
+            "bw_id": "o18d138b05d",
+            "materials": [
+              "AnodizedAluminium"
+            ]
+          }
+        },
+        {
+          "task": "bracket",
+          "op": "export",
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "bytes": 8864,
+              "file": "bracket.glb",
+              "sha256": "76c1347952bbcf5ccf6f538036344da1446c8e117ab702c8f9e9a00fd0059dc1"
+            },
+            "stl": {
+              "ok": true,
+              "bytes": 5484,
+              "file": "bracket.stl",
+              "sha256": "9d9c6132a129249f3665f71966c44e01245ffb8c26b80bd100e3468315fea06f"
+            }
+          }
+        },
+        {
+          "task": "bracket",
+          "op": "scene.inspect",
+          "ok": true,
+          "result": {
+            "objects": [
+              {
+                "bw_id": "o18d138b05d",
+                "name": "Bracket",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  0.025
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.3,
+                  0.18,
+                  0.05
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": [
+                  "AnodizedAluminium"
+                ],
+                "bound_box": [
+                  [
+                    -0.15,
+                    -0.09,
+                    -0.025
+                  ],
+                  [
+                    -0.15,
+                    -0.09,
+                    0.025
+                  ],
+                  [
+                    -0.15,
+                    0.09,
+                    0.025
+                  ],
+                  [
+                    -0.15,
+                    0.09,
+                    -0.025
+                  ],
+                  [
+                    0.15,
+                    -0.09,
+                    -0.025
+                  ],
+                  [
+                    0.15,
+                    -0.09,
+                    0.025
+                  ],
+                  [
+                    0.15,
+                    0.09,
+                    0.025
+                  ],
+                  [
+                    0.15,
+                    0.09,
+                    -0.025
+                  ]
+                ],
+                "selected": true
+              }
+            ],
+            "materials": [
+              "AnodizedAluminium",
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE",
+            "selection": [
+              "Bracket"
+            ]
+          }
+        }
+      ],
+      "errors": [],
+      "artifacts": {
+        "bracket.glb": {
+          "bytes": 8864,
+          "sha256": "76c1347952bbcf5ccf6f538036344da1446c8e117ab702c8f9e9a00fd0059dc1",
+          "from_blender": true,
+          "independent_verification": {
+            "magic": "glTF",
+            "version": 2,
+            "declared_length": 8864,
+            "actual_length": 8864,
+            "chunks": [
+              {
+                "type": "JSON",
+                "bytes": 1276
+              },
+              {
+                "type": "BIN",
+                "bytes": 7560
+              }
+            ],
+            "meshes": 1,
+            "materials": [
+              "AnodizedAluminium"
+            ],
+            "nodes": 1,
+            "accessors": 4,
+            "primitives": 1,
+            "vertices": 216,
+            "generator": "Khronos glTF Blender I/O v5.2.39",
+            "ok": true
+          },
+          "kept_as": "sessions/20261025-110009-0222d9/artifacts/s1-bracket.glb"
+        },
+        "bracket.stl": {
+          "bytes": 5484,
+          "sha256": "9d9c6132a129249f3665f71966c44e01245ffb8c26b80bd100e3468315fea06f",
+          "from_blender": true,
+          "independent_verification": {
+            "ok": true,
+            "format": "binary",
+            "triangles": 108,
+            "expected_bytes": 5484,
+            "actual_bytes": 5484
+          },
+          "kept_as": "sessions/20261025-110009-0222d9/artifacts/s1-bracket.stl"
+        }
+      },
+      "scene_summary": {
+        "objects": [
+          {
+            "name": "Bracket",
+            "bw_id": "o18d138b05d",
+            "type": "MESH",
+            "location": [
+              0,
+              0,
+              0.025
+            ],
+            "verts": 56,
+            "faces": 54,
+            "materials": [
+              "AnodizedAluminium"
+            ]
+          }
+        ],
+        "materials": [
+          "AnodizedAluminium",
+          "Material"
+        ]
+      },
+      "evidence_dir": "sessions/20261025-110009-0222d9/steps/step-01",
+      "label": "build"
+    }
+  ],
+  "current_scene": null,
+  "result": {
+    "summary": "s1_dimensioned_object: 1 step(s), 4 checks passed",
+    "delivered_artifacts": [
+      "bracket.glb",
+      "bracket.stl"
+    ],
+    "artifact_index": {
+      "bracket.glb": {
+        "bytes": 8864,
+        "sha256": "76c1347952bbcf5ccf6f538036344da1446c8e117ab702c8f9e9a00fd0059dc1",
+        "from_blender": true,
+        "independent_verification": {
+          "magic": "glTF",
+          "version": 2,
+          "declared_length": 8864,
+          "actual_length": 8864,
+          "chunks": [
+            {
+              "type": "JSON",
+              "bytes": 1276
+            },
+            {
+              "type": "BIN",
+              "bytes": 7560
+            }
+          ],
+          "meshes": 1,
+          "materials": [
+            "AnodizedAluminium"
+          ],
+          "nodes": 1,
+          "accessors": 4,
+          "primitives": 1,
+          "vertices": 216,
+          "generator": "Khronos glTF Blender I/O v5.2.39",
+          "ok": true
+        },
+        "kept_as": "sessions/20261025-110009-0222d9/artifacts/s1-bracket.glb"
+      },
+      "bracket.stl": {
+        "bytes": 5484,
+        "sha256": "9d9c6132a129249f3665f71966c44e01245ffb8c26b80bd100e3468315fea06f",
+        "from_blender": true,
+        "independent_verification": {
+          "ok": true,
+          "format": "binary",
+          "triangles": 108,
+          "expected_bytes": 5484,
+          "actual_bytes": 5484
+        },
+        "kept_as": "sessions/20261025-110009-0222d9/artifacts/s1-bracket.stl"
+      }
+    },
+    "steps_used": 1,
+    "scene": {
+      "objects": [
+        {
+          "name": "Bracket",
+          "bw_id": "o18d138b05d",
+          "type": "MESH",
+          "location": [
+            0,
+            0,
+            0.025
+          ],
+          "verts": 56,
+          "faces": 54,
+          "materials": [
+            "AnodizedAluminium"
+          ]
+        }
+      ],
+      "materials": [
+        "AnodizedAluminium",
+        "Material"
+      ]
+    },
+    "finished_at": "2026-10-25T11:00:21Z"
+  }
+}

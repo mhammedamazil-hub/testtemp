@@ -1,0 +1,278 @@
+[
+  {
+    "task": "t1_table",
+    "goal": "Table: slab top on four cylindrical legs, wood and steel materials",
+    "started": "2026-10-25T10:57:12Z",
+    "elapsed_s": 10.31,
+    "ok": true,
+    "runtime_exit": 0,
+    "blender": "5.2.0 LTS",
+    "ops_total": 19,
+    "ops_failed": [],
+    "exports": {
+      "glb": {
+        "ok": true,
+        "bytes": 30676,
+        "file": "t1_table.glb",
+        "sha256": "27ea271dfb11081c6491730896399cb8bbf6978b6c04ecb24391536232004d52"
+      },
+      "obj": {
+        "ok": true,
+        "bytes": 31754,
+        "file": "t1_table.obj",
+        "sha256": "73a24e09fc58aeed81d10c61e14e32450a715919d78d389be17f3cf2f8efed8d"
+      }
+    },
+    "roundtrip": {
+      "glb": {
+        "ok": true,
+        "objects": 5,
+        "meshes": 5,
+        "verts": 792,
+        "materials": 4
+      },
+      "obj": {
+        "ok": true,
+        "objects": 5,
+        "meshes": 5,
+        "verts": 264,
+        "materials": 4
+      }
+    },
+    "artifacts": {
+      "t1_table.glb": {
+        "bytes": 30676,
+        "sha256": "27ea271dfb11081c6491730896399cb8bbf6978b6c04ecb24391536232004d52"
+      },
+      "t1_table.obj": {
+        "bytes": 31754,
+        "sha256": "73a24e09fc58aeed81d10c61e14e32450a715919d78d389be17f3cf2f8efed8d"
+      }
+    },
+    "evidence": "evidence-v2/baseline/t1_table"
+  },
+  {
+    "task": "t2_robot",
+    "goal": "Robot head: beveled cube head with two spherical eyes",
+    "started": "2026-10-25T10:57:22Z",
+    "elapsed_s": 10.28,
+    "ok": true,
+    "runtime_exit": 0,
+    "blender": "5.2.0 LTS",
+    "ops_total": 15,
+    "ops_failed": [],
+    "exports": {
+      "glb": {
+        "ok": true,
+        "bytes": 149104,
+        "file": "t2_robot.glb",
+        "sha256": "7fa77c2eba2bc768e88907fd44030b7c636953b0b263fb5981d71025029f8c9a"
+      },
+      "stl": {
+        "ok": true,
+        "bytes": 105484,
+        "file": "t2_robot.stl",
+        "sha256": "b653e2ec38db4ead6398c4f01e448fab423f012e27dc4913387fca61e178817c"
+      }
+    },
+    "roundtrip": {
+      "glb": {
+        "ok": true,
+        "objects": 3,
+        "meshes": 3,
+        "verts": 4352,
+        "materials": 4
+      },
+      "stl": {
+        "ok": true,
+        "objects": 1,
+        "meshes": 1,
+        "verts": 1060,
+        "materials": 2
+      }
+    },
+    "artifacts": {
+      "t2_robot.glb": {
+        "bytes": 149104,
+        "sha256": "7fa77c2eba2bc768e88907fd44030b7c636953b0b263fb5981d71025029f8c9a"
+      },
+      "t2_robot.stl": {
+        "bytes": 105484,
+        "sha256": "b653e2ec38db4ead6398c4f01e448fab423f012e27dc4913387fca61e178817c"
+      }
+    },
+    "evidence": "evidence-v2/baseline/t2_robot"
+  },
+  {
+    "task": "t3_house",
+    "goal": "House: walls, conical roof, chimney made by extruding a face",
+    "started": "2026-10-25T10:57:33Z",
+    "elapsed_s": 10.76,
+    "ok": true,
+    "runtime_exit": 0,
+    "blender": "5.2.0 LTS",
+    "ops_total": 16,
+    "ops_failed": [],
+    "exports": {
+      "glb": {
+        "ok": true,
+        "bytes": 9432,
+        "file": "t3_house.glb",
+        "sha256": "b4f13ac9980c8418641282d742f4707a44a0e3b41e1a6c1575f5ac321ecb8d0f"
+      },
+      "ply": {
+        "ok": true,
+        "bytes": 3028,
+        "file": "t3_house.ply",
+        "sha256": "3e2c30d4d764a2a7e445ab75dd8dab598e7131092170ef3a43735bcbb87660d8"
+      }
+    },
+    "roundtrip": {
+      "glb": {
+        "ok": true,
+        "objects": 3,
+        "meshes": 3,
+        "verts": 184,
+        "materials": 4
+      },
+      "ply": {
+        "ok": true,
+        "objects": 1,
+        "meshes": 1,
+        "verts": 98,
+        "materials": 2
+      }
+    },
+    "artifacts": {
+      "t3_house.glb": {
+        "bytes": 9432,
+        "sha256": "b4f13ac9980c8418641282d742f4707a44a0e3b41e1a6c1575f5ac321ecb8d0f"
+      },
+      "t3_house.ply": {
+        "bytes": 3028,
+        "sha256": "3e2c30d4d764a2a7e445ab75dd8dab598e7131092170ef3a43735bcbb87660d8"
+      }
+    },
+    "evidence": "evidence-v2/baseline/t3_house"
+  },
+  {
+    "task": "t4_pedestal",
+    "goal": "Pedestal: beveled cylinders with a polished brass material",
+    "started": "2026-10-25T10:57:44Z",
+    "elapsed_s": 11.27,
+    "ok": true,
+    "runtime_exit": 0,
+    "blender": "5.2.0 LTS",
+    "ops_total": 16,
+    "ops_failed": [],
+    "exports": {
+      "glb": {
+        "ok": true,
+        "bytes": 50992,
+        "file": "t4_pedestal.glb",
+        "sha256": "69879d90d4890a9acc67aff4fad3833951f1d8b63f9ce43654c98a1e99e62ab6"
+      },
+      "usda": {
+        "ok": true,
+        "bytes": 95514,
+        "file": "t4_pedestal.usda",
+        "sha256": "767914381911fcbda8e36ed3d4fafce93647e364bbb75db7c25d90d7b93e0a74"
+      }
+    },
+    "roundtrip": {
+      "glb": {
+        "ok": true,
+        "objects": 3,
+        "meshes": 3,
+        "verts": 1432,
+        "materials": 2
+      },
+      "usda": {
+        "ok": true,
+        "objects": 6,
+        "meshes": 3,
+        "verts": 392,
+        "materials": 2
+      }
+    },
+    "artifacts": {
+      "t4_pedestal.glb": {
+        "bytes": 50992,
+        "sha256": "69879d90d4890a9acc67aff4fad3833951f1d8b63f9ce43654c98a1e99e62ab6"
+      },
+      "t4_pedestal.usda": {
+        "bytes": 95514,
+        "sha256": "767914381911fcbda8e36ed3d4fafce93647e364bbb75db7c25d90d7b93e0a74"
+      }
+    },
+    "evidence": "evidence-v2/baseline/t4_pedestal"
+  },
+  {
+    "task": "t5_full",
+    "goal": "Full pipeline: extrude + bevel + material + camera + light, export and re-import",
+    "started": "2026-10-25T10:57:55Z",
+    "elapsed_s": 10.78,
+    "ok": true,
+    "runtime_exit": 0,
+    "blender": "5.2.0 LTS",
+    "ops_total": 14,
+    "ops_failed": [],
+    "exports": {
+      "glb": {
+        "ok": true,
+        "bytes": 79868,
+        "file": "t5_full.glb",
+        "sha256": "e8cbdbd912a4605f1c2f7d4f0a831a5e4384b1ed98d43c154c75d87a11ca38fd"
+      },
+      "gltf": {
+        "ok": true,
+        "bytes": 3014,
+        "file": "t5_full.gltf",
+        "sha256": "8843bf89ccdb62038ea2a861d099ed5d97a8d4cd1e7e1aa74b0c6c85b5ff28d8"
+      },
+      "blend": {
+        "ok": true,
+        "bytes": 115407,
+        "file": "t5_full.blend",
+        "sha256": "ac56f379efe977bf027b4b973eb1ecfce2f662201ea4befccb5316a07e8c744d"
+      }
+    },
+    "roundtrip": {
+      "glb": {
+        "ok": true,
+        "objects": 2,
+        "meshes": 2,
+        "verts": 2224,
+        "materials": 4
+      },
+      "gltf": {
+        "ok": true,
+        "objects": 2,
+        "meshes": 2,
+        "verts": 2224,
+        "materials": 4
+      },
+      "blend": {
+        "ok": true,
+        "mode": "header-check",
+        "compression": "zstd",
+        "note": "not re-opened: open_mainfile destabilises this build"
+      }
+    },
+    "artifacts": {
+      "t5_full.blend": {
+        "bytes": 115407,
+        "sha256": "ac56f379efe977bf027b4b973eb1ecfce2f662201ea4befccb5316a07e8c744d"
+      },
+      "t5_full.glb": {
+        "bytes": 79868,
+        "sha256": "e8cbdbd912a4605f1c2f7d4f0a831a5e4384b1ed98d43c154c75d87a11ca38fd"
+      },
+      "t5_full.gltf": {
+        "bytes": 3014,
+        "sha256": "8843bf89ccdb62038ea2a861d099ed5d97a8d4cd1e7e1aa74b0c6c85b5ff28d8"
+      }
+    },
+    "evidence": "evidence-v2/baseline/t5_full"
+  }
+]

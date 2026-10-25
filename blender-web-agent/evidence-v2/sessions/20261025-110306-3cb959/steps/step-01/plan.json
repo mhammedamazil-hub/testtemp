@@ -1,0 +1,21 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "try",
+      "ops": [
+        {
+          "op": "object.transform",
+          "target": "Widget",
+          "location": [
+            1,
+            2,
+            3
+          ]
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-110306-3cb959-s1-ab456f",
+  "limits": {}
+}

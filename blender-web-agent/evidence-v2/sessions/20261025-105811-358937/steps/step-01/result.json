@@ -1,0 +1,9447 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "blender": "5.2.0 LTS",
+  "plan_ok": true,
+  "tasks": [
+    {
+      "id": "build_spacecraft",
+      "goal": "Fuselage + two swept wings + cockpit; hull and glass materials; camera and key light",
+      "ops": [
+        {
+          "op": "scene.reset",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": 0
+          },
+          "scene": {
+            "objects": {},
+            "object_count": 0,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4ad1c1e25c",
+            "name": "Fuselage",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4ad1c1e25c",
+            "dimensions": [
+              0.8,
+              3.6,
+              0.7
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "mesh.bevel",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4ad1c1e25c",
+            "verts_before": 8,
+            "verts": 56
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "ode131bf254",
+            "name": "Wing_L",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 2,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "ode131bf254",
+            "dimensions": [
+              2.2,
+              0.9,
+              0.08
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 2,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.transform",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "ode131bf254",
+            "location": [
+              -1.5,
+              0.1,
+              1
+            ],
+            "rotation": [
+              0,
+              0,
+              0.314159
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "dimensions": [
+              2.2,
+              0.9,
+              0.08
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 2,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o757453bb3f",
+            "name": "Wing_R",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o757453bb3f",
+            "dimensions": [
+              2.2,
+              0.9,
+              0.08
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.transform",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o757453bb3f",
+            "location": [
+              1.5,
+              0.1,
+              1
+            ],
+            "rotation": [
+              0,
+              0,
+              -0.314159
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "dimensions": [
+              2.2,
+              0.9,
+              0.08
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4513399778",
+            "name": "Cockpit",
+            "created": true,
+            "verts": 482,
+            "dimensions": [
+              0.899999,
+              0.9,
+              0.9
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": []
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "HullWhite",
+            "created": true,
+            "base_color": [
+              0.86,
+              0.87,
+              0.9
+            ],
+            "roughness": 0.35,
+            "metallic": 0.25
+          },
+          "scene": {
+            "objects": {
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": []
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "HullWhite",
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "CockpitGlass",
+            "created": true,
+            "base_color": [
+              0.1,
+              0.35,
+              0.55
+            ],
+            "roughness": 0.08,
+            "metallic": 0.1
+          },
+          "scene": {
+            "objects": {
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": []
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": []
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "CockpitGlass",
+              "HullWhite",
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4ad1c1e25c",
+            "materials": [
+              "HullWhite"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": []
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "CockpitGlass",
+              "HullWhite",
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "ode131bf254",
+            "materials": [
+              "HullWhite"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": []
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "CockpitGlass",
+              "HullWhite",
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o757453bb3f",
+            "materials": [
+              "HullWhite"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": []
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "CockpitGlass",
+              "HullWhite",
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4513399778",
+            "materials": [
+              "CockpitGlass"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": [
+                  "CockpitGlass"
+                ]
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "CockpitGlass",
+              "HullWhite",
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "camera.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "odabf8db63c",
+            "camera": "Cam",
+            "lens": 50,
+            "is_scene_camera": true
+          },
+          "scene": {
+            "objects": {
+              "Cam": {
+                "bw_id": "odabf8db63c",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  5.5,
+                  -6.5,
+                  4.2
+                ],
+                "rotation": [
+                  1.211306,
+                  0,
+                  0.702257
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": [
+                  "CockpitGlass"
+                ]
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "CockpitGlass",
+              "HullWhite",
+              "Material"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "light.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "odd1ccc6d5d",
+            "light": "KeyLight",
+            "type": "SUN",
+            "energy": 4
+          },
+          "scene": {
+            "objects": {
+              "Cam": {
+                "bw_id": "odabf8db63c",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  5.5,
+                  -6.5,
+                  4.2
+                ],
+                "rotation": [
+                  1.211306,
+                  0,
+                  0.702257
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              "Cockpit": {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": [
+                  "CockpitGlass"
+                ]
+              },
+              "Fuselage": {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "KeyLight": {
+                "bw_id": "odd1ccc6d5d",
+                "name": "KeyLight",
+                "type": "LIGHT",
+                "location": [
+                  4,
+                  -2,
+                  6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 4
+              },
+              "Wing_L": {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              },
+              "Wing_R": {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ]
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "CockpitGlass",
+              "HullWhite",
+              "Material"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "scene.inspect",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": [
+              {
+                "bw_id": "odabf8db63c",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  5.5,
+                  -6.5,
+                  4.2
+                ],
+                "rotation": [
+                  1.211306,
+                  0,
+                  0.702257
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              {
+                "bw_id": "o4513399778",
+                "name": "Cockpit",
+                "type": "MESH",
+                "location": [
+                  0,
+                  -1.35,
+                  1.3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.899999,
+                  0.9,
+                  0.9
+                ],
+                "verts": 482,
+                "faces": 512,
+                "materials": [
+                  "CockpitGlass"
+                ],
+                "bound_box": [
+                  [
+                    -0.45,
+                    -0.45,
+                    -0.45
+                  ],
+                  [
+                    -0.45,
+                    -0.45,
+                    0.45
+                  ],
+                  [
+                    -0.45,
+                    0.45,
+                    0.45
+                  ],
+                  [
+                    -0.45,
+                    0.45,
+                    -0.45
+                  ],
+                  [
+                    0.45,
+                    -0.45,
+                    -0.45
+                  ],
+                  [
+                    0.45,
+                    -0.45,
+                    0.45
+                  ],
+                  [
+                    0.45,
+                    0.45,
+                    0.45
+                  ],
+                  [
+                    0.45,
+                    0.45,
+                    -0.45
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o4ad1c1e25c",
+                "name": "Fuselage",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.8,
+                  3.6,
+                  0.7
+                ],
+                "verts": 56,
+                "faces": 54,
+                "materials": [
+                  "HullWhite"
+                ],
+                "bound_box": [
+                  [
+                    -0.4,
+                    -1.8,
+                    -0.35
+                  ],
+                  [
+                    -0.4,
+                    -1.8,
+                    0.35
+                  ],
+                  [
+                    -0.4,
+                    1.8,
+                    0.35
+                  ],
+                  [
+                    -0.4,
+                    1.8,
+                    -0.35
+                  ],
+                  [
+                    0.4,
+                    -1.8,
+                    -0.35
+                  ],
+                  [
+                    0.4,
+                    -1.8,
+                    0.35
+                  ],
+                  [
+                    0.4,
+                    1.8,
+                    0.35
+                  ],
+                  [
+                    0.4,
+                    1.8,
+                    -0.35
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "odd1ccc6d5d",
+                "name": "KeyLight",
+                "type": "LIGHT",
+                "location": [
+                  4,
+                  -2,
+                  6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 4
+              },
+              {
+                "bw_id": "ode131bf254",
+                "name": "Wing_L",
+                "type": "MESH",
+                "location": [
+                  -1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ],
+                "bound_box": [
+                  [
+                    -1.1,
+                    -0.45,
+                    -0.04
+                  ],
+                  [
+                    -1.1,
+                    -0.45,
+                    0.04
+                  ],
+                  [
+                    -1.1,
+                    0.45,
+                    0.04
+                  ],
+                  [
+                    -1.1,
+                    0.45,
+                    -0.04
+                  ],
+                  [
+                    1.1,
+                    -0.45,
+                    -0.04
+                  ],
+                  [
+                    1.1,
+                    -0.45,
+                    0.04
+                  ],
+                  [
+                    1.1,
+                    0.45,
+                    0.04
+                  ],
+                  [
+                    1.1,
+                    0.45,
+                    -0.04
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o757453bb3f",
+                "name": "Wing_R",
+                "type": "MESH",
+                "location": [
+                  1.5,
+                  0.1,
+                  1
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  -0.314159
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.2,
+                  0.9,
+                  0.08
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "HullWhite"
+                ],
+                "bound_box": [
+                  [
+                    -1.1,
+                    -0.45,
+                    -0.04
+                  ],
+                  [
+                    -1.1,
+                    -0.45,
+                    0.04
+                  ],
+                  [
+                    -1.1,
+                    0.45,
+                    0.04
+                  ],
+                  [
+                    -1.1,
+                    0.45,
+                    -0.04
+                  ],
+                  [
+                    1.1,
+                    -0.45,
+                    -0.04
+                  ],
+                  [
+                    1.1,
+                    -0.45,
+                    0.04
+                  ],
+                  [
+                    1.1,
+                    0.45,
+                    0.04
+                  ],
+                  [
+                    1.1,
+                    0.45,
+                    -0.04
+                  ]
+                ],
+                "selected": false
+              }
+            ],
+            "materials": [
+              "CockpitGlass",
+              "HullWhite",
+              "Material"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE",
+            "selection": [
+              "KeyLight"
+            ]
+          }
+        }
+      ],
+      "artifacts": {}
+    }
+  ],
+  "trace_id": "20261025-105811-358937-s1-a0e66b",
+  "elapsed_s": 0.35,
+  "snapshot": {
+    "format": "bw.scene.snapshot/v1",
+    "objects": [
+      {
+        "bw_id": "odabf8db63c",
+        "name": "Cam",
+        "type": "CAMERA",
+        "location": [
+          5.5,
+          -6.5,
+          4.2
+        ],
+        "rotation": [
+          1.211306,
+          0,
+          0.702257
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "lens": 50,
+        "is_scene_camera": true
+      },
+      {
+        "bw_id": "o4513399778",
+        "name": "Cockpit",
+        "type": "MESH",
+        "location": [
+          0,
+          -1.35,
+          1.3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            0,
+            0,
+            0.45
+          ],
+          [
+            0,
+            0.250007,
+            0.374161
+          ],
+          [
+            0,
+            0.374161,
+            0.250007
+          ],
+          [
+            0,
+            0.415746,
+            0.172208
+          ],
+          [
+            0,
+            0.441353,
+            0.087791
+          ],
+          [
+            0,
+            0.45,
+            0
+          ],
+          [
+            0,
+            0.441353,
+            -0.087791
+          ],
+          [
+            0,
+            0.415746,
+            -0.172208
+          ],
+          [
+            0,
+            0.374161,
+            -0.250007
+          ],
+          [
+            0,
+            0.250007,
+            -0.374161
+          ],
+          [
+            0,
+            0,
+            -0.45
+          ],
+          [
+            0.017127,
+            0.086104,
+            0.441353
+          ],
+          [
+            0.033596,
+            0.168899,
+            0.415746
+          ],
+          [
+            0.048774,
+            0.245203,
+            0.374161
+          ],
+          [
+            0.062077,
+            0.312084,
+            0.318198
+          ],
+          [
+            0.072995,
+            0.366972,
+            0.250007
+          ],
+          [
+            0.081108,
+            0.407757,
+            0.172208
+          ],
+          [
+            0.086104,
+            0.432873,
+            0.087791
+          ],
+          [
+            0.087791,
+            0.441353,
+            0
+          ],
+          [
+            0.086104,
+            0.432873,
+            -0.087791
+          ],
+          [
+            0.081108,
+            0.407757,
+            -0.172208
+          ],
+          [
+            0.072995,
+            0.366972,
+            -0.250007
+          ],
+          [
+            0.062077,
+            0.312084,
+            -0.318198
+          ],
+          [
+            0.048774,
+            0.245203,
+            -0.374161
+          ],
+          [
+            0.033596,
+            0.168899,
+            -0.415746
+          ],
+          [
+            0.017127,
+            0.086104,
+            -0.441353
+          ],
+          [
+            0.033596,
+            0.081108,
+            0.441353
+          ],
+          [
+            0.065901,
+            0.159099,
+            0.415746
+          ],
+          [
+            0.095673,
+            0.230976,
+            0.374161
+          ],
+          [
+            0.121769,
+            0.293977,
+            0.318198
+          ],
+          [
+            0.143185,
+            0.34568,
+            0.250007
+          ],
+          [
+            0.159099,
+            0.384099,
+            0.172208
+          ],
+          [
+            0.168899,
+            0.407757,
+            0.087791
+          ],
+          [
+            0.172208,
+            0.415746,
+            0
+          ],
+          [
+            0.168899,
+            0.407757,
+            -0.087791
+          ],
+          [
+            0.159099,
+            0.384099,
+            -0.172208
+          ],
+          [
+            0.143185,
+            0.34568,
+            -0.250007
+          ],
+          [
+            0.121769,
+            0.293977,
+            -0.318198
+          ],
+          [
+            0.095673,
+            0.230976,
+            -0.374161
+          ],
+          [
+            0.065901,
+            0.159099,
+            -0.415746
+          ],
+          [
+            0.033596,
+            0.081108,
+            -0.441353
+          ],
+          [
+            0.048774,
+            0.072995,
+            0.441353
+          ],
+          [
+            0.095673,
+            0.143185,
+            0.415746
+          ],
+          [
+            0.138896,
+            0.207873,
+            0.374161
+          ],
+          [
+            0.176781,
+            0.264572,
+            0.318198
+          ],
+          [
+            0.207873,
+            0.311104,
+            0.250007
+          ],
+          [
+            0.230976,
+            0.34568,
+            0.172208
+          ],
+          [
+            0.245203,
+            0.366972,
+            0.087791
+          ],
+          [
+            0.250007,
+            0.374161,
+            0
+          ],
+          [
+            0.245203,
+            0.366972,
+            -0.087791
+          ],
+          [
+            0.230976,
+            0.34568,
+            -0.172208
+          ],
+          [
+            0.207873,
+            0.311104,
+            -0.250007
+          ],
+          [
+            0.176781,
+            0.264572,
+            -0.318198
+          ],
+          [
+            0.138896,
+            0.207873,
+            -0.374161
+          ],
+          [
+            0.095673,
+            0.143185,
+            -0.415746
+          ],
+          [
+            0.048774,
+            0.072995,
+            -0.441353
+          ],
+          [
+            0.062077,
+            0.062077,
+            0.441353
+          ],
+          [
+            0.121769,
+            0.121769,
+            0.415746
+          ],
+          [
+            0.176781,
+            0.176781,
+            0.374161
+          ],
+          [
+            0.225,
+            0.225,
+            0.318198
+          ],
+          [
+            0.264572,
+            0.264572,
+            0.250007
+          ],
+          [
+            0.293977,
+            0.293977,
+            0.172208
+          ],
+          [
+            0.312084,
+            0.312084,
+            0.087791
+          ],
+          [
+            0.318198,
+            0.318198,
+            0
+          ],
+          [
+            0.312084,
+            0.312084,
+            -0.087791
+          ],
+          [
+            0.293977,
+            0.293977,
+            -0.172208
+          ],
+          [
+            0.264572,
+            0.264572,
+            -0.250007
+          ],
+          [
+            0.225,
+            0.225,
+            -0.318198
+          ],
+          [
+            0.176781,
+            0.176781,
+            -0.374161
+          ],
+          [
+            0.121769,
+            0.121769,
+            -0.415746
+          ],
+          [
+            0.062077,
+            0.062077,
+            -0.441353
+          ],
+          [
+            0.072995,
+            0.048774,
+            0.441353
+          ],
+          [
+            0.143185,
+            0.095673,
+            0.415746
+          ],
+          [
+            0.207873,
+            0.138896,
+            0.374161
+          ],
+          [
+            0.264572,
+            0.176781,
+            0.318198
+          ],
+          [
+            0.311104,
+            0.207873,
+            0.250007
+          ],
+          [
+            0.34568,
+            0.230976,
+            0.172208
+          ],
+          [
+            0.366972,
+            0.245203,
+            0.087791
+          ],
+          [
+            0.374161,
+            0.250007,
+            0
+          ],
+          [
+            0.366972,
+            0.245203,
+            -0.087791
+          ],
+          [
+            0.34568,
+            0.230976,
+            -0.172208
+          ],
+          [
+            0.311104,
+            0.207873,
+            -0.250007
+          ],
+          [
+            0.264572,
+            0.176781,
+            -0.318198
+          ],
+          [
+            0.207873,
+            0.138896,
+            -0.374161
+          ],
+          [
+            0.143185,
+            0.095673,
+            -0.415746
+          ],
+          [
+            0.072995,
+            0.048774,
+            -0.441353
+          ],
+          [
+            0.081108,
+            0.033596,
+            0.441353
+          ],
+          [
+            0.159099,
+            0.065901,
+            0.415746
+          ],
+          [
+            0.230976,
+            0.095673,
+            0.374161
+          ],
+          [
+            0.293977,
+            0.121769,
+            0.318198
+          ],
+          [
+            0.34568,
+            0.143185,
+            0.250007
+          ],
+          [
+            0.384099,
+            0.159099,
+            0.172208
+          ],
+          [
+            0.407757,
+            0.168899,
+            0.087791
+          ],
+          [
+            0.415746,
+            0.172208,
+            0
+          ],
+          [
+            0.407757,
+            0.168899,
+            -0.087791
+          ],
+          [
+            0.384099,
+            0.159099,
+            -0.172208
+          ],
+          [
+            0.34568,
+            0.143185,
+            -0.250007
+          ],
+          [
+            0.293977,
+            0.121769,
+            -0.318198
+          ],
+          [
+            0.230976,
+            0.095673,
+            -0.374161
+          ],
+          [
+            0.159099,
+            0.065901,
+            -0.415746
+          ],
+          [
+            0.081108,
+            0.033596,
+            -0.441353
+          ],
+          [
+            0.086104,
+            0.017127,
+            0.441353
+          ],
+          [
+            0.168899,
+            0.033596,
+            0.415746
+          ],
+          [
+            0.245203,
+            0.048774,
+            0.374161
+          ],
+          [
+            0.312084,
+            0.062077,
+            0.318198
+          ],
+          [
+            0.366972,
+            0.072995,
+            0.250007
+          ],
+          [
+            0.407757,
+            0.081108,
+            0.172208
+          ],
+          [
+            0.432873,
+            0.086104,
+            0.087791
+          ],
+          [
+            0.441353,
+            0.087791,
+            0
+          ],
+          [
+            0.432873,
+            0.086104,
+            -0.087791
+          ],
+          [
+            0.407757,
+            0.081108,
+            -0.172208
+          ],
+          [
+            0.366972,
+            0.072995,
+            -0.250007
+          ],
+          [
+            0.312084,
+            0.062077,
+            -0.318198
+          ],
+          [
+            0.245203,
+            0.048774,
+            -0.374161
+          ],
+          [
+            0.168899,
+            0.033596,
+            -0.415746
+          ],
+          [
+            0.086104,
+            0.017127,
+            -0.441353
+          ],
+          [
+            0.087791,
+            0,
+            0.441353
+          ],
+          [
+            0.172207,
+            0,
+            0.415746
+          ],
+          [
+            0.250007,
+            0,
+            0.374161
+          ],
+          [
+            0.318198,
+            0,
+            0.318198
+          ],
+          [
+            0.374161,
+            0,
+            0.250007
+          ],
+          [
+            0.415746,
+            0,
+            0.172208
+          ],
+          [
+            0.441353,
+            0,
+            0.087791
+          ],
+          [
+            0.45,
+            0,
+            0
+          ],
+          [
+            0.441353,
+            0,
+            -0.087791
+          ],
+          [
+            0.415746,
+            0,
+            -0.172208
+          ],
+          [
+            0.374161,
+            0,
+            -0.250007
+          ],
+          [
+            0.318198,
+            0,
+            -0.318198
+          ],
+          [
+            0.250007,
+            0,
+            -0.374161
+          ],
+          [
+            0.172207,
+            0,
+            -0.415746
+          ],
+          [
+            0.087791,
+            0,
+            -0.441353
+          ],
+          [
+            0.086104,
+            -0.017127,
+            0.441353
+          ],
+          [
+            0.168899,
+            -0.033596,
+            0.415746
+          ],
+          [
+            0.245203,
+            -0.048774,
+            0.374161
+          ],
+          [
+            0.312084,
+            -0.062077,
+            0.318198
+          ],
+          [
+            0.366972,
+            -0.072995,
+            0.250007
+          ],
+          [
+            0.407757,
+            -0.081108,
+            0.172208
+          ],
+          [
+            0.432873,
+            -0.086104,
+            0.087791
+          ],
+          [
+            0.441353,
+            -0.087791,
+            0
+          ],
+          [
+            0.432873,
+            -0.086104,
+            -0.087791
+          ],
+          [
+            0.407757,
+            -0.081108,
+            -0.172208
+          ],
+          [
+            0.366972,
+            -0.072995,
+            -0.250007
+          ],
+          [
+            0.312084,
+            -0.062077,
+            -0.318198
+          ],
+          [
+            0.245203,
+            -0.048774,
+            -0.374161
+          ],
+          [
+            0.168899,
+            -0.033596,
+            -0.415746
+          ],
+          [
+            0.086104,
+            -0.017127,
+            -0.441353
+          ],
+          [
+            0.081108,
+            -0.033596,
+            0.441353
+          ],
+          [
+            0.159099,
+            -0.065901,
+            0.415746
+          ],
+          [
+            0.230976,
+            -0.095673,
+            0.374161
+          ],
+          [
+            0.293977,
+            -0.121769,
+            0.318198
+          ],
+          [
+            0.34568,
+            -0.143185,
+            0.250007
+          ],
+          [
+            0.384099,
+            -0.159099,
+            0.172208
+          ],
+          [
+            0.407757,
+            -0.168899,
+            0.087791
+          ],
+          [
+            0.415746,
+            -0.172207,
+            0
+          ],
+          [
+            0.407757,
+            -0.168899,
+            -0.087791
+          ],
+          [
+            0.384099,
+            -0.159099,
+            -0.172208
+          ],
+          [
+            0.34568,
+            -0.143185,
+            -0.250007
+          ],
+          [
+            0.293977,
+            -0.121769,
+            -0.318198
+          ],
+          [
+            0.230976,
+            -0.095673,
+            -0.374161
+          ],
+          [
+            0.159099,
+            -0.065901,
+            -0.415746
+          ],
+          [
+            0.081108,
+            -0.033596,
+            -0.441353
+          ],
+          [
+            0.072995,
+            -0.048774,
+            0.441353
+          ],
+          [
+            0.143185,
+            -0.095673,
+            0.415746
+          ],
+          [
+            0.207873,
+            -0.138896,
+            0.374161
+          ],
+          [
+            0.264572,
+            -0.176781,
+            0.318198
+          ],
+          [
+            0.311104,
+            -0.207873,
+            0.250007
+          ],
+          [
+            0.34568,
+            -0.230976,
+            0.172208
+          ],
+          [
+            0.366972,
+            -0.245203,
+            0.087791
+          ],
+          [
+            0.374161,
+            -0.250006,
+            0
+          ],
+          [
+            0.366972,
+            -0.245203,
+            -0.087791
+          ],
+          [
+            0.34568,
+            -0.230976,
+            -0.172208
+          ],
+          [
+            0.311104,
+            -0.207873,
+            -0.250007
+          ],
+          [
+            0.264572,
+            -0.176781,
+            -0.318198
+          ],
+          [
+            0.207873,
+            -0.138896,
+            -0.374161
+          ],
+          [
+            0.143185,
+            -0.095673,
+            -0.415746
+          ],
+          [
+            0.072995,
+            -0.048774,
+            -0.441353
+          ],
+          [
+            0.062077,
+            -0.062077,
+            0.441353
+          ],
+          [
+            0.121769,
+            -0.121769,
+            0.415746
+          ],
+          [
+            0.176781,
+            -0.176781,
+            0.374161
+          ],
+          [
+            0.225,
+            -0.225,
+            0.318198
+          ],
+          [
+            0.264572,
+            -0.264572,
+            0.250007
+          ],
+          [
+            0.293977,
+            -0.293977,
+            0.172208
+          ],
+          [
+            0.312084,
+            -0.312084,
+            0.087791
+          ],
+          [
+            0.318198,
+            -0.318198,
+            0
+          ],
+          [
+            0.312084,
+            -0.312084,
+            -0.087791
+          ],
+          [
+            0.293977,
+            -0.293977,
+            -0.172208
+          ],
+          [
+            0.264572,
+            -0.264572,
+            -0.250007
+          ],
+          [
+            0.225,
+            -0.225,
+            -0.318198
+          ],
+          [
+            0.176781,
+            -0.176781,
+            -0.374161
+          ],
+          [
+            0.121769,
+            -0.121769,
+            -0.415746
+          ],
+          [
+            0.062077,
+            -0.062077,
+            -0.441353
+          ],
+          [
+            0.048774,
+            -0.072995,
+            0.441353
+          ],
+          [
+            0.095673,
+            -0.143185,
+            0.415746
+          ],
+          [
+            0.138896,
+            -0.207873,
+            0.374161
+          ],
+          [
+            0.176781,
+            -0.264572,
+            0.318198
+          ],
+          [
+            0.207873,
+            -0.311104,
+            0.250007
+          ],
+          [
+            0.230976,
+            -0.34568,
+            0.172208
+          ],
+          [
+            0.245203,
+            -0.366972,
+            0.087791
+          ],
+          [
+            0.250006,
+            -0.374161,
+            0
+          ],
+          [
+            0.245203,
+            -0.366972,
+            -0.087791
+          ],
+          [
+            0.230976,
+            -0.34568,
+            -0.172208
+          ],
+          [
+            0.207873,
+            -0.311104,
+            -0.250007
+          ],
+          [
+            0.176781,
+            -0.264572,
+            -0.318198
+          ],
+          [
+            0.138896,
+            -0.207873,
+            -0.374161
+          ],
+          [
+            0.095673,
+            -0.143185,
+            -0.415746
+          ],
+          [
+            0.048774,
+            -0.072995,
+            -0.441353
+          ],
+          [
+            0.033596,
+            -0.081108,
+            0.441353
+          ],
+          [
+            0.065901,
+            -0.159099,
+            0.415746
+          ],
+          [
+            0.095673,
+            -0.230976,
+            0.374161
+          ],
+          [
+            0.121769,
+            -0.293977,
+            0.318198
+          ],
+          [
+            0.143185,
+            -0.34568,
+            0.250007
+          ],
+          [
+            0.159099,
+            -0.384099,
+            0.172208
+          ],
+          [
+            0.168899,
+            -0.407757,
+            0.087791
+          ],
+          [
+            0.172207,
+            -0.415746,
+            0
+          ],
+          [
+            0.168899,
+            -0.407757,
+            -0.087791
+          ],
+          [
+            0.159099,
+            -0.384099,
+            -0.172208
+          ],
+          [
+            0.143185,
+            -0.34568,
+            -0.250007
+          ],
+          [
+            0.121769,
+            -0.293977,
+            -0.318198
+          ],
+          [
+            0.095673,
+            -0.230976,
+            -0.374161
+          ],
+          [
+            0.065901,
+            -0.159099,
+            -0.415746
+          ],
+          [
+            0.033596,
+            -0.081108,
+            -0.441353
+          ],
+          [
+            0.017127,
+            -0.086104,
+            0.441353
+          ],
+          [
+            0.033596,
+            -0.168899,
+            0.415746
+          ],
+          [
+            0.048774,
+            -0.245203,
+            0.374161
+          ],
+          [
+            0.062077,
+            -0.312084,
+            0.318198
+          ],
+          [
+            0.072995,
+            -0.366972,
+            0.250007
+          ],
+          [
+            0.081108,
+            -0.407757,
+            0.172208
+          ],
+          [
+            0.086104,
+            -0.432873,
+            0.087791
+          ],
+          [
+            0.087791,
+            -0.441353,
+            0
+          ],
+          [
+            0.086104,
+            -0.432873,
+            -0.087791
+          ],
+          [
+            0.081108,
+            -0.407757,
+            -0.172208
+          ],
+          [
+            0.072995,
+            -0.366972,
+            -0.250007
+          ],
+          [
+            0.062077,
+            -0.312084,
+            -0.318198
+          ],
+          [
+            0.048774,
+            -0.245203,
+            -0.374161
+          ],
+          [
+            0.033596,
+            -0.168899,
+            -0.415746
+          ],
+          [
+            0.017127,
+            -0.086104,
+            -0.441353
+          ],
+          [
+            0,
+            -0.087791,
+            0.441353
+          ],
+          [
+            0,
+            -0.172207,
+            0.415746
+          ],
+          [
+            0,
+            -0.250006,
+            0.374161
+          ],
+          [
+            0,
+            -0.318198,
+            0.318198
+          ],
+          [
+            0,
+            -0.374161,
+            0.250007
+          ],
+          [
+            0,
+            -0.415746,
+            0.172208
+          ],
+          [
+            0,
+            -0.441353,
+            0.087791
+          ],
+          [
+            0,
+            -0.45,
+            0
+          ],
+          [
+            0,
+            -0.441353,
+            -0.087791
+          ],
+          [
+            0,
+            -0.415746,
+            -0.172208
+          ],
+          [
+            0,
+            -0.374161,
+            -0.250007
+          ],
+          [
+            0,
+            -0.318198,
+            -0.318198
+          ],
+          [
+            0,
+            -0.250006,
+            -0.374161
+          ],
+          [
+            0,
+            -0.172207,
+            -0.415746
+          ],
+          [
+            0,
+            -0.087791,
+            -0.441353
+          ],
+          [
+            -0.017127,
+            -0.086104,
+            0.441353
+          ],
+          [
+            -0.033596,
+            -0.168899,
+            0.415746
+          ],
+          [
+            -0.048774,
+            -0.245203,
+            0.374161
+          ],
+          [
+            -0.062077,
+            -0.312084,
+            0.318198
+          ],
+          [
+            -0.072995,
+            -0.366972,
+            0.250007
+          ],
+          [
+            -0.081108,
+            -0.407757,
+            0.172208
+          ],
+          [
+            -0.086104,
+            -0.432873,
+            0.087791
+          ],
+          [
+            -0.087791,
+            -0.441353,
+            0
+          ],
+          [
+            -0.086104,
+            -0.432873,
+            -0.087791
+          ],
+          [
+            -0.081108,
+            -0.407757,
+            -0.172208
+          ],
+          [
+            -0.072995,
+            -0.366972,
+            -0.250007
+          ],
+          [
+            -0.062077,
+            -0.312084,
+            -0.318198
+          ],
+          [
+            -0.048774,
+            -0.245203,
+            -0.374161
+          ],
+          [
+            -0.033596,
+            -0.168899,
+            -0.415746
+          ],
+          [
+            -0.017127,
+            -0.086104,
+            -0.441353
+          ],
+          [
+            -0.033596,
+            -0.081108,
+            0.441353
+          ],
+          [
+            -0.065901,
+            -0.159099,
+            0.415746
+          ],
+          [
+            -0.095673,
+            -0.230976,
+            0.374161
+          ],
+          [
+            -0.121769,
+            -0.293977,
+            0.318198
+          ],
+          [
+            -0.143185,
+            -0.34568,
+            0.250007
+          ],
+          [
+            -0.159099,
+            -0.384099,
+            0.172208
+          ],
+          [
+            -0.168899,
+            -0.407757,
+            0.087791
+          ],
+          [
+            -0.172207,
+            -0.415746,
+            0
+          ],
+          [
+            -0.168899,
+            -0.407757,
+            -0.087791
+          ],
+          [
+            -0.159099,
+            -0.384099,
+            -0.172208
+          ],
+          [
+            -0.143185,
+            -0.34568,
+            -0.250007
+          ],
+          [
+            -0.121769,
+            -0.293977,
+            -0.318198
+          ],
+          [
+            -0.095673,
+            -0.230976,
+            -0.374161
+          ],
+          [
+            -0.065901,
+            -0.159099,
+            -0.415746
+          ],
+          [
+            -0.033596,
+            -0.081108,
+            -0.441353
+          ],
+          [
+            -0.048774,
+            -0.072995,
+            0.441353
+          ],
+          [
+            -0.095673,
+            -0.143185,
+            0.415746
+          ],
+          [
+            -0.138896,
+            -0.207873,
+            0.374161
+          ],
+          [
+            -0.176781,
+            -0.264572,
+            0.318198
+          ],
+          [
+            -0.207873,
+            -0.311103,
+            0.250007
+          ],
+          [
+            -0.230976,
+            -0.34568,
+            0.172208
+          ],
+          [
+            -0.245203,
+            -0.366972,
+            0.087791
+          ],
+          [
+            -0.250006,
+            -0.374161,
+            0
+          ],
+          [
+            -0.245203,
+            -0.366972,
+            -0.087791
+          ],
+          [
+            -0.230976,
+            -0.34568,
+            -0.172208
+          ],
+          [
+            -0.207873,
+            -0.311103,
+            -0.250007
+          ],
+          [
+            -0.176781,
+            -0.264572,
+            -0.318198
+          ],
+          [
+            -0.138896,
+            -0.207873,
+            -0.374161
+          ],
+          [
+            -0.095673,
+            -0.143185,
+            -0.415746
+          ],
+          [
+            -0.048774,
+            -0.072995,
+            -0.441353
+          ],
+          [
+            -0.062077,
+            -0.062077,
+            0.441353
+          ],
+          [
+            -0.121769,
+            -0.121769,
+            0.415746
+          ],
+          [
+            -0.176781,
+            -0.176781,
+            0.374161
+          ],
+          [
+            -0.225,
+            -0.225,
+            0.318198
+          ],
+          [
+            -0.264572,
+            -0.264572,
+            0.250007
+          ],
+          [
+            -0.293977,
+            -0.293976,
+            0.172208
+          ],
+          [
+            -0.312084,
+            -0.312084,
+            0.087791
+          ],
+          [
+            -0.318198,
+            -0.318198,
+            0
+          ],
+          [
+            -0.312084,
+            -0.312084,
+            -0.087791
+          ],
+          [
+            -0.293977,
+            -0.293976,
+            -0.172208
+          ],
+          [
+            -0.264572,
+            -0.264572,
+            -0.250007
+          ],
+          [
+            -0.225,
+            -0.225,
+            -0.318198
+          ],
+          [
+            -0.176781,
+            -0.176781,
+            -0.374161
+          ],
+          [
+            -0.121769,
+            -0.121769,
+            -0.415746
+          ],
+          [
+            -0.062077,
+            -0.062077,
+            -0.441353
+          ],
+          [
+            -0.072995,
+            -0.048774,
+            0.441353
+          ],
+          [
+            -0.143185,
+            -0.095673,
+            0.415746
+          ],
+          [
+            -0.207873,
+            -0.138896,
+            0.374161
+          ],
+          [
+            -0.264572,
+            -0.176781,
+            0.318198
+          ],
+          [
+            -0.311104,
+            -0.207873,
+            0.250007
+          ],
+          [
+            -0.34568,
+            -0.230976,
+            0.172208
+          ],
+          [
+            -0.366972,
+            -0.245203,
+            0.087791
+          ],
+          [
+            -0.374161,
+            -0.250006,
+            0
+          ],
+          [
+            -0.366972,
+            -0.245203,
+            -0.087791
+          ],
+          [
+            -0.34568,
+            -0.230976,
+            -0.172208
+          ],
+          [
+            -0.311104,
+            -0.207873,
+            -0.250007
+          ],
+          [
+            -0.264572,
+            -0.176781,
+            -0.318198
+          ],
+          [
+            -0.207873,
+            -0.138896,
+            -0.374161
+          ],
+          [
+            -0.143185,
+            -0.095673,
+            -0.415746
+          ],
+          [
+            -0.072995,
+            -0.048774,
+            -0.441353
+          ],
+          [
+            -0.081108,
+            -0.033596,
+            0.441353
+          ],
+          [
+            -0.159099,
+            -0.065901,
+            0.415746
+          ],
+          [
+            -0.230976,
+            -0.095673,
+            0.374161
+          ],
+          [
+            -0.293976,
+            -0.121769,
+            0.318198
+          ],
+          [
+            -0.34568,
+            -0.143185,
+            0.250007
+          ],
+          [
+            -0.384099,
+            -0.159099,
+            0.172208
+          ],
+          [
+            -0.407757,
+            -0.168899,
+            0.087791
+          ],
+          [
+            -0.415746,
+            -0.172207,
+            0
+          ],
+          [
+            -0.407757,
+            -0.168899,
+            -0.087791
+          ],
+          [
+            -0.384099,
+            -0.159099,
+            -0.172208
+          ],
+          [
+            -0.34568,
+            -0.143185,
+            -0.250007
+          ],
+          [
+            -0.293976,
+            -0.121769,
+            -0.318198
+          ],
+          [
+            -0.230976,
+            -0.095673,
+            -0.374161
+          ],
+          [
+            -0.159099,
+            -0.065901,
+            -0.415746
+          ],
+          [
+            -0.081108,
+            -0.033596,
+            -0.441353
+          ],
+          [
+            -0.086104,
+            -0.017127,
+            0.441353
+          ],
+          [
+            -0.168898,
+            -0.033596,
+            0.415746
+          ],
+          [
+            -0.245203,
+            -0.048774,
+            0.374161
+          ],
+          [
+            -0.312084,
+            -0.062077,
+            0.318198
+          ],
+          [
+            -0.366972,
+            -0.072995,
+            0.250007
+          ],
+          [
+            -0.407757,
+            -0.081108,
+            0.172208
+          ],
+          [
+            -0.432873,
+            -0.086104,
+            0.087791
+          ],
+          [
+            -0.441353,
+            -0.08779,
+            0
+          ],
+          [
+            -0.432873,
+            -0.086104,
+            -0.087791
+          ],
+          [
+            -0.407757,
+            -0.081108,
+            -0.172208
+          ],
+          [
+            -0.366972,
+            -0.072995,
+            -0.250007
+          ],
+          [
+            -0.312084,
+            -0.062077,
+            -0.318198
+          ],
+          [
+            -0.245203,
+            -0.048774,
+            -0.374161
+          ],
+          [
+            -0.168898,
+            -0.033596,
+            -0.415746
+          ],
+          [
+            -0.086104,
+            -0.017127,
+            -0.441353
+          ],
+          [
+            -0.087791,
+            0,
+            0.441353
+          ],
+          [
+            -0.172207,
+            0,
+            0.415746
+          ],
+          [
+            -0.250006,
+            0,
+            0.374161
+          ],
+          [
+            -0.318198,
+            0,
+            0.318198
+          ],
+          [
+            -0.374161,
+            0,
+            0.250007
+          ],
+          [
+            -0.415745,
+            0,
+            0.172208
+          ],
+          [
+            -0.441353,
+            0,
+            0.087791
+          ],
+          [
+            -0.45,
+            0,
+            0
+          ],
+          [
+            -0.441353,
+            0,
+            -0.087791
+          ],
+          [
+            -0.415745,
+            0,
+            -0.172208
+          ],
+          [
+            -0.374161,
+            0,
+            -0.250007
+          ],
+          [
+            -0.318198,
+            0,
+            -0.318198
+          ],
+          [
+            -0.250006,
+            0,
+            -0.374161
+          ],
+          [
+            -0.172207,
+            0,
+            -0.415746
+          ],
+          [
+            -0.087791,
+            0,
+            -0.441353
+          ],
+          [
+            -0.086104,
+            0.017127,
+            0.441353
+          ],
+          [
+            -0.168898,
+            0.033596,
+            0.415746
+          ],
+          [
+            -0.245203,
+            0.048774,
+            0.374161
+          ],
+          [
+            -0.312084,
+            0.062077,
+            0.318198
+          ],
+          [
+            -0.366972,
+            0.072995,
+            0.250007
+          ],
+          [
+            -0.407757,
+            0.081108,
+            0.172208
+          ],
+          [
+            -0.432873,
+            0.086104,
+            0.087791
+          ],
+          [
+            -0.441353,
+            0.087791,
+            0
+          ],
+          [
+            -0.432873,
+            0.086104,
+            -0.087791
+          ],
+          [
+            -0.407757,
+            0.081108,
+            -0.172208
+          ],
+          [
+            -0.366972,
+            0.072995,
+            -0.250007
+          ],
+          [
+            -0.312084,
+            0.062077,
+            -0.318198
+          ],
+          [
+            -0.245203,
+            0.048774,
+            -0.374161
+          ],
+          [
+            -0.168898,
+            0.033596,
+            -0.415746
+          ],
+          [
+            -0.086104,
+            0.017127,
+            -0.441353
+          ],
+          [
+            -0.081108,
+            0.033596,
+            0.441353
+          ],
+          [
+            -0.159099,
+            0.065901,
+            0.415746
+          ],
+          [
+            -0.230976,
+            0.095673,
+            0.374161
+          ],
+          [
+            -0.293976,
+            0.121769,
+            0.318198
+          ],
+          [
+            -0.34568,
+            0.143185,
+            0.250007
+          ],
+          [
+            -0.384099,
+            0.159099,
+            0.172208
+          ],
+          [
+            -0.407757,
+            0.168899,
+            0.087791
+          ],
+          [
+            -0.415745,
+            0.172207,
+            0
+          ],
+          [
+            -0.407757,
+            0.168899,
+            -0.087791
+          ],
+          [
+            -0.384099,
+            0.159099,
+            -0.172208
+          ],
+          [
+            -0.34568,
+            0.143185,
+            -0.250007
+          ],
+          [
+            -0.293976,
+            0.121769,
+            -0.318198
+          ],
+          [
+            -0.230976,
+            0.095673,
+            -0.374161
+          ],
+          [
+            -0.159099,
+            0.065901,
+            -0.415746
+          ],
+          [
+            -0.081108,
+            0.033596,
+            -0.441353
+          ],
+          [
+            -0.072995,
+            0.048774,
+            0.441353
+          ],
+          [
+            -0.143185,
+            0.095673,
+            0.415746
+          ],
+          [
+            -0.207873,
+            0.138896,
+            0.374161
+          ],
+          [
+            -0.264572,
+            0.176781,
+            0.318198
+          ],
+          [
+            -0.311103,
+            0.207873,
+            0.250007
+          ],
+          [
+            -0.34568,
+            0.230976,
+            0.172208
+          ],
+          [
+            -0.366972,
+            0.245203,
+            0.087791
+          ],
+          [
+            -0.374161,
+            0.250006,
+            0
+          ],
+          [
+            -0.366972,
+            0.245203,
+            -0.087791
+          ],
+          [
+            -0.34568,
+            0.230976,
+            -0.172208
+          ],
+          [
+            -0.311103,
+            0.207873,
+            -0.250007
+          ],
+          [
+            -0.264572,
+            0.176781,
+            -0.318198
+          ],
+          [
+            -0.207873,
+            0.138896,
+            -0.374161
+          ],
+          [
+            -0.143185,
+            0.095673,
+            -0.415746
+          ],
+          [
+            -0.072995,
+            0.048774,
+            -0.441353
+          ],
+          [
+            -0.062077,
+            0.062077,
+            0.441353
+          ],
+          [
+            -0.121769,
+            0.121769,
+            0.415746
+          ],
+          [
+            -0.176781,
+            0.176781,
+            0.374161
+          ],
+          [
+            -0.225,
+            0.225,
+            0.318198
+          ],
+          [
+            -0.264572,
+            0.264572,
+            0.250007
+          ],
+          [
+            -0.293976,
+            0.293976,
+            0.172208
+          ],
+          [
+            -0.312084,
+            0.312084,
+            0.087791
+          ],
+          [
+            -0.318198,
+            0.318198,
+            0
+          ],
+          [
+            -0.312084,
+            0.312084,
+            -0.087791
+          ],
+          [
+            -0.293976,
+            0.293976,
+            -0.172208
+          ],
+          [
+            -0.264572,
+            0.264572,
+            -0.250007
+          ],
+          [
+            -0.225,
+            0.225,
+            -0.318198
+          ],
+          [
+            -0.176781,
+            0.176781,
+            -0.374161
+          ],
+          [
+            -0.121769,
+            0.121769,
+            -0.415746
+          ],
+          [
+            -0.062077,
+            0.062077,
+            -0.441353
+          ],
+          [
+            -0.048774,
+            0.072995,
+            0.441353
+          ],
+          [
+            -0.095673,
+            0.143185,
+            0.415746
+          ],
+          [
+            -0.138896,
+            0.207873,
+            0.374161
+          ],
+          [
+            -0.176781,
+            0.264572,
+            0.318198
+          ],
+          [
+            -0.207873,
+            0.311103,
+            0.250007
+          ],
+          [
+            -0.230976,
+            0.34568,
+            0.172208
+          ],
+          [
+            -0.245203,
+            0.366972,
+            0.087791
+          ],
+          [
+            -0.250006,
+            0.374161,
+            0
+          ],
+          [
+            -0.245203,
+            0.366972,
+            -0.087791
+          ],
+          [
+            -0.230976,
+            0.34568,
+            -0.172208
+          ],
+          [
+            -0.207873,
+            0.311103,
+            -0.250007
+          ],
+          [
+            -0.176781,
+            0.264572,
+            -0.318198
+          ],
+          [
+            -0.138896,
+            0.207873,
+            -0.374161
+          ],
+          [
+            -0.095673,
+            0.143185,
+            -0.415746
+          ],
+          [
+            -0.048774,
+            0.072995,
+            -0.441353
+          ],
+          [
+            -0.033596,
+            0.081108,
+            0.441353
+          ],
+          [
+            -0.065901,
+            0.159099,
+            0.415746
+          ],
+          [
+            -0.095673,
+            0.230976,
+            0.374161
+          ],
+          [
+            -0.121769,
+            0.293976,
+            0.318198
+          ],
+          [
+            -0.143185,
+            0.34568,
+            0.250007
+          ],
+          [
+            -0.159099,
+            0.384099,
+            0.172208
+          ],
+          [
+            -0.168899,
+            0.407757,
+            0.087791
+          ],
+          [
+            -0.172207,
+            0.415745,
+            0
+          ],
+          [
+            -0.168899,
+            0.407757,
+            -0.087791
+          ],
+          [
+            -0.159099,
+            0.384099,
+            -0.172208
+          ],
+          [
+            -0.143185,
+            0.34568,
+            -0.250007
+          ],
+          [
+            -0.121769,
+            0.293976,
+            -0.318198
+          ],
+          [
+            -0.095673,
+            0.230976,
+            -0.374161
+          ],
+          [
+            -0.065901,
+            0.159099,
+            -0.415746
+          ],
+          [
+            -0.033596,
+            0.081108,
+            -0.441353
+          ],
+          [
+            -0.017127,
+            0.086104,
+            0.441353
+          ],
+          [
+            -0.033596,
+            0.168898,
+            0.415746
+          ],
+          [
+            -0.048774,
+            0.245202,
+            0.374161
+          ],
+          [
+            -0.062077,
+            0.312084,
+            0.318198
+          ],
+          [
+            -0.072995,
+            0.366972,
+            0.250007
+          ],
+          [
+            -0.081108,
+            0.407757,
+            0.172208
+          ],
+          [
+            -0.086104,
+            0.432873,
+            0.087791
+          ],
+          [
+            -0.08779,
+            0.441353,
+            0
+          ],
+          [
+            -0.086104,
+            0.432873,
+            -0.087791
+          ],
+          [
+            -0.081108,
+            0.407757,
+            -0.172208
+          ],
+          [
+            -0.072995,
+            0.366972,
+            -0.250007
+          ],
+          [
+            -0.062077,
+            0.312084,
+            -0.318198
+          ],
+          [
+            -0.048774,
+            0.245202,
+            -0.374161
+          ],
+          [
+            -0.033596,
+            0.168898,
+            -0.415746
+          ],
+          [
+            -0.017127,
+            0.086104,
+            -0.441353
+          ],
+          [
+            0,
+            0.087791,
+            0.441353
+          ],
+          [
+            0,
+            0.172207,
+            0.415746
+          ],
+          [
+            0,
+            0.318198,
+            0.318198
+          ],
+          [
+            0,
+            0.318198,
+            -0.318198
+          ],
+          [
+            0,
+            0.172207,
+            -0.415746
+          ],
+          [
+            0,
+            0.087791,
+            -0.441353
+          ]
+        ],
+        "faces": [
+          [
+            2,
+            478,
+            14,
+            15
+          ],
+          [
+            7,
+            6,
+            19,
+            20
+          ],
+          [
+            10,
+            481,
+            25
+          ],
+          [
+            481,
+            480,
+            24,
+            25
+          ],
+          [
+            478,
+            1,
+            13,
+            14
+          ],
+          [
+            1,
+            477,
+            12,
+            13
+          ],
+          [
+            6,
+            5,
+            18,
+            19
+          ],
+          [
+            480,
+            9,
+            23,
+            24
+          ],
+          [
+            477,
+            476,
+            11,
+            12
+          ],
+          [
+            5,
+            4,
+            17,
+            18
+          ],
+          [
+            4,
+            3,
+            16,
+            17
+          ],
+          [
+            9,
+            479,
+            22,
+            23
+          ],
+          [
+            476,
+            0,
+            11
+          ],
+          [
+            3,
+            2,
+            15,
+            16
+          ],
+          [
+            479,
+            8,
+            21,
+            22
+          ],
+          [
+            8,
+            7,
+            20,
+            21
+          ],
+          [
+            16,
+            15,
+            30,
+            31
+          ],
+          [
+            22,
+            21,
+            36,
+            37
+          ],
+          [
+            21,
+            20,
+            35,
+            36
+          ],
+          [
+            15,
+            14,
+            29,
+            30
+          ],
+          [
+            20,
+            19,
+            34,
+            35
+          ],
+          [
+            10,
+            25,
+            40
+          ],
+          [
+            25,
+            24,
+            39,
+            40
+          ],
+          [
+            14,
+            13,
+            28,
+            29
+          ],
+          [
+            13,
+            12,
+            27,
+            28
+          ],
+          [
+            19,
+            18,
+            33,
+            34
+          ],
+          [
+            24,
+            23,
+            38,
+            39
+          ],
+          [
+            12,
+            11,
+            26,
+            27
+          ],
+          [
+            18,
+            17,
+            32,
+            33
+          ],
+          [
+            17,
+            16,
+            31,
+            32
+          ],
+          [
+            23,
+            22,
+            37,
+            38
+          ],
+          [
+            11,
+            0,
+            26
+          ],
+          [
+            38,
+            37,
+            52,
+            53
+          ],
+          [
+            26,
+            0,
+            41
+          ],
+          [
+            32,
+            31,
+            46,
+            47
+          ],
+          [
+            31,
+            30,
+            45,
+            46
+          ],
+          [
+            37,
+            36,
+            51,
+            52
+          ],
+          [
+            30,
+            29,
+            44,
+            45
+          ],
+          [
+            36,
+            35,
+            50,
+            51
+          ],
+          [
+            35,
+            34,
+            49,
+            50
+          ],
+          [
+            10,
+            40,
+            55
+          ],
+          [
+            29,
+            28,
+            43,
+            44
+          ],
+          [
+            34,
+            33,
+            48,
+            49
+          ],
+          [
+            40,
+            39,
+            54,
+            55
+          ],
+          [
+            39,
+            38,
+            53,
+            54
+          ],
+          [
+            28,
+            27,
+            42,
+            43
+          ],
+          [
+            27,
+            26,
+            41,
+            42
+          ],
+          [
+            33,
+            32,
+            47,
+            48
+          ],
+          [
+            43,
+            42,
+            57,
+            58
+          ],
+          [
+            48,
+            47,
+            62,
+            63
+          ],
+          [
+            54,
+            53,
+            68,
+            69
+          ],
+          [
+            53,
+            52,
+            67,
+            68
+          ],
+          [
+            42,
+            41,
+            56,
+            57
+          ],
+          [
+            41,
+            0,
+            56
+          ],
+          [
+            47,
+            46,
+            61,
+            62
+          ],
+          [
+            52,
+            51,
+            66,
+            67
+          ],
+          [
+            46,
+            45,
+            60,
+            61
+          ],
+          [
+            45,
+            44,
+            59,
+            60
+          ],
+          [
+            51,
+            50,
+            65,
+            66
+          ],
+          [
+            10,
+            55,
+            70
+          ],
+          [
+            44,
+            43,
+            58,
+            59
+          ],
+          [
+            50,
+            49,
+            64,
+            65
+          ],
+          [
+            49,
+            48,
+            63,
+            64
+          ],
+          [
+            55,
+            54,
+            69,
+            70
+          ],
+          [
+            70,
+            69,
+            84,
+            85
+          ],
+          [
+            58,
+            57,
+            72,
+            73
+          ],
+          [
+            64,
+            63,
+            78,
+            79
+          ],
+          [
+            63,
+            62,
+            77,
+            78
+          ],
+          [
+            69,
+            68,
+            83,
+            84
+          ],
+          [
+            57,
+            56,
+            71,
+            72
+          ],
+          [
+            62,
+            61,
+            76,
+            77
+          ],
+          [
+            68,
+            67,
+            82,
+            83
+          ],
+          [
+            67,
+            66,
+            81,
+            82
+          ],
+          [
+            56,
+            0,
+            71
+          ],
+          [
+            61,
+            60,
+            75,
+            76
+          ],
+          [
+            66,
+            65,
+            80,
+            81
+          ],
+          [
+            10,
+            70,
+            85
+          ],
+          [
+            60,
+            59,
+            74,
+            75
+          ],
+          [
+            59,
+            58,
+            73,
+            74
+          ],
+          [
+            65,
+            64,
+            79,
+            80
+          ],
+          [
+            75,
+            74,
+            89,
+            90
+          ],
+          [
+            80,
+            79,
+            94,
+            95
+          ],
+          [
+            10,
+            85,
+            100
+          ],
+          [
+            85,
+            84,
+            99,
+            100
+          ],
+          [
+            74,
+            73,
+            88,
+            89
+          ],
+          [
+            73,
+            72,
+            87,
+            88
+          ],
+          [
+            79,
+            78,
+            93,
+            94
+          ],
+          [
+            84,
+            83,
+            98,
+            99
+          ],
+          [
+            72,
+            71,
+            86,
+            87
+          ],
+          [
+            78,
+            77,
+            92,
+            93
+          ],
+          [
+            77,
+            76,
+            91,
+            92
+          ],
+          [
+            83,
+            82,
+            97,
+            98
+          ],
+          [
+            71,
+            0,
+            86
+          ],
+          [
+            76,
+            75,
+            90,
+            91
+          ],
+          [
+            82,
+            81,
+            96,
+            97
+          ],
+          [
+            81,
+            80,
+            95,
+            96
+          ],
+          [
+            91,
+            90,
+            105,
+            106
+          ],
+          [
+            97,
+            96,
+            111,
+            112
+          ],
+          [
+            90,
+            89,
+            104,
+            105
+          ],
+          [
+            96,
+            95,
+            110,
+            111
+          ],
+          [
+            95,
+            94,
+            109,
+            110
+          ],
+          [
+            10,
+            100,
+            115
+          ],
+          [
+            89,
+            88,
+            103,
+            104
+          ],
+          [
+            94,
+            93,
+            108,
+            109
+          ],
+          [
+            100,
+            99,
+            114,
+            115
+          ],
+          [
+            99,
+            98,
+            113,
+            114
+          ],
+          [
+            88,
+            87,
+            102,
+            103
+          ],
+          [
+            87,
+            86,
+            101,
+            102
+          ],
+          [
+            93,
+            92,
+            107,
+            108
+          ],
+          [
+            98,
+            97,
+            112,
+            113
+          ],
+          [
+            86,
+            0,
+            101
+          ],
+          [
+            92,
+            91,
+            106,
+            107
+          ],
+          [
+            102,
+            101,
+            116,
+            117
+          ],
+          [
+            101,
+            0,
+            116
+          ],
+          [
+            107,
+            106,
+            121,
+            122
+          ],
+          [
+            112,
+            111,
+            126,
+            127
+          ],
+          [
+            106,
+            105,
+            120,
+            121
+          ],
+          [
+            105,
+            104,
+            119,
+            120
+          ],
+          [
+            111,
+            110,
+            125,
+            126
+          ],
+          [
+            10,
+            115,
+            130
+          ],
+          [
+            104,
+            103,
+            118,
+            119
+          ],
+          [
+            110,
+            109,
+            124,
+            125
+          ],
+          [
+            109,
+            108,
+            123,
+            124
+          ],
+          [
+            115,
+            114,
+            129,
+            130
+          ],
+          [
+            103,
+            102,
+            117,
+            118
+          ],
+          [
+            108,
+            107,
+            122,
+            123
+          ],
+          [
+            114,
+            113,
+            128,
+            129
+          ],
+          [
+            113,
+            112,
+            127,
+            128
+          ],
+          [
+            124,
+            123,
+            138,
+            139
+          ],
+          [
+            123,
+            122,
+            137,
+            138
+          ],
+          [
+            129,
+            128,
+            143,
+            144
+          ],
+          [
+            117,
+            116,
+            131,
+            132
+          ],
+          [
+            122,
+            121,
+            136,
+            137
+          ],
+          [
+            128,
+            127,
+            142,
+            143
+          ],
+          [
+            127,
+            126,
+            141,
+            142
+          ],
+          [
+            116,
+            0,
+            131
+          ],
+          [
+            121,
+            120,
+            135,
+            136
+          ],
+          [
+            126,
+            125,
+            140,
+            141
+          ],
+          [
+            10,
+            130,
+            145
+          ],
+          [
+            120,
+            119,
+            134,
+            135
+          ],
+          [
+            119,
+            118,
+            133,
+            134
+          ],
+          [
+            125,
+            124,
+            139,
+            140
+          ],
+          [
+            130,
+            129,
+            144,
+            145
+          ],
+          [
+            118,
+            117,
+            132,
+            133
+          ],
+          [
+            145,
+            144,
+            159,
+            160
+          ],
+          [
+            134,
+            133,
+            148,
+            149
+          ],
+          [
+            133,
+            132,
+            147,
+            148
+          ],
+          [
+            139,
+            138,
+            153,
+            154
+          ],
+          [
+            144,
+            143,
+            158,
+            159
+          ],
+          [
+            132,
+            131,
+            146,
+            147
+          ],
+          [
+            138,
+            137,
+            152,
+            153
+          ],
+          [
+            137,
+            136,
+            151,
+            152
+          ],
+          [
+            143,
+            142,
+            157,
+            158
+          ],
+          [
+            131,
+            0,
+            146
+          ],
+          [
+            136,
+            135,
+            150,
+            151
+          ],
+          [
+            142,
+            141,
+            156,
+            157
+          ],
+          [
+            141,
+            140,
+            155,
+            156
+          ],
+          [
+            135,
+            134,
+            149,
+            150
+          ],
+          [
+            140,
+            139,
+            154,
+            155
+          ],
+          [
+            10,
+            145,
+            160
+          ],
+          [
+            150,
+            149,
+            164,
+            165
+          ],
+          [
+            156,
+            155,
+            170,
+            171
+          ],
+          [
+            155,
+            154,
+            169,
+            170
+          ],
+          [
+            10,
+            160,
+            175
+          ],
+          [
+            149,
+            148,
+            163,
+            164
+          ],
+          [
+            154,
+            153,
+            168,
+            169
+          ],
+          [
+            160,
+            159,
+            174,
+            175
+          ],
+          [
+            159,
+            158,
+            173,
+            174
+          ],
+          [
+            148,
+            147,
+            162,
+            163
+          ],
+          [
+            147,
+            146,
+            161,
+            162
+          ],
+          [
+            153,
+            152,
+            167,
+            168
+          ],
+          [
+            158,
+            157,
+            172,
+            173
+          ],
+          [
+            146,
+            0,
+            161
+          ],
+          [
+            152,
+            151,
+            166,
+            167
+          ],
+          [
+            151,
+            150,
+            165,
+            166
+          ],
+          [
+            157,
+            156,
+            171,
+            172
+          ],
+          [
+            172,
+            171,
+            186,
+            187
+          ],
+          [
+            166,
+            165,
+            180,
+            181
+          ],
+          [
+            165,
+            164,
+            179,
+            180
+          ],
+          [
+            171,
+            170,
+            185,
+            186
+          ],
+          [
+            10,
+            175,
+            190
+          ],
+          [
+            164,
+            163,
+            178,
+            179
+          ],
+          [
+            170,
+            169,
+            184,
+            185
+          ],
+          [
+            169,
+            168,
+            183,
+            184
+          ],
+          [
+            175,
+            174,
+            189,
+            190
+          ],
+          [
+            163,
+            162,
+            177,
+            178
+          ],
+          [
+            168,
+            167,
+            182,
+            183
+          ],
+          [
+            174,
+            173,
+            188,
+            189
+          ],
+          [
+            173,
+            172,
+            187,
+            188
+          ],
+          [
+            162,
+            161,
+            176,
+            177
+          ],
+          [
+            161,
+            0,
+            176
+          ],
+          [
+            167,
+            166,
+            181,
+            182
+          ],
+          [
+            177,
+            176,
+            191,
+            192
+          ],
+          [
+            182,
+            181,
+            196,
+            197
+          ],
+          [
+            188,
+            187,
+            202,
+            203
+          ],
+          [
+            187,
+            186,
+            201,
+            202
+          ],
+          [
+            176,
+            0,
+            191
+          ],
+          [
+            181,
+            180,
+            195,
+            196
+          ],
+          [
+            186,
+            185,
+            200,
+            201
+          ],
+          [
+            10,
+            190,
+            205
+          ],
+          [
+            180,
+            179,
+            194,
+            195
+          ],
+          [
+            179,
+            178,
+            193,
+            194
+          ],
+          [
+            185,
+            184,
+            199,
+            200
+          ],
+          [
+            190,
+            189,
+            204,
+            205
+          ],
+          [
+            178,
+            177,
+            192,
+            193
+          ],
+          [
+            184,
+            183,
+            198,
+            199
+          ],
+          [
+            183,
+            182,
+            197,
+            198
+          ],
+          [
+            189,
+            188,
+            203,
+            204
+          ],
+          [
+            204,
+            203,
+            218,
+            219
+          ],
+          [
+            192,
+            191,
+            206,
+            207
+          ],
+          [
+            198,
+            197,
+            212,
+            213
+          ],
+          [
+            197,
+            196,
+            211,
+            212
+          ],
+          [
+            203,
+            202,
+            217,
+            218
+          ],
+          [
+            191,
+            0,
+            206
+          ],
+          [
+            196,
+            195,
+            210,
+            211
+          ],
+          [
+            202,
+            201,
+            216,
+            217
+          ],
+          [
+            201,
+            200,
+            215,
+            216
+          ],
+          [
+            195,
+            194,
+            209,
+            210
+          ],
+          [
+            200,
+            199,
+            214,
+            215
+          ],
+          [
+            10,
+            205,
+            220
+          ],
+          [
+            205,
+            204,
+            219,
+            220
+          ],
+          [
+            194,
+            193,
+            208,
+            209
+          ],
+          [
+            193,
+            192,
+            207,
+            208
+          ],
+          [
+            199,
+            198,
+            213,
+            214
+          ],
+          [
+            209,
+            208,
+            223,
+            224
+          ],
+          [
+            214,
+            213,
+            228,
+            229
+          ],
+          [
+            220,
+            219,
+            234,
+            235
+          ],
+          [
+            219,
+            218,
+            233,
+            234
+          ],
+          [
+            208,
+            207,
+            222,
+            223
+          ],
+          [
+            207,
+            206,
+            221,
+            222
+          ],
+          [
+            213,
+            212,
+            227,
+            228
+          ],
+          [
+            218,
+            217,
+            232,
+            233
+          ],
+          [
+            206,
+            0,
+            221
+          ],
+          [
+            212,
+            211,
+            226,
+            227
+          ],
+          [
+            211,
+            210,
+            225,
+            226
+          ],
+          [
+            217,
+            216,
+            231,
+            232
+          ],
+          [
+            210,
+            209,
+            224,
+            225
+          ],
+          [
+            216,
+            215,
+            230,
+            231
+          ],
+          [
+            215,
+            214,
+            229,
+            230
+          ],
+          [
+            10,
+            220,
+            235
+          ],
+          [
+            225,
+            224,
+            239,
+            240
+          ],
+          [
+            231,
+            230,
+            245,
+            246
+          ],
+          [
+            10,
+            235,
+            250
+          ],
+          [
+            224,
+            223,
+            238,
+            239
+          ],
+          [
+            230,
+            229,
+            244,
+            245
+          ],
+          [
+            229,
+            228,
+            243,
+            244
+          ],
+          [
+            235,
+            234,
+            249,
+            250
+          ],
+          [
+            223,
+            222,
+            237,
+            238
+          ],
+          [
+            228,
+            227,
+            242,
+            243
+          ],
+          [
+            234,
+            233,
+            248,
+            249
+          ],
+          [
+            233,
+            232,
+            247,
+            248
+          ],
+          [
+            222,
+            221,
+            236,
+            237
+          ],
+          [
+            221,
+            0,
+            236
+          ],
+          [
+            227,
+            226,
+            241,
+            242
+          ],
+          [
+            232,
+            231,
+            246,
+            247
+          ],
+          [
+            226,
+            225,
+            240,
+            241
+          ],
+          [
+            236,
+            0,
+            251
+          ],
+          [
+            241,
+            240,
+            255,
+            256
+          ],
+          [
+            246,
+            245,
+            260,
+            261
+          ],
+          [
+            10,
+            250,
+            265
+          ],
+          [
+            240,
+            239,
+            254,
+            255
+          ],
+          [
+            239,
+            238,
+            253,
+            254
+          ],
+          [
+            245,
+            244,
+            259,
+            260
+          ],
+          [
+            250,
+            249,
+            264,
+            265
+          ],
+          [
+            238,
+            237,
+            252,
+            253
+          ],
+          [
+            244,
+            243,
+            258,
+            259
+          ],
+          [
+            243,
+            242,
+            257,
+            258
+          ],
+          [
+            249,
+            248,
+            263,
+            264
+          ],
+          [
+            237,
+            236,
+            251,
+            252
+          ],
+          [
+            242,
+            241,
+            256,
+            257
+          ],
+          [
+            248,
+            247,
+            262,
+            263
+          ],
+          [
+            247,
+            246,
+            261,
+            262
+          ],
+          [
+            258,
+            257,
+            272,
+            273
+          ],
+          [
+            257,
+            256,
+            271,
+            272
+          ],
+          [
+            263,
+            262,
+            277,
+            278
+          ],
+          [
+            251,
+            0,
+            266
+          ],
+          [
+            256,
+            255,
+            270,
+            271
+          ],
+          [
+            262,
+            261,
+            276,
+            277
+          ],
+          [
+            261,
+            260,
+            275,
+            276
+          ],
+          [
+            255,
+            254,
+            269,
+            270
+          ],
+          [
+            260,
+            259,
+            274,
+            275
+          ],
+          [
+            10,
+            265,
+            280
+          ],
+          [
+            265,
+            264,
+            279,
+            280
+          ],
+          [
+            254,
+            253,
+            268,
+            269
+          ],
+          [
+            253,
+            252,
+            267,
+            268
+          ],
+          [
+            259,
+            258,
+            273,
+            274
+          ],
+          [
+            264,
+            263,
+            278,
+            279
+          ],
+          [
+            252,
+            251,
+            266,
+            267
+          ],
+          [
+            279,
+            278,
+            293,
+            294
+          ],
+          [
+            268,
+            267,
+            282,
+            283
+          ],
+          [
+            267,
+            266,
+            281,
+            282
+          ],
+          [
+            273,
+            272,
+            287,
+            288
+          ],
+          [
+            278,
+            277,
+            292,
+            293
+          ],
+          [
+            266,
+            0,
+            281
+          ],
+          [
+            272,
+            271,
+            286,
+            287
+          ],
+          [
+            271,
+            270,
+            285,
+            286
+          ],
+          [
+            277,
+            276,
+            291,
+            292
+          ],
+          [
+            270,
+            269,
+            284,
+            285
+          ],
+          [
+            276,
+            275,
+            290,
+            291
+          ],
+          [
+            275,
+            274,
+            289,
+            290
+          ],
+          [
+            10,
+            280,
+            295
+          ],
+          [
+            269,
+            268,
+            283,
+            284
+          ],
+          [
+            274,
+            273,
+            288,
+            289
+          ],
+          [
+            280,
+            279,
+            294,
+            295
+          ],
+          [
+            284,
+            283,
+            298,
+            299
+          ],
+          [
+            290,
+            289,
+            304,
+            305
+          ],
+          [
+            289,
+            288,
+            303,
+            304
+          ],
+          [
+            295,
+            294,
+            309,
+            310
+          ],
+          [
+            283,
+            282,
+            297,
+            298
+          ],
+          [
+            288,
+            287,
+            302,
+            303
+          ],
+          [
+            294,
+            293,
+            308,
+            309
+          ],
+          [
+            293,
+            292,
+            307,
+            308
+          ],
+          [
+            282,
+            281,
+            296,
+            297
+          ],
+          [
+            281,
+            0,
+            296
+          ],
+          [
+            287,
+            286,
+            301,
+            302
+          ],
+          [
+            292,
+            291,
+            306,
+            307
+          ],
+          [
+            286,
+            285,
+            300,
+            301
+          ],
+          [
+            285,
+            284,
+            299,
+            300
+          ],
+          [
+            291,
+            290,
+            305,
+            306
+          ],
+          [
+            10,
+            295,
+            310
+          ],
+          [
+            306,
+            305,
+            320,
+            321
+          ],
+          [
+            10,
+            310,
+            325
+          ],
+          [
+            300,
+            299,
+            314,
+            315
+          ],
+          [
+            299,
+            298,
+            313,
+            314
+          ],
+          [
+            305,
+            304,
+            319,
+            320
+          ],
+          [
+            310,
+            309,
+            324,
+            325
+          ],
+          [
+            298,
+            297,
+            312,
+            313
+          ],
+          [
+            304,
+            303,
+            318,
+            319
+          ],
+          [
+            303,
+            302,
+            317,
+            318
+          ],
+          [
+            309,
+            308,
+            323,
+            324
+          ],
+          [
+            297,
+            296,
+            311,
+            312
+          ],
+          [
+            302,
+            301,
+            316,
+            317
+          ],
+          [
+            308,
+            307,
+            322,
+            323
+          ],
+          [
+            307,
+            306,
+            321,
+            322
+          ],
+          [
+            296,
+            0,
+            311
+          ],
+          [
+            301,
+            300,
+            315,
+            316
+          ],
+          [
+            311,
+            0,
+            326
+          ],
+          [
+            316,
+            315,
+            330,
+            331
+          ],
+          [
+            322,
+            321,
+            336,
+            337
+          ],
+          [
+            321,
+            320,
+            335,
+            336
+          ],
+          [
+            315,
+            314,
+            329,
+            330
+          ],
+          [
+            320,
+            319,
+            334,
+            335
+          ],
+          [
+            10,
+            325,
+            340
+          ],
+          [
+            325,
+            324,
+            339,
+            340
+          ],
+          [
+            314,
+            313,
+            328,
+            329
+          ],
+          [
+            313,
+            312,
+            327,
+            328
+          ],
+          [
+            319,
+            318,
+            333,
+            334
+          ],
+          [
+            324,
+            323,
+            338,
+            339
+          ],
+          [
+            312,
+            311,
+            326,
+            327
+          ],
+          [
+            318,
+            317,
+            332,
+            333
+          ],
+          [
+            317,
+            316,
+            331,
+            332
+          ],
+          [
+            323,
+            322,
+            337,
+            338
+          ],
+          [
+            338,
+            337,
+            352,
+            353
+          ],
+          [
+            326,
+            0,
+            341
+          ],
+          [
+            332,
+            331,
+            346,
+            347
+          ],
+          [
+            331,
+            330,
+            345,
+            346
+          ],
+          [
+            337,
+            336,
+            351,
+            352
+          ],
+          [
+            330,
+            329,
+            344,
+            345
+          ],
+          [
+            336,
+            335,
+            350,
+            351
+          ],
+          [
+            335,
+            334,
+            349,
+            350
+          ],
+          [
+            10,
+            340,
+            355
+          ],
+          [
+            329,
+            328,
+            343,
+            344
+          ],
+          [
+            334,
+            333,
+            348,
+            349
+          ],
+          [
+            340,
+            339,
+            354,
+            355
+          ],
+          [
+            339,
+            338,
+            353,
+            354
+          ],
+          [
+            328,
+            327,
+            342,
+            343
+          ],
+          [
+            327,
+            326,
+            341,
+            342
+          ],
+          [
+            333,
+            332,
+            347,
+            348
+          ],
+          [
+            343,
+            342,
+            357,
+            358
+          ],
+          [
+            348,
+            347,
+            362,
+            363
+          ],
+          [
+            354,
+            353,
+            368,
+            369
+          ],
+          [
+            353,
+            352,
+            367,
+            368
+          ],
+          [
+            342,
+            341,
+            356,
+            357
+          ],
+          [
+            341,
+            0,
+            356
+          ],
+          [
+            347,
+            346,
+            361,
+            362
+          ],
+          [
+            352,
+            351,
+            366,
+            367
+          ],
+          [
+            346,
+            345,
+            360,
+            361
+          ],
+          [
+            345,
+            344,
+            359,
+            360
+          ],
+          [
+            351,
+            350,
+            365,
+            366
+          ],
+          [
+            10,
+            355,
+            370
+          ],
+          [
+            344,
+            343,
+            358,
+            359
+          ],
+          [
+            350,
+            349,
+            364,
+            365
+          ],
+          [
+            349,
+            348,
+            363,
+            364
+          ],
+          [
+            355,
+            354,
+            369,
+            370
+          ],
+          [
+            359,
+            358,
+            373,
+            374
+          ],
+          [
+            365,
+            364,
+            379,
+            380
+          ],
+          [
+            370,
+            369,
+            384,
+            385
+          ],
+          [
+            358,
+            357,
+            372,
+            373
+          ],
+          [
+            364,
+            363,
+            378,
+            379
+          ],
+          [
+            363,
+            362,
+            377,
+            378
+          ],
+          [
+            369,
+            368,
+            383,
+            384
+          ],
+          [
+            357,
+            356,
+            371,
+            372
+          ],
+          [
+            362,
+            361,
+            376,
+            377
+          ],
+          [
+            368,
+            367,
+            382,
+            383
+          ],
+          [
+            367,
+            366,
+            381,
+            382
+          ],
+          [
+            356,
+            0,
+            371
+          ],
+          [
+            361,
+            360,
+            375,
+            376
+          ],
+          [
+            366,
+            365,
+            380,
+            381
+          ],
+          [
+            10,
+            370,
+            385
+          ],
+          [
+            360,
+            359,
+            374,
+            375
+          ],
+          [
+            375,
+            374,
+            389,
+            390
+          ],
+          [
+            380,
+            379,
+            394,
+            395
+          ],
+          [
+            10,
+            385,
+            400
+          ],
+          [
+            385,
+            384,
+            399,
+            400
+          ],
+          [
+            374,
+            373,
+            388,
+            389
+          ],
+          [
+            373,
+            372,
+            387,
+            388
+          ],
+          [
+            379,
+            378,
+            393,
+            394
+          ],
+          [
+            384,
+            383,
+            398,
+            399
+          ],
+          [
+            372,
+            371,
+            386,
+            387
+          ],
+          [
+            378,
+            377,
+            392,
+            393
+          ],
+          [
+            377,
+            376,
+            391,
+            392
+          ],
+          [
+            383,
+            382,
+            397,
+            398
+          ],
+          [
+            371,
+            0,
+            386
+          ],
+          [
+            376,
+            375,
+            390,
+            391
+          ],
+          [
+            382,
+            381,
+            396,
+            397
+          ],
+          [
+            381,
+            380,
+            395,
+            396
+          ],
+          [
+            392,
+            391,
+            406,
+            407
+          ],
+          [
+            391,
+            390,
+            405,
+            406
+          ],
+          [
+            397,
+            396,
+            411,
+            412
+          ],
+          [
+            390,
+            389,
+            404,
+            405
+          ],
+          [
+            396,
+            395,
+            410,
+            411
+          ],
+          [
+            395,
+            394,
+            409,
+            410
+          ],
+          [
+            10,
+            400,
+            415
+          ],
+          [
+            389,
+            388,
+            403,
+            404
+          ],
+          [
+            394,
+            393,
+            408,
+            409
+          ],
+          [
+            400,
+            399,
+            414,
+            415
+          ],
+          [
+            399,
+            398,
+            413,
+            414
+          ],
+          [
+            388,
+            387,
+            402,
+            403
+          ],
+          [
+            387,
+            386,
+            401,
+            402
+          ],
+          [
+            393,
+            392,
+            407,
+            408
+          ],
+          [
+            398,
+            397,
+            412,
+            413
+          ],
+          [
+            386,
+            0,
+            401
+          ],
+          [
+            413,
+            412,
+            427,
+            428
+          ],
+          [
+            402,
+            401,
+            416,
+            417
+          ],
+          [
+            401,
+            0,
+            416
+          ],
+          [
+            407,
+            406,
+            421,
+            422
+          ],
+          [
+            412,
+            411,
+            426,
+            427
+          ],
+          [
+            406,
+            405,
+            420,
+            421
+          ],
+          [
+            405,
+            404,
+            419,
+            420
+          ],
+          [
+            411,
+            410,
+            425,
+            426
+          ],
+          [
+            10,
+            415,
+            430
+          ],
+          [
+            404,
+            403,
+            418,
+            419
+          ],
+          [
+            410,
+            409,
+            424,
+            425
+          ],
+          [
+            409,
+            408,
+            423,
+            424
+          ],
+          [
+            415,
+            414,
+            429,
+            430
+          ],
+          [
+            403,
+            402,
+            417,
+            418
+          ],
+          [
+            408,
+            407,
+            422,
+            423
+          ],
+          [
+            414,
+            413,
+            428,
+            429
+          ],
+          [
+            418,
+            417,
+            432,
+            433
+          ],
+          [
+            424,
+            423,
+            438,
+            439
+          ],
+          [
+            423,
+            422,
+            437,
+            438
+          ],
+          [
+            429,
+            428,
+            443,
+            444
+          ],
+          [
+            417,
+            416,
+            431,
+            432
+          ],
+          [
+            422,
+            421,
+            436,
+            437
+          ],
+          [
+            428,
+            427,
+            442,
+            443
+          ],
+          [
+            427,
+            426,
+            441,
+            442
+          ],
+          [
+            416,
+            0,
+            431
+          ],
+          [
+            421,
+            420,
+            435,
+            436
+          ],
+          [
+            426,
+            425,
+            440,
+            441
+          ],
+          [
+            10,
+            430,
+            445
+          ],
+          [
+            420,
+            419,
+            434,
+            435
+          ],
+          [
+            419,
+            418,
+            433,
+            434
+          ],
+          [
+            425,
+            424,
+            439,
+            440
+          ],
+          [
+            430,
+            429,
+            444,
+            445
+          ],
+          [
+            440,
+            439,
+            454,
+            455
+          ],
+          [
+            10,
+            445,
+            460
+          ],
+          [
+            445,
+            444,
+            459,
+            460
+          ],
+          [
+            434,
+            433,
+            448,
+            449
+          ],
+          [
+            433,
+            432,
+            447,
+            448
+          ],
+          [
+            439,
+            438,
+            453,
+            454
+          ],
+          [
+            444,
+            443,
+            458,
+            459
+          ],
+          [
+            432,
+            431,
+            446,
+            447
+          ],
+          [
+            438,
+            437,
+            452,
+            453
+          ],
+          [
+            437,
+            436,
+            451,
+            452
+          ],
+          [
+            443,
+            442,
+            457,
+            458
+          ],
+          [
+            431,
+            0,
+            446
+          ],
+          [
+            436,
+            435,
+            450,
+            451
+          ],
+          [
+            442,
+            441,
+            456,
+            457
+          ],
+          [
+            441,
+            440,
+            455,
+            456
+          ],
+          [
+            435,
+            434,
+            449,
+            450
+          ],
+          [
+            450,
+            449,
+            464,
+            465
+          ],
+          [
+            456,
+            455,
+            470,
+            471
+          ],
+          [
+            455,
+            454,
+            469,
+            470
+          ],
+          [
+            10,
+            460,
+            475
+          ],
+          [
+            449,
+            448,
+            463,
+            464
+          ],
+          [
+            454,
+            453,
+            468,
+            469
+          ],
+          [
+            460,
+            459,
+            474,
+            475
+          ],
+          [
+            459,
+            458,
+            473,
+            474
+          ],
+          [
+            448,
+            447,
+            462,
+            463
+          ],
+          [
+            447,
+            446,
+            461,
+            462
+          ],
+          [
+            453,
+            452,
+            467,
+            468
+          ],
+          [
+            458,
+            457,
+            472,
+            473
+          ],
+          [
+            446,
+            0,
+            461
+          ],
+          [
+            452,
+            451,
+            466,
+            467
+          ],
+          [
+            451,
+            450,
+            465,
+            466
+          ],
+          [
+            457,
+            456,
+            471,
+            472
+          ],
+          [
+            472,
+            471,
+            8,
+            479
+          ],
+          [
+            466,
+            465,
+            2,
+            3
+          ],
+          [
+            465,
+            464,
+            478,
+            2
+          ],
+          [
+            471,
+            470,
+            7,
+            8
+          ],
+          [
+            10,
+            475,
+            481
+          ],
+          [
+            464,
+            463,
+            1,
+            478
+          ],
+          [
+            470,
+            469,
+            6,
+            7
+          ],
+          [
+            469,
+            468,
+            5,
+            6
+          ],
+          [
+            475,
+            474,
+            480,
+            481
+          ],
+          [
+            463,
+            462,
+            477,
+            1
+          ],
+          [
+            468,
+            467,
+            4,
+            5
+          ],
+          [
+            474,
+            473,
+            9,
+            480
+          ],
+          [
+            473,
+            472,
+            479,
+            9
+          ],
+          [
+            462,
+            461,
+            476,
+            477
+          ],
+          [
+            461,
+            0,
+            476
+          ],
+          [
+            467,
+            466,
+            3,
+            4
+          ]
+        ],
+        "material_names": [
+          "CockpitGlass"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": "o4ad1c1e25c",
+        "name": "Fuselage",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          1
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -0.28,
+            -1.68,
+            -0.35
+          ],
+          [
+            -0.28,
+            -1.8,
+            -0.23
+          ],
+          [
+            -0.4,
+            -1.68,
+            -0.23
+          ],
+          [
+            -0.28,
+            -1.764853,
+            -0.314853
+          ],
+          [
+            -0.349282,
+            -1.749282,
+            -0.299282
+          ],
+          [
+            -0.364853,
+            -1.764853,
+            -0.23
+          ],
+          [
+            -0.364853,
+            -1.68,
+            -0.314853
+          ],
+          [
+            -0.28,
+            -1.8,
+            0.23
+          ],
+          [
+            -0.28,
+            -1.68,
+            0.35
+          ],
+          [
+            -0.4,
+            -1.68,
+            0.23
+          ],
+          [
+            -0.28,
+            -1.764853,
+            0.314853
+          ],
+          [
+            -0.349282,
+            -1.749282,
+            0.299282
+          ],
+          [
+            -0.364853,
+            -1.68,
+            0.314853
+          ],
+          [
+            -0.364853,
+            -1.764853,
+            0.23
+          ],
+          [
+            -0.28,
+            1.68,
+            -0.35
+          ],
+          [
+            -0.4,
+            1.68,
+            -0.23
+          ],
+          [
+            -0.28,
+            1.8,
+            -0.23
+          ],
+          [
+            -0.364853,
+            1.68,
+            -0.314853
+          ],
+          [
+            -0.349282,
+            1.749282,
+            -0.299282
+          ],
+          [
+            -0.364853,
+            1.764853,
+            -0.23
+          ],
+          [
+            -0.28,
+            1.764853,
+            -0.314853
+          ],
+          [
+            -0.28,
+            1.68,
+            0.35
+          ],
+          [
+            -0.28,
+            1.8,
+            0.23
+          ],
+          [
+            -0.4,
+            1.68,
+            0.23
+          ],
+          [
+            -0.28,
+            1.764853,
+            0.314853
+          ],
+          [
+            -0.349282,
+            1.749282,
+            0.299282
+          ],
+          [
+            -0.364853,
+            1.764853,
+            0.23
+          ],
+          [
+            -0.364853,
+            1.68,
+            0.314853
+          ],
+          [
+            0.28,
+            -1.68,
+            -0.35
+          ],
+          [
+            0.4,
+            -1.68,
+            -0.23
+          ],
+          [
+            0.28,
+            -1.8,
+            -0.23
+          ],
+          [
+            0.364853,
+            -1.68,
+            -0.314853
+          ],
+          [
+            0.349282,
+            -1.749282,
+            -0.299282
+          ],
+          [
+            0.364853,
+            -1.764853,
+            -0.23
+          ],
+          [
+            0.28,
+            -1.764853,
+            -0.314853
+          ],
+          [
+            0.28,
+            -1.68,
+            0.35
+          ],
+          [
+            0.28,
+            -1.8,
+            0.23
+          ],
+          [
+            0.4,
+            -1.68,
+            0.23
+          ],
+          [
+            0.28,
+            -1.764853,
+            0.314853
+          ],
+          [
+            0.349282,
+            -1.749282,
+            0.299282
+          ],
+          [
+            0.364853,
+            -1.764853,
+            0.23
+          ],
+          [
+            0.364853,
+            -1.68,
+            0.314853
+          ],
+          [
+            0.28,
+            1.68,
+            -0.35
+          ],
+          [
+            0.28,
+            1.8,
+            -0.23
+          ],
+          [
+            0.4,
+            1.68,
+            -0.23
+          ],
+          [
+            0.28,
+            1.764853,
+            -0.314853
+          ],
+          [
+            0.349282,
+            1.749282,
+            -0.299282
+          ],
+          [
+            0.364853,
+            1.764853,
+            -0.23
+          ],
+          [
+            0.364853,
+            1.68,
+            -0.314853
+          ],
+          [
+            0.28,
+            1.68,
+            0.35
+          ],
+          [
+            0.4,
+            1.68,
+            0.23
+          ],
+          [
+            0.28,
+            1.8,
+            0.23
+          ],
+          [
+            0.364853,
+            1.68,
+            0.314853
+          ],
+          [
+            0.349282,
+            1.749282,
+            0.299282
+          ],
+          [
+            0.364853,
+            1.764853,
+            0.23
+          ],
+          [
+            0.28,
+            1.764853,
+            0.314853
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            3,
+            4,
+            6
+          ],
+          [
+            1,
+            5,
+            4,
+            3
+          ],
+          [
+            2,
+            6,
+            4,
+            5
+          ],
+          [
+            7,
+            10,
+            11,
+            13
+          ],
+          [
+            8,
+            12,
+            11,
+            10
+          ],
+          [
+            9,
+            13,
+            11,
+            12
+          ],
+          [
+            14,
+            17,
+            18,
+            20
+          ],
+          [
+            15,
+            19,
+            18,
+            17
+          ],
+          [
+            16,
+            20,
+            18,
+            19
+          ],
+          [
+            21,
+            24,
+            25,
+            27
+          ],
+          [
+            22,
+            26,
+            25,
+            24
+          ],
+          [
+            23,
+            27,
+            25,
+            26
+          ],
+          [
+            28,
+            31,
+            32,
+            34
+          ],
+          [
+            29,
+            33,
+            32,
+            31
+          ],
+          [
+            30,
+            34,
+            32,
+            33
+          ],
+          [
+            35,
+            38,
+            39,
+            41
+          ],
+          [
+            36,
+            40,
+            39,
+            38
+          ],
+          [
+            37,
+            41,
+            39,
+            40
+          ],
+          [
+            42,
+            45,
+            46,
+            48
+          ],
+          [
+            43,
+            47,
+            46,
+            45
+          ],
+          [
+            44,
+            48,
+            46,
+            47
+          ],
+          [
+            49,
+            52,
+            53,
+            55
+          ],
+          [
+            50,
+            54,
+            53,
+            52
+          ],
+          [
+            51,
+            55,
+            53,
+            54
+          ],
+          [
+            14,
+            0,
+            6,
+            17
+          ],
+          [
+            17,
+            6,
+            2,
+            15
+          ],
+          [
+            1,
+            7,
+            13,
+            5
+          ],
+          [
+            5,
+            13,
+            9,
+            2
+          ],
+          [
+            8,
+            21,
+            27,
+            12
+          ],
+          [
+            12,
+            27,
+            23,
+            9
+          ],
+          [
+            22,
+            16,
+            19,
+            26
+          ],
+          [
+            26,
+            19,
+            15,
+            23
+          ],
+          [
+            42,
+            14,
+            20,
+            45
+          ],
+          [
+            45,
+            20,
+            16,
+            43
+          ],
+          [
+            21,
+            49,
+            55,
+            24
+          ],
+          [
+            24,
+            55,
+            51,
+            22
+          ],
+          [
+            50,
+            44,
+            47,
+            54
+          ],
+          [
+            54,
+            47,
+            43,
+            51
+          ],
+          [
+            28,
+            42,
+            48,
+            31
+          ],
+          [
+            31,
+            48,
+            44,
+            29
+          ],
+          [
+            49,
+            35,
+            41,
+            52
+          ],
+          [
+            52,
+            41,
+            37,
+            50
+          ],
+          [
+            36,
+            30,
+            33,
+            40
+          ],
+          [
+            40,
+            33,
+            29,
+            37
+          ],
+          [
+            0,
+            28,
+            34,
+            3
+          ],
+          [
+            3,
+            34,
+            30,
+            1
+          ],
+          [
+            35,
+            8,
+            10,
+            38
+          ],
+          [
+            38,
+            10,
+            7,
+            36
+          ],
+          [
+            14,
+            42,
+            28,
+            0
+          ],
+          [
+            2,
+            9,
+            23,
+            15
+          ],
+          [
+            30,
+            36,
+            7,
+            1
+          ],
+          [
+            49,
+            21,
+            8,
+            35
+          ],
+          [
+            16,
+            22,
+            51,
+            43
+          ],
+          [
+            44,
+            50,
+            37,
+            29
+          ]
+        ],
+        "material_names": [
+          "HullWhite"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": "odd1ccc6d5d",
+        "name": "KeyLight",
+        "type": "LIGHT",
+        "location": [
+          4,
+          -2,
+          6
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "light_type": "SUN",
+        "energy": 4
+      },
+      {
+        "bw_id": "ode131bf254",
+        "name": "Wing_L",
+        "type": "MESH",
+        "location": [
+          -1.5,
+          0.1,
+          1
+        ],
+        "rotation": [
+          0,
+          0,
+          0.314159
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -1.1,
+            -0.45,
+            -0.04
+          ],
+          [
+            -1.1,
+            -0.45,
+            0.04
+          ],
+          [
+            -1.1,
+            0.45,
+            -0.04
+          ],
+          [
+            -1.1,
+            0.45,
+            0.04
+          ],
+          [
+            1.1,
+            -0.45,
+            -0.04
+          ],
+          [
+            1.1,
+            -0.45,
+            0.04
+          ],
+          [
+            1.1,
+            0.45,
+            -0.04
+          ],
+          [
+            1.1,
+            0.45,
+            0.04
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            1,
+            0
+          ],
+          [
+            2,
+            6,
+            4,
+            0
+          ],
+          [
+            7,
+            3,
+            1,
+            5
+          ]
+        ],
+        "material_names": [
+          "HullWhite"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": "o757453bb3f",
+        "name": "Wing_R",
+        "type": "MESH",
+        "location": [
+          1.5,
+          0.1,
+          1
+        ],
+        "rotation": [
+          0,
+          0,
+          -0.314159
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -1.1,
+            -0.45,
+            -0.04
+          ],
+          [
+            -1.1,
+            -0.45,
+            0.04
+          ],
+          [
+            -1.1,
+            0.45,
+            -0.04
+          ],
+          [
+            -1.1,
+            0.45,
+            0.04
+          ],
+          [
+            1.1,
+            -0.45,
+            -0.04
+          ],
+          [
+            1.1,
+            -0.45,
+            0.04
+          ],
+          [
+            1.1,
+            0.45,
+            -0.04
+          ],
+          [
+            1.1,
+            0.45,
+            0.04
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            1,
+            0
+          ],
+          [
+            2,
+            6,
+            4,
+            0
+          ],
+          [
+            7,
+            3,
+            1,
+            5
+          ]
+        ],
+        "material_names": [
+          "HullWhite"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "materials": [
+      {
+        "name": "CockpitGlass",
+        "base_color": [
+          0.1,
+          0.35,
+          0.55,
+          1
+        ],
+        "roughness": 0.08,
+        "metallic": 0.1
+      },
+      {
+        "name": "HullWhite",
+        "base_color": [
+          0.86,
+          0.87,
+          0.9,
+          1
+        ],
+        "roughness": 0.35,
+        "metallic": 0.25
+      },
+      {
+        "name": "Material",
+        "base_color": [
+          0.8,
+          0.8,
+          0.8,
+          1
+        ],
+        "roughness": 0.5,
+        "metallic": 0
+      }
+    ]
+  },
+  "artifacts": [],
+  "wall_clock_s": 9.56,
+  "runtime_exit": "ok"
+}

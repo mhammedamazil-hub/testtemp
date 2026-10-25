@@ -1,0 +1,9 @@
+CMD ['node', '/home/user/testtemp/blender-web-agent/harness/run_plan.mjs', '--plan', '/home/user/testtemp/blender-web-agent/sessions/20261025-110242-fc84d8/steps/step-02/plan.json', '--out', '/home/user/testtemp/blender-web-agent/sessions/20261025-110242-fc84d8/steps/step-02', '--bin', '/home/user/bw/blender-web-local/bin', '--lib-dir', '/tmp/lib', '--chromium', '/tmp/chromium', '--timeout-ms', '6000']
+EXIT 3
+TIMED_OUT False
+ELAPSED 6.48s
+--- stdout ---
+RESULT FAILED elapsed=6.26s artifacts=0
+
+--- stderr ---
+TIMEOUT after 6000ms

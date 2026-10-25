@@ -1,0 +1,63 @@
+{
+  "summary": "Recovered from TARGET_NOT_FOUND by creating the missing object, then applying the transform.",
+  "delivered_artifacts": [],
+  "artifact_index": {},
+  "steps_used": 2,
+  "scene": {
+    "objects": [
+      {
+        "name": "Camera",
+        "bw_id": "o66b1df2b77",
+        "type": "CAMERA",
+        "location": [
+          7.358891,
+          -6.925791,
+          4.958309
+        ]
+      },
+      {
+        "name": "Cube",
+        "bw_id": "oa498927a12",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "Material"
+        ]
+      },
+      {
+        "name": "Light",
+        "bw_id": "obba0900523",
+        "type": "LIGHT",
+        "location": [
+          4.076245,
+          1.005454,
+          5.903862
+        ]
+      },
+      {
+        "name": "Widget",
+        "bw_id": "o2f21d9f557",
+        "type": "MESH",
+        "location": [
+          1,
+          2,
+          3
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": []
+      }
+    ],
+    "materials": [
+      "Dots Stroke",
+      "Material"
+    ]
+  },
+  "finished_at": "2026-10-25T11:03:25Z"
+}

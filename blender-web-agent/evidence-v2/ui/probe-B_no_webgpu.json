@@ -1,0 +1,62 @@
+{
+  "label": "B_no_webgpu",
+  "extraFlags": [],
+  "supported": false,
+  "reason": "main loop reached but the viewport never presented a frame",
+  "samples": [
+    {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 0,
+      "canvasSize": "900x600",
+      "pngHash": "ab0bae03:12931",
+      "nonBlack": true
+    },
+    {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 0,
+      "canvasSize": "900x600",
+      "pngHash": "ab0bae03:12931",
+      "nonBlack": true
+    },
+    {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 0,
+      "canvasSize": "900x600",
+      "pngHash": "ab0bae03:12931",
+      "nonBlack": true
+    },
+    {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 0,
+      "canvasSize": "900x600",
+      "pngHash": "ab0bae03:12931",
+      "nonBlack": true
+    }
+  ],
+  "input": {
+    "before": {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 0,
+      "canvasSize": "900x600",
+      "pngHash": "ab0bae03:12931",
+      "nonBlack": true
+    },
+    "after": {
+      "presentCount": 0,
+      "redrawEpisodes": 0,
+      "wmTicks": 0,
+      "canvasSize": "900x600",
+      "pngHash": "ab0bae03:12931",
+      "nonBlack": true
+    },
+    "redraw_changed": false,
+    "present_changed": false,
+    "png_changed": false
+  },
+  "booted_main_loop": true
+}

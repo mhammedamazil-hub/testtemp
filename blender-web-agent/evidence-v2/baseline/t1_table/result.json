@@ -1,0 +1,5460 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "blender": "5.2.0 LTS",
+  "plan_ok": true,
+  "tasks": [
+    {
+      "id": "t1_table",
+      "goal": "Table: slab top on four cylindrical legs, wood and steel materials",
+      "ops": [
+        {
+          "op": "scene.reset",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": 0
+          },
+          "scene": {
+            "objects": {},
+            "object_count": 0,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o2bede97a7c",
+            "name": "TableTop",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o2bede97a7c",
+            "dimensions": [
+              2.4,
+              1.4,
+              0.12
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o3d16ceb7e3",
+            "name": "Leg_FL",
+            "created": true,
+            "verts": 64,
+            "dimensions": [
+              0.16,
+              0.16,
+              1.2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 2,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o26232c6ff6",
+            "name": "Leg_FR",
+            "created": true,
+            "verts": 64,
+            "dimensions": [
+              0.16,
+              0.16,
+              1.2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o7f46461b3f",
+            "name": "Leg_BL",
+            "created": true,
+            "verts": 64,
+            "dimensions": [
+              0.16,
+              0.16,
+              1.2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o155751aa4b",
+            "name": "Leg_BR",
+            "created": true,
+            "verts": 64,
+            "dimensions": [
+              0.16,
+              0.16,
+              1.2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "Wood",
+            "created": true,
+            "base_color": [
+              0.45,
+              0.26,
+              0.12
+            ],
+            "roughness": 0.6,
+            "metallic": 0
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material",
+              "Wood"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "Steel",
+            "created": true,
+            "base_color": [
+              0.7,
+              0.72,
+              0.75
+            ],
+            "roughness": 0.25,
+            "metallic": 0.9
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o2bede97a7c",
+            "materials": [
+              "Wood"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Wood"
+                ]
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o3d16ceb7e3",
+            "materials": [
+              "Steel"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Wood"
+                ]
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o26232c6ff6",
+            "materials": [
+              "Steel"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Wood"
+                ]
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o7f46461b3f",
+            "materials": [
+              "Steel"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": []
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Wood"
+                ]
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o155751aa4b",
+            "materials": [
+              "Steel"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Wood"
+                ]
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "camera.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o7085b4154a",
+            "camera": "Cam",
+            "lens": 50,
+            "is_scene_camera": true
+          },
+          "scene": {
+            "objects": {
+              "Cam": {
+                "bw_id": "o7085b4154a",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  4.5,
+                  -4.5,
+                  3.5
+                ],
+                "rotation": [
+                  1.182941,
+                  0,
+                  0.785398
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Wood"
+                ]
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "light.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oc0d745709f",
+            "light": "Sun",
+            "type": "SUN",
+            "energy": 3
+          },
+          "scene": {
+            "objects": {
+              "Cam": {
+                "bw_id": "o7085b4154a",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  4.5,
+                  -4.5,
+                  3.5
+                ],
+                "rotation": [
+                  1.182941,
+                  0,
+                  0.785398
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              "Leg_BL": {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_BR": {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FL": {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Leg_FR": {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ]
+              },
+              "Sun": {
+                "bw_id": "oc0d745709f",
+                "name": "Sun",
+                "type": "LIGHT",
+                "location": [
+                  3,
+                  3,
+                  6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 3
+              },
+              "TableTop": {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Wood"
+                ]
+              }
+            },
+            "object_count": 7,
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "scene.inspect",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": [
+              {
+                "bw_id": "o7085b4154a",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  4.5,
+                  -4.5,
+                  3.5
+                ],
+                "rotation": [
+                  1.182941,
+                  0,
+                  0.785398
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              {
+                "bw_id": "o7f46461b3f",
+                "name": "Leg_BL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ],
+                "bound_box": [
+                  [
+                    -0.08,
+                    -0.08,
+                    -0.6
+                  ],
+                  [
+                    -0.08,
+                    -0.08,
+                    0.6
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    0.6
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    -0.6
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    -0.6
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    0.6
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    0.6
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    -0.6
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o155751aa4b",
+                "name": "Leg_BR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ],
+                "bound_box": [
+                  [
+                    -0.08,
+                    -0.08,
+                    -0.6
+                  ],
+                  [
+                    -0.08,
+                    -0.08,
+                    0.6
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    0.6
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    -0.6
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    -0.6
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    0.6
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    0.6
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    -0.6
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o3d16ceb7e3",
+                "name": "Leg_FL",
+                "type": "MESH",
+                "location": [
+                  -0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ],
+                "bound_box": [
+                  [
+                    -0.08,
+                    -0.08,
+                    -0.6
+                  ],
+                  [
+                    -0.08,
+                    -0.08,
+                    0.6
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    0.6
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    -0.6
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    -0.6
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    0.6
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    0.6
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    -0.6
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o26232c6ff6",
+                "name": "Leg_FR",
+                "type": "MESH",
+                "location": [
+                  0.9,
+                  -0.5,
+                  0.6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  1.2
+                ],
+                "verts": 64,
+                "faces": 34,
+                "materials": [
+                  "Steel"
+                ],
+                "bound_box": [
+                  [
+                    -0.08,
+                    -0.08,
+                    -0.6
+                  ],
+                  [
+                    -0.08,
+                    -0.08,
+                    0.6
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    0.6
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    -0.6
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    -0.6
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    0.6
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    0.6
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    -0.6
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "oc0d745709f",
+                "name": "Sun",
+                "type": "LIGHT",
+                "location": [
+                  3,
+                  3,
+                  6
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 3
+              },
+              {
+                "bw_id": "o2bede97a7c",
+                "name": "TableTop",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2.4,
+                  1.4,
+                  0.12
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Wood"
+                ],
+                "bound_box": [
+                  [
+                    -1.2,
+                    -0.7,
+                    -0.06
+                  ],
+                  [
+                    -1.2,
+                    -0.7,
+                    0.06
+                  ],
+                  [
+                    -1.2,
+                    0.7,
+                    0.06
+                  ],
+                  [
+                    -1.2,
+                    0.7,
+                    -0.06
+                  ],
+                  [
+                    1.2,
+                    -0.7,
+                    -0.06
+                  ],
+                  [
+                    1.2,
+                    -0.7,
+                    0.06
+                  ],
+                  [
+                    1.2,
+                    0.7,
+                    0.06
+                  ],
+                  [
+                    1.2,
+                    0.7,
+                    -0.06
+                  ]
+                ],
+                "selected": false
+              }
+            ],
+            "materials": [
+              "Material",
+              "Steel",
+              "Wood"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE",
+            "selection": [
+              "Sun"
+            ]
+          }
+        },
+        {
+          "op": "export",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "bytes": 30676,
+              "file": "t1_table.glb",
+              "sha256": "27ea271dfb11081c6491730896399cb8bbf6978b6c04ecb24391536232004d52"
+            },
+            "obj": {
+              "ok": true,
+              "bytes": 31754,
+              "file": "t1_table.obj",
+              "sha256": "73a24e09fc58aeed81d10c61e14e32450a715919d78d389be17f3cf2f8efed8d"
+            }
+          }
+        },
+        {
+          "op": "validate.roundtrip",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "objects": 5,
+              "meshes": 5,
+              "verts": 792,
+              "materials": 4
+            },
+            "obj": {
+              "ok": true,
+              "objects": 5,
+              "meshes": 5,
+              "verts": 264,
+              "materials": 4
+            }
+          }
+        }
+      ],
+      "artifacts": {}
+    }
+  ],
+  "trace_id": "baseline-t1_table",
+  "elapsed_s": 1.54,
+  "snapshot": {
+    "format": "bw.scene.snapshot/v1",
+    "objects": [
+      {
+        "bw_id": null,
+        "name": "Leg_BL",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          1.570796,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -0.9,
+            0,
+            -0.58
+          ],
+          [
+            -0.9,
+            1.2,
+            -0.58
+          ],
+          [
+            -0.884393,
+            0,
+            -0.578463
+          ],
+          [
+            -0.884393,
+            1.2,
+            -0.578463
+          ],
+          [
+            -0.869385,
+            0,
+            -0.57391
+          ],
+          [
+            -0.869385,
+            1.2,
+            -0.57391
+          ],
+          [
+            -0.855554,
+            0,
+            -0.566518
+          ],
+          [
+            -0.855554,
+            1.2,
+            -0.566518
+          ],
+          [
+            -0.843431,
+            0,
+            -0.556569
+          ],
+          [
+            -0.843431,
+            1.2,
+            -0.556569
+          ],
+          [
+            -0.833482,
+            0,
+            -0.544446
+          ],
+          [
+            -0.833482,
+            1.2,
+            -0.544446
+          ],
+          [
+            -0.82609,
+            0,
+            -0.530615
+          ],
+          [
+            -0.82609,
+            1.2,
+            -0.530615
+          ],
+          [
+            -0.821537,
+            0,
+            -0.515607
+          ],
+          [
+            -0.821537,
+            1.2,
+            -0.515607
+          ],
+          [
+            -0.82,
+            0,
+            -0.5
+          ],
+          [
+            -0.82,
+            1.2,
+            -0.5
+          ],
+          [
+            -0.821537,
+            0,
+            -0.484393
+          ],
+          [
+            -0.821537,
+            1.2,
+            -0.484393
+          ],
+          [
+            -0.82609,
+            0,
+            -0.469385
+          ],
+          [
+            -0.82609,
+            1.2,
+            -0.469385
+          ],
+          [
+            -0.833482,
+            0,
+            -0.455554
+          ],
+          [
+            -0.833482,
+            1.2,
+            -0.455554
+          ],
+          [
+            -0.843431,
+            0,
+            -0.443431
+          ],
+          [
+            -0.843431,
+            1.2,
+            -0.443431
+          ],
+          [
+            -0.855554,
+            0,
+            -0.433482
+          ],
+          [
+            -0.855554,
+            1.2,
+            -0.433482
+          ],
+          [
+            -0.869385,
+            0,
+            -0.42609
+          ],
+          [
+            -0.869385,
+            1.2,
+            -0.42609
+          ],
+          [
+            -0.884393,
+            0,
+            -0.421537
+          ],
+          [
+            -0.884393,
+            1.2,
+            -0.421537
+          ],
+          [
+            -0.9,
+            0,
+            -0.42
+          ],
+          [
+            -0.9,
+            1.2,
+            -0.42
+          ],
+          [
+            -0.915607,
+            0,
+            -0.421537
+          ],
+          [
+            -0.915607,
+            1.2,
+            -0.421537
+          ],
+          [
+            -0.930615,
+            0,
+            -0.42609
+          ],
+          [
+            -0.930615,
+            1.2,
+            -0.42609
+          ],
+          [
+            -0.944446,
+            0,
+            -0.433482
+          ],
+          [
+            -0.944446,
+            1.2,
+            -0.433482
+          ],
+          [
+            -0.956569,
+            0,
+            -0.443431
+          ],
+          [
+            -0.956569,
+            1.2,
+            -0.443431
+          ],
+          [
+            -0.966518,
+            0,
+            -0.455554
+          ],
+          [
+            -0.966518,
+            1.2,
+            -0.455554
+          ],
+          [
+            -0.97391,
+            0,
+            -0.469385
+          ],
+          [
+            -0.97391,
+            1.2,
+            -0.469385
+          ],
+          [
+            -0.978463,
+            0,
+            -0.484393
+          ],
+          [
+            -0.978463,
+            1.2,
+            -0.484393
+          ],
+          [
+            -0.98,
+            0,
+            -0.5
+          ],
+          [
+            -0.98,
+            1.2,
+            -0.5
+          ],
+          [
+            -0.978463,
+            0,
+            -0.515607
+          ],
+          [
+            -0.978463,
+            1.2,
+            -0.515607
+          ],
+          [
+            -0.97391,
+            0,
+            -0.530615
+          ],
+          [
+            -0.97391,
+            1.2,
+            -0.530615
+          ],
+          [
+            -0.966518,
+            0,
+            -0.544446
+          ],
+          [
+            -0.966518,
+            1.2,
+            -0.544446
+          ],
+          [
+            -0.956569,
+            0,
+            -0.556569
+          ],
+          [
+            -0.956569,
+            1.2,
+            -0.556569
+          ],
+          [
+            -0.944446,
+            0,
+            -0.566518
+          ],
+          [
+            -0.944446,
+            1.2,
+            -0.566518
+          ],
+          [
+            -0.930615,
+            0,
+            -0.57391
+          ],
+          [
+            -0.930615,
+            1.2,
+            -0.57391
+          ],
+          [
+            -0.915607,
+            0,
+            -0.578463
+          ],
+          [
+            -0.915607,
+            1.2,
+            -0.578463
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            9,
+            8
+          ],
+          [
+            8,
+            9,
+            11,
+            10
+          ],
+          [
+            10,
+            11,
+            13,
+            12
+          ],
+          [
+            12,
+            13,
+            15,
+            14
+          ],
+          [
+            14,
+            15,
+            17,
+            16
+          ],
+          [
+            16,
+            17,
+            19,
+            18
+          ],
+          [
+            18,
+            19,
+            21,
+            20
+          ],
+          [
+            20,
+            21,
+            23,
+            22
+          ],
+          [
+            22,
+            23,
+            25,
+            24
+          ],
+          [
+            24,
+            25,
+            27,
+            26
+          ],
+          [
+            26,
+            27,
+            29,
+            28
+          ],
+          [
+            28,
+            29,
+            31,
+            30
+          ],
+          [
+            30,
+            31,
+            33,
+            32
+          ],
+          [
+            32,
+            33,
+            35,
+            34
+          ],
+          [
+            34,
+            35,
+            37,
+            36
+          ],
+          [
+            36,
+            37,
+            39,
+            38
+          ],
+          [
+            38,
+            39,
+            41,
+            40
+          ],
+          [
+            40,
+            41,
+            43,
+            42
+          ],
+          [
+            42,
+            43,
+            45,
+            44
+          ],
+          [
+            44,
+            45,
+            47,
+            46
+          ],
+          [
+            46,
+            47,
+            49,
+            48
+          ],
+          [
+            48,
+            49,
+            51,
+            50
+          ],
+          [
+            50,
+            51,
+            53,
+            52
+          ],
+          [
+            52,
+            53,
+            55,
+            54
+          ],
+          [
+            54,
+            55,
+            57,
+            56
+          ],
+          [
+            56,
+            57,
+            59,
+            58
+          ],
+          [
+            58,
+            59,
+            61,
+            60
+          ],
+          [
+            3,
+            1,
+            63,
+            61,
+            59,
+            57,
+            55,
+            53,
+            51,
+            49,
+            47,
+            45,
+            43,
+            41,
+            39,
+            37,
+            35,
+            33,
+            31,
+            29,
+            27,
+            25,
+            23,
+            21,
+            19,
+            17,
+            15,
+            13,
+            11,
+            9,
+            7,
+            5
+          ],
+          [
+            60,
+            61,
+            63,
+            62
+          ],
+          [
+            62,
+            63,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            4,
+            6,
+            8,
+            10,
+            12,
+            14,
+            16,
+            18,
+            20,
+            22,
+            24,
+            26,
+            28,
+            30,
+            32,
+            34,
+            36,
+            38,
+            40,
+            42,
+            44,
+            46,
+            48,
+            50,
+            52,
+            54,
+            56,
+            58,
+            60,
+            62
+          ]
+        ],
+        "material_names": [
+          "Steel"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": null,
+        "name": "Leg_BR",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          1.570796,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            0.9,
+            0,
+            -0.58
+          ],
+          [
+            0.9,
+            1.2,
+            -0.58
+          ],
+          [
+            0.915607,
+            0,
+            -0.578463
+          ],
+          [
+            0.915607,
+            1.2,
+            -0.578463
+          ],
+          [
+            0.930615,
+            0,
+            -0.57391
+          ],
+          [
+            0.930615,
+            1.2,
+            -0.57391
+          ],
+          [
+            0.944446,
+            0,
+            -0.566518
+          ],
+          [
+            0.944446,
+            1.2,
+            -0.566518
+          ],
+          [
+            0.956569,
+            0,
+            -0.556569
+          ],
+          [
+            0.956569,
+            1.2,
+            -0.556569
+          ],
+          [
+            0.966518,
+            0,
+            -0.544446
+          ],
+          [
+            0.966518,
+            1.2,
+            -0.544446
+          ],
+          [
+            0.97391,
+            0,
+            -0.530615
+          ],
+          [
+            0.97391,
+            1.2,
+            -0.530615
+          ],
+          [
+            0.978463,
+            0,
+            -0.515607
+          ],
+          [
+            0.978463,
+            1.2,
+            -0.515607
+          ],
+          [
+            0.98,
+            0,
+            -0.5
+          ],
+          [
+            0.98,
+            1.2,
+            -0.5
+          ],
+          [
+            0.978463,
+            0,
+            -0.484393
+          ],
+          [
+            0.978463,
+            1.2,
+            -0.484393
+          ],
+          [
+            0.97391,
+            0,
+            -0.469385
+          ],
+          [
+            0.97391,
+            1.2,
+            -0.469385
+          ],
+          [
+            0.966518,
+            0,
+            -0.455554
+          ],
+          [
+            0.966518,
+            1.2,
+            -0.455554
+          ],
+          [
+            0.956569,
+            0,
+            -0.443431
+          ],
+          [
+            0.956569,
+            1.2,
+            -0.443431
+          ],
+          [
+            0.944446,
+            0,
+            -0.433482
+          ],
+          [
+            0.944446,
+            1.2,
+            -0.433482
+          ],
+          [
+            0.930615,
+            0,
+            -0.42609
+          ],
+          [
+            0.930615,
+            1.2,
+            -0.42609
+          ],
+          [
+            0.915607,
+            0,
+            -0.421537
+          ],
+          [
+            0.915607,
+            1.2,
+            -0.421537
+          ],
+          [
+            0.9,
+            0,
+            -0.42
+          ],
+          [
+            0.9,
+            1.2,
+            -0.42
+          ],
+          [
+            0.884393,
+            0,
+            -0.421537
+          ],
+          [
+            0.884393,
+            1.2,
+            -0.421537
+          ],
+          [
+            0.869385,
+            0,
+            -0.42609
+          ],
+          [
+            0.869385,
+            1.2,
+            -0.42609
+          ],
+          [
+            0.855554,
+            0,
+            -0.433482
+          ],
+          [
+            0.855554,
+            1.2,
+            -0.433482
+          ],
+          [
+            0.843431,
+            0,
+            -0.443431
+          ],
+          [
+            0.843431,
+            1.2,
+            -0.443431
+          ],
+          [
+            0.833482,
+            0,
+            -0.455554
+          ],
+          [
+            0.833482,
+            1.2,
+            -0.455554
+          ],
+          [
+            0.82609,
+            0,
+            -0.469385
+          ],
+          [
+            0.82609,
+            1.2,
+            -0.469385
+          ],
+          [
+            0.821537,
+            0,
+            -0.484393
+          ],
+          [
+            0.821537,
+            1.2,
+            -0.484393
+          ],
+          [
+            0.82,
+            0,
+            -0.5
+          ],
+          [
+            0.82,
+            1.2,
+            -0.5
+          ],
+          [
+            0.821537,
+            0,
+            -0.515607
+          ],
+          [
+            0.821537,
+            1.2,
+            -0.515607
+          ],
+          [
+            0.82609,
+            0,
+            -0.530615
+          ],
+          [
+            0.82609,
+            1.2,
+            -0.530615
+          ],
+          [
+            0.833482,
+            0,
+            -0.544446
+          ],
+          [
+            0.833482,
+            1.2,
+            -0.544446
+          ],
+          [
+            0.843431,
+            0,
+            -0.556569
+          ],
+          [
+            0.843431,
+            1.2,
+            -0.556569
+          ],
+          [
+            0.855554,
+            0,
+            -0.566518
+          ],
+          [
+            0.855554,
+            1.2,
+            -0.566518
+          ],
+          [
+            0.869385,
+            0,
+            -0.57391
+          ],
+          [
+            0.869385,
+            1.2,
+            -0.57391
+          ],
+          [
+            0.884393,
+            0,
+            -0.578463
+          ],
+          [
+            0.884393,
+            1.2,
+            -0.578463
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            9,
+            8
+          ],
+          [
+            8,
+            9,
+            11,
+            10
+          ],
+          [
+            10,
+            11,
+            13,
+            12
+          ],
+          [
+            12,
+            13,
+            15,
+            14
+          ],
+          [
+            14,
+            15,
+            17,
+            16
+          ],
+          [
+            16,
+            17,
+            19,
+            18
+          ],
+          [
+            18,
+            19,
+            21,
+            20
+          ],
+          [
+            20,
+            21,
+            23,
+            22
+          ],
+          [
+            22,
+            23,
+            25,
+            24
+          ],
+          [
+            24,
+            25,
+            27,
+            26
+          ],
+          [
+            26,
+            27,
+            29,
+            28
+          ],
+          [
+            28,
+            29,
+            31,
+            30
+          ],
+          [
+            30,
+            31,
+            33,
+            32
+          ],
+          [
+            32,
+            33,
+            35,
+            34
+          ],
+          [
+            34,
+            35,
+            37,
+            36
+          ],
+          [
+            36,
+            37,
+            39,
+            38
+          ],
+          [
+            38,
+            39,
+            41,
+            40
+          ],
+          [
+            40,
+            41,
+            43,
+            42
+          ],
+          [
+            42,
+            43,
+            45,
+            44
+          ],
+          [
+            44,
+            45,
+            47,
+            46
+          ],
+          [
+            46,
+            47,
+            49,
+            48
+          ],
+          [
+            48,
+            49,
+            51,
+            50
+          ],
+          [
+            50,
+            51,
+            53,
+            52
+          ],
+          [
+            52,
+            53,
+            55,
+            54
+          ],
+          [
+            54,
+            55,
+            57,
+            56
+          ],
+          [
+            56,
+            57,
+            59,
+            58
+          ],
+          [
+            58,
+            59,
+            61,
+            60
+          ],
+          [
+            3,
+            1,
+            63,
+            61,
+            59,
+            57,
+            55,
+            53,
+            51,
+            49,
+            47,
+            45,
+            43,
+            41,
+            39,
+            37,
+            35,
+            33,
+            31,
+            29,
+            27,
+            25,
+            23,
+            21,
+            19,
+            17,
+            15,
+            13,
+            11,
+            9,
+            7,
+            5
+          ],
+          [
+            60,
+            61,
+            63,
+            62
+          ],
+          [
+            62,
+            63,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            4,
+            6,
+            8,
+            10,
+            12,
+            14,
+            16,
+            18,
+            20,
+            22,
+            24,
+            26,
+            28,
+            30,
+            32,
+            34,
+            36,
+            38,
+            40,
+            42,
+            44,
+            46,
+            48,
+            50,
+            52,
+            54,
+            56,
+            58,
+            60,
+            62
+          ]
+        ],
+        "material_names": [
+          "Steel"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": null,
+        "name": "Leg_FL",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          1.570796,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -0.9,
+            0,
+            0.42
+          ],
+          [
+            -0.9,
+            1.2,
+            0.42
+          ],
+          [
+            -0.884393,
+            0,
+            0.421537
+          ],
+          [
+            -0.884393,
+            1.2,
+            0.421537
+          ],
+          [
+            -0.869385,
+            0,
+            0.42609
+          ],
+          [
+            -0.869385,
+            1.2,
+            0.42609
+          ],
+          [
+            -0.855554,
+            0,
+            0.433482
+          ],
+          [
+            -0.855554,
+            1.2,
+            0.433482
+          ],
+          [
+            -0.843431,
+            0,
+            0.443431
+          ],
+          [
+            -0.843431,
+            1.2,
+            0.443431
+          ],
+          [
+            -0.833482,
+            0,
+            0.455554
+          ],
+          [
+            -0.833482,
+            1.2,
+            0.455554
+          ],
+          [
+            -0.82609,
+            0,
+            0.469385
+          ],
+          [
+            -0.82609,
+            1.2,
+            0.469385
+          ],
+          [
+            -0.821537,
+            0,
+            0.484393
+          ],
+          [
+            -0.821537,
+            1.2,
+            0.484393
+          ],
+          [
+            -0.82,
+            0,
+            0.5
+          ],
+          [
+            -0.82,
+            1.2,
+            0.5
+          ],
+          [
+            -0.821537,
+            0,
+            0.515607
+          ],
+          [
+            -0.821537,
+            1.2,
+            0.515607
+          ],
+          [
+            -0.82609,
+            0,
+            0.530615
+          ],
+          [
+            -0.82609,
+            1.2,
+            0.530615
+          ],
+          [
+            -0.833482,
+            0,
+            0.544446
+          ],
+          [
+            -0.833482,
+            1.2,
+            0.544446
+          ],
+          [
+            -0.843431,
+            0,
+            0.556569
+          ],
+          [
+            -0.843431,
+            1.2,
+            0.556569
+          ],
+          [
+            -0.855554,
+            0,
+            0.566518
+          ],
+          [
+            -0.855554,
+            1.2,
+            0.566518
+          ],
+          [
+            -0.869385,
+            0,
+            0.57391
+          ],
+          [
+            -0.869385,
+            1.2,
+            0.57391
+          ],
+          [
+            -0.884393,
+            0,
+            0.578463
+          ],
+          [
+            -0.884393,
+            1.2,
+            0.578463
+          ],
+          [
+            -0.9,
+            0,
+            0.58
+          ],
+          [
+            -0.9,
+            1.2,
+            0.58
+          ],
+          [
+            -0.915607,
+            0,
+            0.578463
+          ],
+          [
+            -0.915607,
+            1.2,
+            0.578463
+          ],
+          [
+            -0.930615,
+            0,
+            0.57391
+          ],
+          [
+            -0.930615,
+            1.2,
+            0.57391
+          ],
+          [
+            -0.944446,
+            0,
+            0.566518
+          ],
+          [
+            -0.944446,
+            1.2,
+            0.566518
+          ],
+          [
+            -0.956569,
+            0,
+            0.556569
+          ],
+          [
+            -0.956569,
+            1.2,
+            0.556569
+          ],
+          [
+            -0.966518,
+            0,
+            0.544446
+          ],
+          [
+            -0.966518,
+            1.2,
+            0.544446
+          ],
+          [
+            -0.97391,
+            0,
+            0.530615
+          ],
+          [
+            -0.97391,
+            1.2,
+            0.530615
+          ],
+          [
+            -0.978463,
+            0,
+            0.515607
+          ],
+          [
+            -0.978463,
+            1.2,
+            0.515607
+          ],
+          [
+            -0.98,
+            0,
+            0.5
+          ],
+          [
+            -0.98,
+            1.2,
+            0.5
+          ],
+          [
+            -0.978463,
+            0,
+            0.484393
+          ],
+          [
+            -0.978463,
+            1.2,
+            0.484393
+          ],
+          [
+            -0.97391,
+            0,
+            0.469385
+          ],
+          [
+            -0.97391,
+            1.2,
+            0.469385
+          ],
+          [
+            -0.966518,
+            0,
+            0.455554
+          ],
+          [
+            -0.966518,
+            1.2,
+            0.455554
+          ],
+          [
+            -0.956569,
+            0,
+            0.443431
+          ],
+          [
+            -0.956569,
+            1.2,
+            0.443431
+          ],
+          [
+            -0.944446,
+            0,
+            0.433482
+          ],
+          [
+            -0.944446,
+            1.2,
+            0.433482
+          ],
+          [
+            -0.930615,
+            0,
+            0.42609
+          ],
+          [
+            -0.930615,
+            1.2,
+            0.42609
+          ],
+          [
+            -0.915607,
+            0,
+            0.421537
+          ],
+          [
+            -0.915607,
+            1.2,
+            0.421537
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            9,
+            8
+          ],
+          [
+            8,
+            9,
+            11,
+            10
+          ],
+          [
+            10,
+            11,
+            13,
+            12
+          ],
+          [
+            12,
+            13,
+            15,
+            14
+          ],
+          [
+            14,
+            15,
+            17,
+            16
+          ],
+          [
+            16,
+            17,
+            19,
+            18
+          ],
+          [
+            18,
+            19,
+            21,
+            20
+          ],
+          [
+            20,
+            21,
+            23,
+            22
+          ],
+          [
+            22,
+            23,
+            25,
+            24
+          ],
+          [
+            24,
+            25,
+            27,
+            26
+          ],
+          [
+            26,
+            27,
+            29,
+            28
+          ],
+          [
+            28,
+            29,
+            31,
+            30
+          ],
+          [
+            30,
+            31,
+            33,
+            32
+          ],
+          [
+            32,
+            33,
+            35,
+            34
+          ],
+          [
+            34,
+            35,
+            37,
+            36
+          ],
+          [
+            36,
+            37,
+            39,
+            38
+          ],
+          [
+            38,
+            39,
+            41,
+            40
+          ],
+          [
+            40,
+            41,
+            43,
+            42
+          ],
+          [
+            42,
+            43,
+            45,
+            44
+          ],
+          [
+            44,
+            45,
+            47,
+            46
+          ],
+          [
+            46,
+            47,
+            49,
+            48
+          ],
+          [
+            48,
+            49,
+            51,
+            50
+          ],
+          [
+            50,
+            51,
+            53,
+            52
+          ],
+          [
+            52,
+            53,
+            55,
+            54
+          ],
+          [
+            54,
+            55,
+            57,
+            56
+          ],
+          [
+            56,
+            57,
+            59,
+            58
+          ],
+          [
+            58,
+            59,
+            61,
+            60
+          ],
+          [
+            3,
+            1,
+            63,
+            61,
+            59,
+            57,
+            55,
+            53,
+            51,
+            49,
+            47,
+            45,
+            43,
+            41,
+            39,
+            37,
+            35,
+            33,
+            31,
+            29,
+            27,
+            25,
+            23,
+            21,
+            19,
+            17,
+            15,
+            13,
+            11,
+            9,
+            7,
+            5
+          ],
+          [
+            60,
+            61,
+            63,
+            62
+          ],
+          [
+            62,
+            63,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            4,
+            6,
+            8,
+            10,
+            12,
+            14,
+            16,
+            18,
+            20,
+            22,
+            24,
+            26,
+            28,
+            30,
+            32,
+            34,
+            36,
+            38,
+            40,
+            42,
+            44,
+            46,
+            48,
+            50,
+            52,
+            54,
+            56,
+            58,
+            60,
+            62
+          ]
+        ],
+        "material_names": [
+          "Steel"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": null,
+        "name": "Leg_FR",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          1.570796,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            0.9,
+            0,
+            0.42
+          ],
+          [
+            0.9,
+            1.2,
+            0.42
+          ],
+          [
+            0.915607,
+            0,
+            0.421537
+          ],
+          [
+            0.915607,
+            1.2,
+            0.421537
+          ],
+          [
+            0.930615,
+            0,
+            0.42609
+          ],
+          [
+            0.930615,
+            1.2,
+            0.42609
+          ],
+          [
+            0.944446,
+            0,
+            0.433482
+          ],
+          [
+            0.944446,
+            1.2,
+            0.433482
+          ],
+          [
+            0.956569,
+            0,
+            0.443431
+          ],
+          [
+            0.956569,
+            1.2,
+            0.443431
+          ],
+          [
+            0.966518,
+            0,
+            0.455554
+          ],
+          [
+            0.966518,
+            1.2,
+            0.455554
+          ],
+          [
+            0.97391,
+            0,
+            0.469385
+          ],
+          [
+            0.97391,
+            1.2,
+            0.469385
+          ],
+          [
+            0.978463,
+            0,
+            0.484393
+          ],
+          [
+            0.978463,
+            1.2,
+            0.484393
+          ],
+          [
+            0.98,
+            0,
+            0.5
+          ],
+          [
+            0.98,
+            1.2,
+            0.5
+          ],
+          [
+            0.978463,
+            0,
+            0.515607
+          ],
+          [
+            0.978463,
+            1.2,
+            0.515607
+          ],
+          [
+            0.97391,
+            0,
+            0.530615
+          ],
+          [
+            0.97391,
+            1.2,
+            0.530615
+          ],
+          [
+            0.966518,
+            0,
+            0.544446
+          ],
+          [
+            0.966518,
+            1.2,
+            0.544446
+          ],
+          [
+            0.956569,
+            0,
+            0.556569
+          ],
+          [
+            0.956569,
+            1.2,
+            0.556569
+          ],
+          [
+            0.944446,
+            0,
+            0.566518
+          ],
+          [
+            0.944446,
+            1.2,
+            0.566518
+          ],
+          [
+            0.930615,
+            0,
+            0.57391
+          ],
+          [
+            0.930615,
+            1.2,
+            0.57391
+          ],
+          [
+            0.915607,
+            0,
+            0.578463
+          ],
+          [
+            0.915607,
+            1.2,
+            0.578463
+          ],
+          [
+            0.9,
+            0,
+            0.58
+          ],
+          [
+            0.9,
+            1.2,
+            0.58
+          ],
+          [
+            0.884393,
+            0,
+            0.578463
+          ],
+          [
+            0.884393,
+            1.2,
+            0.578463
+          ],
+          [
+            0.869385,
+            0,
+            0.57391
+          ],
+          [
+            0.869385,
+            1.2,
+            0.57391
+          ],
+          [
+            0.855554,
+            0,
+            0.566518
+          ],
+          [
+            0.855554,
+            1.2,
+            0.566518
+          ],
+          [
+            0.843431,
+            0,
+            0.556569
+          ],
+          [
+            0.843431,
+            1.2,
+            0.556569
+          ],
+          [
+            0.833482,
+            0,
+            0.544446
+          ],
+          [
+            0.833482,
+            1.2,
+            0.544446
+          ],
+          [
+            0.82609,
+            0,
+            0.530615
+          ],
+          [
+            0.82609,
+            1.2,
+            0.530615
+          ],
+          [
+            0.821537,
+            0,
+            0.515607
+          ],
+          [
+            0.821537,
+            1.2,
+            0.515607
+          ],
+          [
+            0.82,
+            0,
+            0.5
+          ],
+          [
+            0.82,
+            1.2,
+            0.5
+          ],
+          [
+            0.821537,
+            0,
+            0.484393
+          ],
+          [
+            0.821537,
+            1.2,
+            0.484393
+          ],
+          [
+            0.82609,
+            0,
+            0.469385
+          ],
+          [
+            0.82609,
+            1.2,
+            0.469385
+          ],
+          [
+            0.833482,
+            0,
+            0.455554
+          ],
+          [
+            0.833482,
+            1.2,
+            0.455554
+          ],
+          [
+            0.843431,
+            0,
+            0.443431
+          ],
+          [
+            0.843431,
+            1.2,
+            0.443431
+          ],
+          [
+            0.855554,
+            0,
+            0.433482
+          ],
+          [
+            0.855554,
+            1.2,
+            0.433482
+          ],
+          [
+            0.869385,
+            0,
+            0.42609
+          ],
+          [
+            0.869385,
+            1.2,
+            0.42609
+          ],
+          [
+            0.884393,
+            0,
+            0.421537
+          ],
+          [
+            0.884393,
+            1.2,
+            0.421537
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            9,
+            8
+          ],
+          [
+            8,
+            9,
+            11,
+            10
+          ],
+          [
+            10,
+            11,
+            13,
+            12
+          ],
+          [
+            12,
+            13,
+            15,
+            14
+          ],
+          [
+            14,
+            15,
+            17,
+            16
+          ],
+          [
+            16,
+            17,
+            19,
+            18
+          ],
+          [
+            18,
+            19,
+            21,
+            20
+          ],
+          [
+            20,
+            21,
+            23,
+            22
+          ],
+          [
+            22,
+            23,
+            25,
+            24
+          ],
+          [
+            24,
+            25,
+            27,
+            26
+          ],
+          [
+            26,
+            27,
+            29,
+            28
+          ],
+          [
+            28,
+            29,
+            31,
+            30
+          ],
+          [
+            30,
+            31,
+            33,
+            32
+          ],
+          [
+            32,
+            33,
+            35,
+            34
+          ],
+          [
+            34,
+            35,
+            37,
+            36
+          ],
+          [
+            36,
+            37,
+            39,
+            38
+          ],
+          [
+            38,
+            39,
+            41,
+            40
+          ],
+          [
+            40,
+            41,
+            43,
+            42
+          ],
+          [
+            42,
+            43,
+            45,
+            44
+          ],
+          [
+            44,
+            45,
+            47,
+            46
+          ],
+          [
+            46,
+            47,
+            49,
+            48
+          ],
+          [
+            48,
+            49,
+            51,
+            50
+          ],
+          [
+            50,
+            51,
+            53,
+            52
+          ],
+          [
+            52,
+            53,
+            55,
+            54
+          ],
+          [
+            54,
+            55,
+            57,
+            56
+          ],
+          [
+            56,
+            57,
+            59,
+            58
+          ],
+          [
+            58,
+            59,
+            61,
+            60
+          ],
+          [
+            3,
+            1,
+            63,
+            61,
+            59,
+            57,
+            55,
+            53,
+            51,
+            49,
+            47,
+            45,
+            43,
+            41,
+            39,
+            37,
+            35,
+            33,
+            31,
+            29,
+            27,
+            25,
+            23,
+            21,
+            19,
+            17,
+            15,
+            13,
+            11,
+            9,
+            7,
+            5
+          ],
+          [
+            60,
+            61,
+            63,
+            62
+          ],
+          [
+            62,
+            63,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            4,
+            6,
+            8,
+            10,
+            12,
+            14,
+            16,
+            18,
+            20,
+            22,
+            24,
+            26,
+            28,
+            30,
+            32,
+            34,
+            36,
+            38,
+            40,
+            42,
+            44,
+            46,
+            48,
+            50,
+            52,
+            54,
+            56,
+            58,
+            60,
+            62
+          ]
+        ],
+        "material_names": [
+          "Steel"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": null,
+        "name": "TableTop",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          1.570796,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -1.2,
+            1.14,
+            0.7
+          ],
+          [
+            -1.2,
+            1.26,
+            0.7
+          ],
+          [
+            -1.2,
+            1.14,
+            -0.7
+          ],
+          [
+            -1.2,
+            1.26,
+            -0.7
+          ],
+          [
+            1.2,
+            1.14,
+            0.7
+          ],
+          [
+            1.2,
+            1.26,
+            0.7
+          ],
+          [
+            1.2,
+            1.14,
+            -0.7
+          ],
+          [
+            1.2,
+            1.26,
+            -0.7
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            1,
+            0
+          ],
+          [
+            2,
+            6,
+            4,
+            0
+          ],
+          [
+            7,
+            3,
+            1,
+            5
+          ]
+        ],
+        "material_names": [
+          "Wood"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "materials": [
+      {
+        "name": "Steel",
+        "base_color": [
+          0.7,
+          0.72,
+          0.75,
+          1
+        ],
+        "roughness": 0.25,
+        "metallic": 0.9
+      },
+      {
+        "name": "Steel.001",
+        "base_color": [
+          0.7,
+          0.72,
+          0.75,
+          1
+        ],
+        "roughness": 0.25,
+        "metallic": 0.9
+      },
+      {
+        "name": "Wood",
+        "base_color": [
+          0.45,
+          0.26,
+          0.12,
+          1
+        ],
+        "roughness": 0.6,
+        "metallic": 0
+      },
+      {
+        "name": "Wood.001",
+        "base_color": [
+          0.45,
+          0.26,
+          0.12,
+          1
+        ],
+        "roughness": 0.6,
+        "metallic": 0
+      }
+    ]
+  },
+  "artifacts": [
+    "t1_table.glb",
+    "t1_table.obj"
+  ],
+  "wall_clock_s": 10.04,
+  "runtime_exit": "ok"
+}

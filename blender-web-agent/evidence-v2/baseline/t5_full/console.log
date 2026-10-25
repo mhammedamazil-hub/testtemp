@@ -1,0 +1,56 @@
+Failed to load resource: the server responded with a status of 404 (Not Found)
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!
+<string>:493: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+WARNING Unsupported platform emscripten, Draco is unavailable
+INFO Draco compression is unavailable on this platform
+WARNING Unsupported platform emscripten, MeshOptimizer is unavailable
+INFO MeshOptimizer compression is unavailable on this platform
+10:58:04 | INFO: Starting glTF 2.0 export
+10:58:04 | INFO: Extracting primitive: Cube
+10:58:04 | INFO: Primitives created: 1
+10:58:04 | INFO: Extracting primitive: Sphere
+10:58:04 | INFO: Primitives created: 1
+10:58:05 | INFO: Finished glTF 2.0 export in 0.2049999237060547 s
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t5_full.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+10:58:05 | INFO: Starting glTF 2.0 export
+10:58:05 | INFO: Extracting primitive: Cube
+10:58:05 | INFO: Primitives created: 1
+10:58:05 | INFO: Extracting primitive: Sphere
+10:58:05 | INFO: Primitives created: 1
+10:58:05 | INFO: Finished glTF 2.0 export in 0.03099966049194336 s
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t5_full.gltf'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t5_full.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Info: Saved as "t5_full.blend"
+10:58:05 | INFO: Data are loaded, start creating Blender stuff
+10:58:05 | INFO: Blender create Mesh node Cube
+10:58:05 | INFO: Blender create Mesh node Sphere
+10:58:05 | INFO: glTF import finished in 0.07s
+10:58:05 | INFO: Data are loaded, start creating Blender stuff
+10:58:05 | INFO: Blender create Mesh node Cube
+10:58:05 | INFO: Blender create Mesh node Sphere
+10:58:05 | INFO: glTF import finished in 0.07s
+<string>:630: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t5_full.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:193: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t5_full.gltf'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t5_full.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+BW_RESULT {"schema": "bw.agent.ops/v2", "blender": "5.2.0 LTS", "plan_ok": true, "tasks": [{"id": "t5_full", "goal": "Full pipeline: extrude + bevel + material + camera + light, export and re-import", "ops": [{"op": "scene.reset", "op_id": null, "ok": true, "result": {"objects": 0}, "scene": {"objects": {}, "object_count": 0, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "odeed78b83f", "name": "Block", "created": true, "verts": 8, "dimensions": [2.0, 2.0, 2.0]}, "scene": {"objects": {"Block": {"bw_id": "odeed78b83f", "name": "Block", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.0], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "mesh.extrude", "op_id": null, "ok": true, "result": {"bw_id": "odeed78b83f", "verts_before": 8, "verts": 12, "faces_before": 6, "faces": 10, "axes": "Z"}, "scene": {"objects": {"Block": {"bw_id": "odeed78b83f", "name": "Block", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.8], "verts": 12, "faces": 10, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "mesh.bevel", "op_id": null, "ok": true, "result": {"bw_id": "odeed78b83f", "verts_before": 12, "verts": 68}, "scene": {"objects": {"Block": {"bw_id": "odeed78b83f", "name": "Block", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.8], "verts": 68, "faces": 66, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "o22483afe18", "name": "Orb", "created": true, "verts": 482, "dimen
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t5_full.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[shell] artifact t5_full.blend -> 200
+[shell] artifact t5_full.blend -> 200
+BW_DONE
+[shell] artifact upload failed: TypeError: Cannot read properties of null (reading 'name')
+
+Blender quit
+[shell] EXIT 0

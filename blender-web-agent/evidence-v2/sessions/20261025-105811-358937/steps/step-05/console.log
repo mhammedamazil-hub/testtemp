@@ -1,0 +1,54 @@
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!
+<string>:226: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+WARNING Unsupported platform emscripten, Draco is unavailable
+INFO Draco compression is unavailable on this platform
+WARNING Unsupported platform emscripten, MeshOptimizer is unavailable
+INFO MeshOptimizer compression is unavailable on this platform
+10:59:41 | INFO: Starting glTF 2.0 export
+10:59:41 | INFO: Extracting primitive: Cockpit
+10:59:41 | INFO: Primitives created: 1
+10:59:41 | INFO: Extracting primitive: Fuselage
+10:59:41 | INFO: Primitives created: 1
+10:59:41 | INFO: Extracting primitive: Wing_L
+10:59:41 | INFO: Primitives created: 1
+10:59:41 | INFO: Extracting primitive: Wing_R
+10:59:41 | INFO: Primitives created: 1
+10:59:41 | INFO: Finished glTF 2.0 export in 0.18400001525878906 s
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft_final.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Writing to /tmp/bw_export/spacecraft_final.obj
+OBJ export of 'spacecraft_final.obj' took 11.37 ms
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft_final.obj'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft_final.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Info: File exported successfully
+Info: Saved as "spacecraft_final.blend"
+10:59:41 | INFO: Data are loaded, start creating Blender stuff
+10:59:41 | INFO: Blender create Mesh node Cockpit
+10:59:41 | INFO: Blender create Mesh node Fuselage
+10:59:41 | INFO: Blender create Mesh node Wing_L
+10:59:41 | INFO: Blender create Mesh node Wing_R
+10:59:41 | INFO: glTF import finished in 0.06s
+OBJ import of 'spacecraft_final.obj' took 27.42 ms
+<string>:630: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft_final.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:193: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft_final.obj'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+BW_RESULT {"schema": "bw.agent.ops/v2", "blender": "5.2.0 LTS", "plan_ok": true, "tasks": [{"id": "final_delivery", "goal": "Remove the retry-test antenna and export the delivered spacecraft", "ops": [{"op": "object.delete", "op_id": null, "ok": true, "result": {"bw_id": "o595c5bd2ae", "deleted": "Antenna"}, "scene": {"objects": {"Cockpit": {"bw_id": "obf23b6658c", "name": "Cockpit", "type": "MESH", "location": [0.0, 0.0, 0.0], "rotation": [1.570796, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [0.9, 0.9, 0.9], "verts": 62, "faces": 72, "materials": ["CockpitGlass"]}, "Fuselage": {"bw_id": "o3a1ba96ef4", "name": "Fuselage", "type": "MESH", "location": [0.0, 0.0, 0.0], "rotation": [1.570796, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [0.8, 0.7, 3.6], "verts": 56, "faces": 54, "materials": ["HullWhite"]}, "Wing_L": {"bw_id": "o40edaaeb30", "name": "Wing_L", "type": "MESH", "location": [0.0, 0.0, 0.0], "rotation": [1.570796, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.37044, 0.08, 1.535788], "verts": 8, "faces": 6, "materials": ["HullWhite"]}, "Wing_R": {"bw_id": "o710012f513", "name": "Wing_R", "type": "MESH", "location": [0.0, 0.0, 0.0], "rotation": [1.570796, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.37044, 0.08, 1.535788], "verts": 8, "faces": 6, "materials": ["HullWhite"]}}, "object_count": 4, "materials": ["CockpitGlass", "CockpitGlass.001", "HullWhite", "HullWhite.001", "Material", "Material.001"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "export", "op_id": null, "ok": true, "result": {"glb": {"ok": true, "bytes": 17644, "file": "spacecraft_final.glb", "sha256": "d7bdda332eb0a90af699a5800832e7bbdbaa80a66794cfd9b0259f43da8df2c3"}, "obj": {"ok": true, "bytes": 11889, "file": "spacecraft_final.obj", "sha256": "e2da16b956e50329c15d196d72fb46f68e7c5f97be46bb86bec335bf0e7d8c5d"}, "blend": {"ok": true, "bytes": 98639, "file": "spacecraft_final.blend", "sha256": "61e10f1f80382dba3e08ef286e9d3a773d8cf62ae465cf6eb16f355c8f2c6
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft_final.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft_final.blend'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[shell] artifact spacecraft_final.glb -> 200
+[shell] artifact spacecraft_final.blend -> 200
+BW_DONE
+[shell] artifact upload failed: TypeError: Cannot read properties of null (reading 'name')
+
+Blender quit
+[shell] EXIT 0

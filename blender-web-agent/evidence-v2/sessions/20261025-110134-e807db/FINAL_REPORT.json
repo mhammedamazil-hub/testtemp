@@ -1,0 +1,78 @@
+{
+  "summary": "s1_dimensioned_object: 1 step(s), 4 checks passed",
+  "delivered_artifacts": [
+    "bracket.glb",
+    "bracket.stl"
+  ],
+  "artifact_index": {
+    "bracket.glb": {
+      "bytes": 8864,
+      "sha256": "76c1347952bbcf5ccf6f538036344da1446c8e117ab702c8f9e9a00fd0059dc1",
+      "from_blender": true,
+      "independent_verification": {
+        "magic": "glTF",
+        "version": 2,
+        "declared_length": 8864,
+        "actual_length": 8864,
+        "chunks": [
+          {
+            "type": "JSON",
+            "bytes": 1276
+          },
+          {
+            "type": "BIN",
+            "bytes": 7560
+          }
+        ],
+        "meshes": 1,
+        "materials": [
+          "AnodizedAluminium"
+        ],
+        "nodes": 1,
+        "accessors": 4,
+        "primitives": 1,
+        "vertices": 216,
+        "generator": "Khronos glTF Blender I/O v5.2.39",
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-110134-e807db/artifacts/s1-bracket.glb"
+    },
+    "bracket.stl": {
+      "bytes": 5484,
+      "sha256": "9d9c6132a129249f3665f71966c44e01245ffb8c26b80bd100e3468315fea06f",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "format": "binary",
+        "triangles": 108,
+        "expected_bytes": 5484,
+        "actual_bytes": 5484
+      },
+      "kept_as": "sessions/20261025-110134-e807db/artifacts/s1-bracket.stl"
+    }
+  },
+  "steps_used": 1,
+  "scene": {
+    "objects": [
+      {
+        "name": "Bracket",
+        "bw_id": "o1529cb75e0",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0.025
+        ],
+        "verts": 56,
+        "faces": 54,
+        "materials": [
+          "AnodizedAluminium"
+        ]
+      }
+    ],
+    "materials": [
+      "AnodizedAluminium"
+    ]
+  },
+  "finished_at": "2026-10-25T11:01:44Z"
+}

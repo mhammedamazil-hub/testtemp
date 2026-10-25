@@ -1,0 +1,155 @@
+{
+  "summary": "s3_architecture: 1 step(s), 4 checks passed",
+  "delivered_artifacts": [
+    "room.glb",
+    "room.usda"
+  ],
+  "artifact_index": {
+    "room.glb": {
+      "bytes": 8820,
+      "sha256": "242cfee2efe878affea032c32ee8036341ac9ed674b1ba5fea034abe6fe972cc",
+      "from_blender": true,
+      "independent_verification": {
+        "magic": "glTF",
+        "version": 2,
+        "declared_length": 8820,
+        "actual_length": 8820,
+        "chunks": [
+          {
+            "type": "JSON",
+            "bytes": 3612
+          },
+          {
+            "type": "BIN",
+            "bytes": 5180
+          }
+        ],
+        "meshes": 4,
+        "materials": [
+          "Concrete",
+          "FloorOak"
+        ],
+        "nodes": 4,
+        "accessors": 15,
+        "primitives": 4,
+        "vertices": 148,
+        "generator": "Khronos glTF Blender I/O v5.2.39",
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-110034-bfdda6/artifacts/s1-room.glb"
+    },
+    "room.usda": {
+      "bytes": 16872,
+      "sha256": "34ac35f26e08006c7fb3fb38e389af415c3f599bc732b0c2379435a7bb55711a",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "meshes": 4,
+        "materials": 2,
+        "bytes": 16872
+      },
+      "kept_as": "sessions/20261025-110034-bfdda6/artifacts/s1-room.usda"
+    }
+  },
+  "steps_used": 1,
+  "scene": {
+    "objects": [
+      {
+        "name": "Cam",
+        "bw_id": "o411338bdbc",
+        "type": "CAMERA",
+        "location": [
+          4.2,
+          -4.6,
+          2.4
+        ]
+      },
+      {
+        "name": "Column",
+        "bw_id": "oc74652cd27",
+        "type": "MESH",
+        "location": [
+          1.6,
+          -1.2,
+          1.4
+        ],
+        "verts": 32,
+        "faces": 18,
+        "materials": [
+          "Concrete"
+        ]
+      },
+      {
+        "name": "Daylight",
+        "bw_id": "o6aaa8e7811",
+        "type": "LIGHT",
+        "location": [
+          4,
+          -3,
+          7
+        ]
+      },
+      {
+        "name": "Fill",
+        "bw_id": "o39bdaa2e04",
+        "type": "LIGHT",
+        "location": [
+          0,
+          1.5,
+          2.4
+        ]
+      },
+      {
+        "name": "Floor",
+        "bw_id": "o3245fc4567",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0
+        ],
+        "verts": 4,
+        "faces": 1,
+        "materials": [
+          "FloorOak"
+        ]
+      },
+      {
+        "name": "Wall_N",
+        "bw_id": "o14865039ef",
+        "type": "MESH",
+        "location": [
+          0,
+          2.5,
+          1.4
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "Concrete"
+        ]
+      },
+      {
+        "name": "Wall_W",
+        "bw_id": "oc67215d773",
+        "type": "MESH",
+        "location": [
+          -3,
+          0,
+          1.4
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "Concrete"
+        ]
+      }
+    ],
+    "materials": [
+      "Concrete",
+      "FloorOak",
+      "Material"
+    ]
+  },
+  "finished_at": "2026-10-25T11:00:47Z"
+}

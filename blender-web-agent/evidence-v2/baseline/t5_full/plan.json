@@ -1,0 +1,130 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "trace_id": "baseline-t5_full",
+  "tasks": [
+    {
+      "id": "t5_full",
+      "goal": "Full pipeline: extrude + bevel + material + camera + light, export and re-import",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Block",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            1.0
+          ]
+        },
+        {
+          "op": "mesh.extrude",
+          "target": "Block",
+          "distance": 0.8,
+          "axis": "Z"
+        },
+        {
+          "op": "mesh.bevel",
+          "target": "Block",
+          "width": 0.05,
+          "segments": 2
+        },
+        {
+          "op": "object.create",
+          "type": "sphere",
+          "name": "Orb",
+          "radius": 0.55,
+          "location": [
+            1.7,
+            0,
+            1.4
+          ]
+        },
+        {
+          "op": "material.create",
+          "name": "Slate",
+          "base_color": [
+            0.2,
+            0.22,
+            0.26
+          ],
+          "roughness": 0.5
+        },
+        {
+          "op": "material.create",
+          "name": "Gold",
+          "base_color": [
+            0.95,
+            0.75,
+            0.25
+          ],
+          "roughness": 0.2,
+          "metallic": 1.0
+        },
+        {
+          "op": "material.assign",
+          "material": "Slate",
+          "target": "Block"
+        },
+        {
+          "op": "material.assign",
+          "material": "Gold",
+          "target": "Orb"
+        },
+        {
+          "op": "camera.create",
+          "name": "Cam",
+          "location": [
+            5,
+            -5,
+            3.6
+          ],
+          "look_at": [
+            0.6,
+            0,
+            1.2
+          ]
+        },
+        {
+          "op": "light.create",
+          "type": "SUN",
+          "name": "Sun",
+          "location": [
+            4,
+            3,
+            7
+          ],
+          "energy": 4.5
+        },
+        {
+          "op": "scene.inspect"
+        },
+        {
+          "op": "export",
+          "prefix": "t5_full",
+          "formats": [
+            "glb",
+            "gltf",
+            "blend"
+          ]
+        },
+        {
+          "op": "validate.roundtrip",
+          "prefix": "t5_full",
+          "formats": [
+            "glb",
+            "gltf",
+            "blend"
+          ]
+        }
+      ],
+      "expect": {
+        "meshes": 2,
+        "materials": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "summary": "s2_lowpoly_robot: 1 step(s), 4 checks passed",
+  "delivered_artifacts": [
+    "robot.glb",
+    "robot.obj"
+  ],
+  "artifact_index": {
+    "robot.glb": {
+      "bytes": 13084,
+      "sha256": "4b021d0564f4ce22a3a6db9b8a48b7633d30d52b059335bc2d9f2d214adca11e",
+      "from_blender": true,
+      "independent_verification": {
+        "magic": "glTF",
+        "version": 2,
+        "declared_length": 13084,
+        "actual_length": 13084,
+        "chunks": [
+          {
+            "type": "JSON",
+            "bytes": 5040
+          },
+          {
+            "type": "BIN",
+            "bytes": 8016
+          }
+        ],
+        "meshes": 6,
+        "materials": [
+          "RobotShell",
+          "Visor"
+        ],
+        "nodes": 6,
+        "accessors": 20,
+        "primitives": 6,
+        "vertices": 240,
+        "generator": "Khronos glTF Blender I/O v5.2.39",
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-110144-9db70a/artifacts/s1-robot.glb"
+    },
+    "robot.obj": {
+      "bytes": 9528,
+      "sha256": "bd6a7567ef9307a599e1adee5212b5cbf5b5475971958e13aa546a0eddde335e",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "vertices": 80,
+        "faces": 52
+      },
+      "kept_as": "sessions/20261025-110144-9db70a/artifacts/s1-robot.obj"
+    }
+  },
+  "steps_used": 1,
+  "scene": {
+    "objects": [
+      {
+        "name": "Arm_L",
+        "bw_id": "o4f154ec1bf",
+        "type": "MESH",
+        "location": [
+          -0.5,
+          0,
+          1.25
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "RobotShell"
+        ]
+      },
+      {
+        "name": "Arm_R",
+        "bw_id": "oa69e099f58",
+        "type": "MESH",
+        "location": [
+          0.5,
+          0,
+          1.25
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "RobotShell"
+        ]
+      },
+      {
+        "name": "Cam",
+        "bw_id": "o920fb27fdb",
+        "type": "CAMERA",
+        "location": [
+          2.6,
+          -3,
+          2.2
+        ]
+      },
+      {
+        "name": "Head",
+        "bw_id": "oac682c566f",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          1.85
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "Visor"
+        ]
+      },
+      {
+        "name": "Key",
+        "bw_id": "o55a202ff9a",
+        "type": "LIGHT",
+        "location": [
+          3,
+          -2,
+          5
+        ]
+      },
+      {
+        "name": "Leg_L",
+        "bw_id": "o12360b80af",
+        "type": "MESH",
+        "location": [
+          -0.19,
+          0,
+          0.35
+        ],
+        "verts": 24,
+        "faces": 14,
+        "materials": [
+          "RobotShell"
+        ]
+      },
+      {
+        "name": "Leg_R",
+        "bw_id": "o02e9537774",
+        "type": "MESH",
+        "location": [
+          0.19,
+          0,
+          0.35
+        ],
+        "verts": 24,
+        "faces": 14,
+        "materials": [
+          "RobotShell"
+        ]
+      },
+      {
+        "name": "Torso",
+        "bw_id": "obc9af4de55",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          1.2
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "RobotShell"
+        ]
+      }
+    ],
+    "materials": [
+      "RobotShell",
+      "Visor"
+    ]
+  },
+  "finished_at": "2026-10-25T11:01:55Z"
+}

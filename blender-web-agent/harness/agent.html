@@ -5,19 +5,31 @@
 <pre id="state">idle</pre><pre id="log"></pre>
 <script src="/bin/blender_browser.js"></script>
 <script>
+let art = null;
+window.__bwArtifactsPending = 0;
 (async () => {
   const setState = (s) => { document.getElementById('state').textContent = s; };
-  const log = (l) => { console.log(l); };
   setState('fetching agent script');
-  // Load the versioned op-plan and the in-Blender executor. The plan is passed
-  // base64-encoded so no quoting can break the --python-expr argument.
+  // The op-plan and (optionally) the scene snapshot to restore are handed to
+  // Blender through --python-expr, base64-encoded so no quoting can break argv.
   const src = await (await fetch('/bw_ops.py', {cache: 'no-store'})).text();
-  const planFile = new URLSearchParams(location.search).get('plan') || 'plan.json';
-  const all = await (await fetch('/' + planFile, {cache: 'no-store'})).json();
-  const want = new URLSearchParams(location.search).get('task');
-  const plan = want ? {...all, tasks: all.tasks.filter(t => t.id === want)} : all;
-  const planB64 = btoa(unescape(encodeURIComponent(JSON.stringify(plan))));
-  const script = src + "\n\nimport base64 as _b64\nBW_PLAN_JSON = _b64.b64decode('" + planB64 + "').decode()\nmain()\n";
+  const plan = await (await fetch('/plan.json', {cache: 'no-store'})).json();
+  let restore = null;
+  try {
+    const r = await fetch('/restore.json', {cache: 'no-store'});
+    if (r.ok) restore = await r.json();
+  } catch (e) { restore = null; }
+
+  const b64 = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o))));
+  let script = src + "\n\nimport base64 as _b64\n";
+  script += "BW_PLAN_JSON = _b64.b64decode('" + b64(plan) + "').decode()\n";
+  if (restore) {
+    script += "BW_RESTORE_JSON = _b64.b64decode('" + b64(restore) + "').decode()\n";
+  } else {
+    script += "BW_RESTORE_JSON = None\n";
+  }
+  script += "main()\n";
+
   const ARGV = ['--background', '--factory-startup', '--python-expr', script];
   const ENV_VARS = {
     BLENDER_SYSTEM_RESOURCES: '/bw',
@@ -30,16 +42,39 @@
     arguments: ARGV,
     canvas: document.getElementById('canvas'),
     locateFile: (p) => '/bin/' + p,
-    print: log,
-    printErr: (l) => console.error(l),
+    print: (l) => {
+      // Artifact markers never hit the console: the console stalls on large
+      // payloads, so bytes are POSTed back to the runner instead.
+      if (l.startsWith('BW_FILE_BEGIN ')) {
+        const parts = l.split(' ');
+        art = { name: parts[1], chunks: [] };
+        return;
+      }
+      if (l.startsWith('BW_CHUNK ')) { if (art) art.chunks.push(l.slice(9)); return; }
+      if (l.startsWith('BW_FILE_END ')) {
+        if (art) {
+          const bin = atob(art.chunks.join(''));
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          window.__bwArtifactsPending++;
+          fetch('/_artifact?name=' + encodeURIComponent(art.name), { method: 'POST', body: bytes })
+            .then(r => console.log('[shell] artifact ' + art.name + ' -> ' + r.status))
+            .catch(e => console.log('[shell] artifact upload failed: ' + e))
+            .finally(() => { window.__bwArtifactsPending--; });
+          art = null;
+        }
+        return;
+      }
+      console.log(l);
+    },
+    printErr: (l) => { console.error(l); },
     preRun: [(mod) => { const env = mod.ENV || (mod.ENV = {}); Object.assign(env, ENV_VARS); }],
     onRuntimeInitialized: () => { setState('runtime initialized'); console.log('[shell] runtime initialized'); },
     onAbort: (w) => { setState('aborted'); console.log('[shell] ABORT ' + w); },
     onExit: (c) => { setState('exited ' + c); console.log('[shell] EXIT ' + c); },
   };
   try {
-    const mod = await createBlenderModule(config);
-    window.__bwModule = mod;
+    window.__bwModule = await createBlenderModule(config);
     setState('booted');
   } catch (e) {
     if (e && typeof e.status === 'number') { setState('exited ' + e.status); console.log('[shell] EXIT ' + e.status); }

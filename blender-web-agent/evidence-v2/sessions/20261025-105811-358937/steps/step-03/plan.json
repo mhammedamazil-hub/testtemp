@@ -1,0 +1,29 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "deliver",
+      "goal": "Export GLB and OBJ and prove each re-imports into a clean scene",
+      "ops": [
+        {
+          "op": "export",
+          "prefix": "spacecraft",
+          "formats": [
+            "glb",
+            "obj"
+          ]
+        },
+        {
+          "op": "validate.roundtrip",
+          "prefix": "spacecraft",
+          "formats": [
+            "glb",
+            "obj"
+          ]
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-105811-358937-s3-375df5",
+  "limits": {}
+}

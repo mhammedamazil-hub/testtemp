@@ -1,0 +1,626 @@
+{
+  "session_id": "20261025-110227-49774e",
+  "task": "Export, independently inspect and re-import every supported format",
+  "created_at": 1792926147.289347,
+  "state": "finished",
+  "decided_by": "arena-llm (external orchestrator)",
+  "budget": {
+    "max_steps": 2,
+    "steps_used": 1
+  },
+  "timeout_s": 300.0,
+  "steps": [
+    {
+      "step": 1,
+      "trace_id": "20261025-110227-49774e-s1-1a31f4",
+      "decided_by": "arena-llm (external orchestrator)",
+      "submitted_at": "2026-10-25T11:02:27Z",
+      "elapsed_s": 11.25,
+      "ok": true,
+      "plan_ok": true,
+      "runtime": {
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_clock_s": 11.24,
+        "stale_processes_killed": 0,
+        "preflight": {
+          "runner": {
+            "where": "/home/user/testtemp/blender-web-agent/harness/run_plan.mjs",
+            "ok": true
+          },
+          "node": {
+            "where": "/usr/local/bin/node",
+            "ok": true
+          },
+          "chromium": {
+            "where": "/tmp/chromium",
+            "ok": true
+          },
+          "libs": {
+            "where": "/tmp/lib",
+            "ok": true
+          },
+          "wasm": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.wasm",
+            "ok": true
+          },
+          "data": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.data",
+            "ok": true
+          }
+        }
+      },
+      "tasks": [
+        "formats"
+      ],
+      "ops": [
+        {
+          "task": "formats",
+          "op": "scene.reset",
+          "ok": true,
+          "result": {
+            "objects": 0
+          }
+        },
+        {
+          "task": "formats",
+          "op": "object.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o260c97c165",
+            "name": "Slab",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        {
+          "task": "formats",
+          "op": "object.set_dimensions",
+          "ok": true,
+          "result": {
+            "bw_id": "o260c97c165",
+            "dimensions": [
+              1.2,
+              0.8,
+              0.2
+            ],
+            "scale_applied": true
+          }
+        },
+        {
+          "task": "formats",
+          "op": "object.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o84b9ad17db",
+            "name": "Ball",
+            "created": true,
+            "verts": 114,
+            "dimensions": [
+              0.6,
+              0.6,
+              0.6
+            ]
+          }
+        },
+        {
+          "task": "formats",
+          "op": "material.create",
+          "ok": true,
+          "result": {
+            "material": "Slate",
+            "created": true,
+            "base_color": [
+              0.3,
+              0.32,
+              0.36
+            ],
+            "roughness": 0.6,
+            "metallic": 0
+          }
+        },
+        {
+          "task": "formats",
+          "op": "material.create",
+          "ok": true,
+          "result": {
+            "material": "Copper",
+            "created": true,
+            "base_color": [
+              0.85,
+              0.45,
+              0.25
+            ],
+            "roughness": 0.25,
+            "metallic": 1
+          }
+        },
+        {
+          "task": "formats",
+          "op": "material.assign",
+          "ok": true,
+          "result": {
+            "bw_id": "o260c97c165",
+            "materials": [
+              "Slate"
+            ]
+          }
+        },
+        {
+          "task": "formats",
+          "op": "material.assign",
+          "ok": true,
+          "result": {
+            "bw_id": "o84b9ad17db",
+            "materials": [
+              "Copper"
+            ]
+          }
+        },
+        {
+          "task": "formats",
+          "op": "export",
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "bytes": 19780,
+              "file": "multi.glb",
+              "sha256": "c82429a7dcd8be08e982f75b0f0e08e4bc35dc6cafb3f4498bcb74a6b7e3714f"
+            },
+            "gltf": {
+              "ok": true,
+              "bytes": 3101,
+              "file": "multi.gltf",
+              "sha256": "c8cd22f5a4e301299ee8af898a3dd3293f1bbe3efd703e209393c2a09b845fc9"
+            },
+            "obj": {
+              "ok": true,
+              "bytes": 15771,
+              "file": "multi.obj",
+              "sha256": "33e3c87acd656d4c50a9b30657a2688242ebc4545c1c56853a92fc34c3acbad6"
+            },
+            "stl": {
+              "ok": true,
+              "bytes": 11884,
+              "file": "multi.stl",
+              "sha256": "c3a28dedb966feb1db1c208fd17e7eca969bb9ea3412f573dd58af2aa917b846"
+            },
+            "ply": {
+              "ok": true,
+              "bytes": 5703,
+              "file": "multi.ply",
+              "sha256": "e5e76fe2b6072226bd894cc3a9e9da94d6b3d93952426014e1fe9dcf006d7e9e"
+            },
+            "usda": {
+              "ok": true,
+              "bytes": 35612,
+              "file": "multi.usda",
+              "sha256": "30f575a1dae113e3df20ab4f5045985ff70ee89774bcdd9178b5a4f673e5f0f5"
+            },
+            "blend": {
+              "ok": true,
+              "bytes": 99366,
+              "file": "multi.blend",
+              "sha256": "c15ca238cca4b3a282ffb878617270c9563eba705ba38f23c3eff4612ec619f3"
+            }
+          }
+        },
+        {
+          "task": "formats",
+          "op": "validate.roundtrip",
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "objects": 2,
+              "meshes": 2,
+              "verts": 504,
+              "materials": 2
+            },
+            "gltf": {
+              "ok": true,
+              "objects": 2,
+              "meshes": 2,
+              "verts": 504,
+              "materials": 2
+            },
+            "obj": {
+              "ok": true,
+              "objects": 2,
+              "meshes": 2,
+              "verts": 122,
+              "materials": 2
+            },
+            "stl": {
+              "ok": true,
+              "objects": 1,
+              "meshes": 1,
+              "verts": 122,
+              "materials": 0
+            },
+            "ply": {
+              "ok": true,
+              "objects": 1,
+              "meshes": 1,
+              "verts": 165,
+              "materials": 0
+            },
+            "usda": {
+              "ok": true,
+              "objects": 3,
+              "meshes": 2,
+              "verts": 122,
+              "materials": 2
+            },
+            "blend": {
+              "ok": true,
+              "mode": "header-check",
+              "compression": "zstd",
+              "note": "not re-opened: open_mainfile destabilises this build"
+            }
+          }
+        }
+      ],
+      "errors": [],
+      "artifacts": {
+        "multi.blend": {
+          "bytes": 99366,
+          "sha256": "c15ca238cca4b3a282ffb878617270c9563eba705ba38f23c3eff4612ec619f3",
+          "from_blender": true,
+          "independent_verification": {
+            "ok": true,
+            "compression": "zstd",
+            "magic": "28b52ffd"
+          },
+          "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.blend"
+        },
+        "multi.glb": {
+          "bytes": 19780,
+          "sha256": "c82429a7dcd8be08e982f75b0f0e08e4bc35dc6cafb3f4498bcb74a6b7e3714f",
+          "from_blender": true,
+          "independent_verification": {
+            "magic": "glTF",
+            "version": 2,
+            "declared_length": 19780,
+            "actual_length": 19780,
+            "chunks": [
+              {
+                "type": "JSON",
+                "bytes": 2208
+              },
+              {
+                "type": "BIN",
+                "bytes": 17544
+              }
+            ],
+            "meshes": 2,
+            "materials": [
+              "Copper",
+              "Slate"
+            ],
+            "nodes": 2,
+            "accessors": 8,
+            "primitives": 2,
+            "vertices": 504,
+            "generator": "Khronos glTF Blender I/O v5.2.39",
+            "ok": true
+          },
+          "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.glb"
+        },
+        "multi.gltf": {
+          "bytes": 3101,
+          "sha256": "c8cd22f5a4e301299ee8af898a3dd3293f1bbe3efd703e209393c2a09b845fc9",
+          "from_blender": true,
+          "independent_verification": {
+            "ok": true,
+            "meshes": 2,
+            "materials": [
+              "Copper",
+              "Slate"
+            ],
+            "primitives": 2,
+            "vertices": 504,
+            "buffers": [
+              {
+                "uri": "multi.bin",
+                "declared": 17544,
+                "exists": false,
+                "actual": null
+              }
+            ]
+          },
+          "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.gltf"
+        },
+        "multi.obj": {
+          "bytes": 15771,
+          "sha256": "33e3c87acd656d4c50a9b30657a2688242ebc4545c1c56853a92fc34c3acbad6",
+          "from_blender": true,
+          "independent_verification": {
+            "ok": true,
+            "vertices": 122,
+            "faces": 134
+          },
+          "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.obj"
+        },
+        "multi.ply": {
+          "bytes": 5703,
+          "sha256": "e5e76fe2b6072226bd894cc3a9e9da94d6b3d93952426014e1fe9dcf006d7e9e",
+          "from_blender": true,
+          "independent_verification": {
+            "format": "format binary_little_endian 1.0",
+            "elements": {
+              "vertex": 165,
+              "face": 134
+            },
+            "ok": true
+          },
+          "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.ply"
+        },
+        "multi.stl": {
+          "bytes": 11884,
+          "sha256": "c3a28dedb966feb1db1c208fd17e7eca969bb9ea3412f573dd58af2aa917b846",
+          "from_blender": true,
+          "independent_verification": {
+            "ok": true,
+            "format": "binary",
+            "triangles": 236,
+            "expected_bytes": 11884,
+            "actual_bytes": 11884
+          },
+          "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.stl"
+        },
+        "multi.usda": {
+          "bytes": 35612,
+          "sha256": "30f575a1dae113e3df20ab4f5045985ff70ee89774bcdd9178b5a4f673e5f0f5",
+          "from_blender": true,
+          "independent_verification": {
+            "ok": true,
+            "meshes": 2,
+            "materials": 2,
+            "bytes": 35612
+          },
+          "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.usda"
+        }
+      },
+      "scene_summary": {
+        "objects": [
+          {
+            "name": "_materials",
+            "bw_id": null,
+            "type": "EMPTY",
+            "location": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "name": "Cube",
+            "bw_id": "o260c97c165",
+            "type": "MESH",
+            "location": [
+              0,
+              0,
+              0.5
+            ],
+            "verts": 8,
+            "faces": 6,
+            "materials": [
+              "Slate"
+            ]
+          },
+          {
+            "name": "Sphere",
+            "bw_id": "o84b9ad17db",
+            "type": "MESH",
+            "location": [
+              0,
+              0,
+              0.9
+            ],
+            "verts": 114,
+            "faces": 128,
+            "materials": [
+              "Copper"
+            ]
+          }
+        ],
+        "materials": [
+          "Copper",
+          "Slate"
+        ]
+      },
+      "evidence_dir": "sessions/20261025-110227-49774e/steps/step-01",
+      "label": "formats"
+    }
+  ],
+  "current_scene": null,
+  "result": {
+    "summary": "s5_all_formats: 1 step(s), 3 checks passed",
+    "delivered_artifacts": [
+      "multi.blend",
+      "multi.glb",
+      "multi.gltf",
+      "multi.obj",
+      "multi.ply",
+      "multi.stl",
+      "multi.usda"
+    ],
+    "artifact_index": {
+      "multi.blend": {
+        "bytes": 99366,
+        "sha256": "c15ca238cca4b3a282ffb878617270c9563eba705ba38f23c3eff4612ec619f3",
+        "from_blender": true,
+        "independent_verification": {
+          "ok": true,
+          "compression": "zstd",
+          "magic": "28b52ffd"
+        },
+        "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.blend"
+      },
+      "multi.glb": {
+        "bytes": 19780,
+        "sha256": "c82429a7dcd8be08e982f75b0f0e08e4bc35dc6cafb3f4498bcb74a6b7e3714f",
+        "from_blender": true,
+        "independent_verification": {
+          "magic": "glTF",
+          "version": 2,
+          "declared_length": 19780,
+          "actual_length": 19780,
+          "chunks": [
+            {
+              "type": "JSON",
+              "bytes": 2208
+            },
+            {
+              "type": "BIN",
+              "bytes": 17544
+            }
+          ],
+          "meshes": 2,
+          "materials": [
+            "Copper",
+            "Slate"
+          ],
+          "nodes": 2,
+          "accessors": 8,
+          "primitives": 2,
+          "vertices": 504,
+          "generator": "Khronos glTF Blender I/O v5.2.39",
+          "ok": true
+        },
+        "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.glb"
+      },
+      "multi.gltf": {
+        "bytes": 3101,
+        "sha256": "c8cd22f5a4e301299ee8af898a3dd3293f1bbe3efd703e209393c2a09b845fc9",
+        "from_blender": true,
+        "independent_verification": {
+          "ok": true,
+          "meshes": 2,
+          "materials": [
+            "Copper",
+            "Slate"
+          ],
+          "primitives": 2,
+          "vertices": 504,
+          "buffers": [
+            {
+              "uri": "multi.bin",
+              "declared": 17544,
+              "exists": false,
+              "actual": null
+            }
+          ]
+        },
+        "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.gltf"
+      },
+      "multi.obj": {
+        "bytes": 15771,
+        "sha256": "33e3c87acd656d4c50a9b30657a2688242ebc4545c1c56853a92fc34c3acbad6",
+        "from_blender": true,
+        "independent_verification": {
+          "ok": true,
+          "vertices": 122,
+          "faces": 134
+        },
+        "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.obj"
+      },
+      "multi.ply": {
+        "bytes": 5703,
+        "sha256": "e5e76fe2b6072226bd894cc3a9e9da94d6b3d93952426014e1fe9dcf006d7e9e",
+        "from_blender": true,
+        "independent_verification": {
+          "format": "format binary_little_endian 1.0",
+          "elements": {
+            "vertex": 165,
+            "face": 134
+          },
+          "ok": true
+        },
+        "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.ply"
+      },
+      "multi.stl": {
+        "bytes": 11884,
+        "sha256": "c3a28dedb966feb1db1c208fd17e7eca969bb9ea3412f573dd58af2aa917b846",
+        "from_blender": true,
+        "independent_verification": {
+          "ok": true,
+          "format": "binary",
+          "triangles": 236,
+          "expected_bytes": 11884,
+          "actual_bytes": 11884
+        },
+        "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.stl"
+      },
+      "multi.usda": {
+        "bytes": 35612,
+        "sha256": "30f575a1dae113e3df20ab4f5045985ff70ee89774bcdd9178b5a4f673e5f0f5",
+        "from_blender": true,
+        "independent_verification": {
+          "ok": true,
+          "meshes": 2,
+          "materials": 2,
+          "bytes": 35612
+        },
+        "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.usda"
+      }
+    },
+    "steps_used": 1,
+    "scene": {
+      "objects": [
+        {
+          "name": "_materials",
+          "bw_id": null,
+          "type": "EMPTY",
+          "location": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "Cube",
+          "bw_id": "o260c97c165",
+          "type": "MESH",
+          "location": [
+            0,
+            0,
+            0.5
+          ],
+          "verts": 8,
+          "faces": 6,
+          "materials": [
+            "Slate"
+          ]
+        },
+        {
+          "name": "Sphere",
+          "bw_id": "o84b9ad17db",
+          "type": "MESH",
+          "location": [
+            0,
+            0,
+            0.9
+          ],
+          "verts": 114,
+          "faces": 128,
+          "materials": [
+            "Copper"
+          ]
+        }
+      ],
+      "materials": [
+        "Copper",
+        "Slate"
+      ]
+    },
+    "finished_at": "2026-10-25T11:02:38Z"
+  }
+}

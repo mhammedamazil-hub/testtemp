@@ -1,0 +1,57 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "crate",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Crate",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            0.4
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Crate",
+          "dimensions": [
+            0.8,
+            0.6,
+            0.8
+          ]
+        },
+        {
+          "op": "material.create",
+          "name": "Pine",
+          "base_color": [
+            0.55,
+            0.38,
+            0.2
+          ],
+          "roughness": 0.7
+        },
+        {
+          "op": "material.assign",
+          "material": "Pine",
+          "target": "Crate"
+        },
+        {
+          "op": "export",
+          "prefix": "crate_v1",
+          "formats": [
+            "glb"
+          ]
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-110206-52ec5e-s1-3477cb",
+  "limits": {}
+}

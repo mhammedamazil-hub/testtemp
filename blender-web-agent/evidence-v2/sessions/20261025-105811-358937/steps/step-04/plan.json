@@ -1,0 +1,67 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "retry_safety",
+      "goal": "Prove a retried action cannot duplicate geometry, and that a duplicate is reported and recoverable",
+      "ops": [
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Antenna",
+          "radius": 0.05,
+          "depth": 0.8,
+          "location": [
+            0,
+            0.9,
+            1.6
+          ],
+          "op_id": "mk-antenna-v1"
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Antenna",
+          "radius": 0.05,
+          "depth": 0.8,
+          "location": [
+            0,
+            0.9,
+            1.6
+          ],
+          "op_id": "mk-antenna-v1"
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Antenna",
+          "radius": 0.05,
+          "depth": 0.8,
+          "location": [
+            0,
+            0.9,
+            1.6
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cylinder",
+          "name": "Antenna",
+          "radius": 0.05,
+          "depth": 0.8,
+          "location": [
+            0,
+            0.9,
+            1.6
+          ],
+          "if_exists": "skip"
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-105811-358937-s4-0f1c22",
+  "limits": {}
+}

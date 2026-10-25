@@ -1,0 +1,30 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "fix",
+      "ops": [
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Widget",
+          "size": 2.0
+        },
+        {
+          "op": "object.transform",
+          "target": "Widget",
+          "location": [
+            1,
+            2,
+            3
+          ]
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-110306-3cb959-s2-231813",
+  "limits": {}
+}

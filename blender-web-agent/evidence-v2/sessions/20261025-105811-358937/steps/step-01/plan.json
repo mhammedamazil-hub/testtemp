@@ -1,0 +1,182 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "build_spacecraft",
+      "goal": "Fuselage + two swept wings + cockpit; hull and glass materials; camera and key light",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Fuselage",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            1.0
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Fuselage",
+          "dimensions": [
+            0.8,
+            3.6,
+            0.7
+          ]
+        },
+        {
+          "op": "mesh.bevel",
+          "target": "Fuselage",
+          "width": 0.12,
+          "segments": 2
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Wing_L",
+          "size": 2.0,
+          "location": [
+            -1.5,
+            0.1,
+            1.0
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Wing_L",
+          "dimensions": [
+            2.2,
+            0.9,
+            0.08
+          ]
+        },
+        {
+          "op": "object.transform",
+          "target": "Wing_L",
+          "rotation_deg": [
+            0,
+            0,
+            18
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Wing_R",
+          "size": 2.0,
+          "location": [
+            1.5,
+            0.1,
+            1.0
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Wing_R",
+          "dimensions": [
+            2.2,
+            0.9,
+            0.08
+          ]
+        },
+        {
+          "op": "object.transform",
+          "target": "Wing_R",
+          "rotation_deg": [
+            0,
+            0,
+            -18
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "sphere",
+          "name": "Cockpit",
+          "radius": 0.45,
+          "location": [
+            0,
+            -1.35,
+            1.3
+          ]
+        },
+        {
+          "op": "material.create",
+          "name": "HullWhite",
+          "base_color": [
+            0.86,
+            0.87,
+            0.9
+          ],
+          "roughness": 0.35,
+          "metallic": 0.25
+        },
+        {
+          "op": "material.create",
+          "name": "CockpitGlass",
+          "base_color": [
+            0.1,
+            0.35,
+            0.55
+          ],
+          "roughness": 0.08,
+          "metallic": 0.1
+        },
+        {
+          "op": "material.assign",
+          "material": "HullWhite",
+          "target": "Fuselage"
+        },
+        {
+          "op": "material.assign",
+          "material": "HullWhite",
+          "target": "Wing_L"
+        },
+        {
+          "op": "material.assign",
+          "material": "HullWhite",
+          "target": "Wing_R"
+        },
+        {
+          "op": "material.assign",
+          "material": "CockpitGlass",
+          "target": "Cockpit"
+        },
+        {
+          "op": "camera.create",
+          "name": "Cam",
+          "location": [
+            5.5,
+            -6.5,
+            4.2
+          ],
+          "look_at": [
+            0,
+            0,
+            1.0
+          ],
+          "lens": 50
+        },
+        {
+          "op": "light.create",
+          "type": "SUN",
+          "name": "KeyLight",
+          "location": [
+            4,
+            -2,
+            6
+          ],
+          "energy": 4.0
+        },
+        {
+          "op": "scene.inspect"
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-105811-358937-s1-a0e66b",
+  "limits": {}
+}

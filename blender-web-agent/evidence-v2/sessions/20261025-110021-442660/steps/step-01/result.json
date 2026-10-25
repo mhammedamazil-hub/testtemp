@@ -1,0 +1,4809 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "blender": "5.2.0 LTS",
+  "plan_ok": true,
+  "tasks": [
+    {
+      "id": "robot",
+      "goal": "",
+      "ops": [
+        {
+          "op": "scene.reset",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": 0
+          },
+          "scene": {
+            "objects": {},
+            "object_count": 0,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4aa28d5034",
+            "name": "Torso",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4aa28d5034",
+            "dimensions": [
+              0.7,
+              0.4,
+              0.9
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 1,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oc6be3b3ea9",
+            "name": "Head",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 2,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oc6be3b3ea9",
+            "dimensions": [
+              0.45,
+              0.4,
+              0.35
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 2,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o78c44b79ad",
+            "name": "Arm_L",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o78c44b79ad",
+            "dimensions": [
+              0.16,
+              0.16,
+              0.75
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 3,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "ob5d4d320d4",
+            "name": "Arm_R",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.set_dimensions",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "ob5d4d320d4",
+            "dimensions": [
+              0.16,
+              0.16,
+              0.75
+            ],
+            "scale_applied": true
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 4,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o1b7b3657de",
+            "name": "Leg_L",
+            "created": true,
+            "verts": 24,
+            "dimensions": [
+              0.18,
+              0.18,
+              0.7
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 5,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "object.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "odbe029ab28",
+            "name": "Leg_R",
+            "created": true,
+            "verts": 24,
+            "dimensions": [
+              0.18,
+              0.18,
+              0.7
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "RobotShell",
+            "created": true,
+            "base_color": [
+              0.75,
+              0.78,
+              0.8
+            ],
+            "roughness": 0.35,
+            "metallic": 0.6
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "RobotShell"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "material": "Visor",
+            "created": true,
+            "base_color": [
+              0.05,
+              0.1,
+              0.15
+            ],
+            "roughness": 0.05,
+            "metallic": 0
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o4aa28d5034",
+            "materials": [
+              "RobotShell"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oc6be3b3ea9",
+            "materials": [
+              "Visor"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Visor"
+                ]
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o78c44b79ad",
+            "materials": [
+              "RobotShell"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": []
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Visor"
+                ]
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "ob5d4d320d4",
+            "materials": [
+              "RobotShell"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Visor"
+                ]
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "o1b7b3657de",
+            "materials": [
+              "RobotShell"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Visor"
+                ]
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": []
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "material.assign",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "odbe029ab28",
+            "materials": [
+              "RobotShell"
+            ]
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Visor"
+                ]
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              }
+            },
+            "object_count": 6,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": null,
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "camera.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "oc9033326c8",
+            "camera": "Cam",
+            "lens": 50,
+            "is_scene_camera": true
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Cam": {
+                "bw_id": "oc9033326c8",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  2.6,
+                  -3,
+                  2.2
+                ],
+                "rotation": [
+                  1.300492,
+                  0,
+                  0.714091
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Visor"
+                ]
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              }
+            },
+            "object_count": 7,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "light.create",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "bw_id": "of8d1b8fa25",
+            "light": "Key",
+            "type": "SUN",
+            "energy": 4
+          },
+          "scene": {
+            "objects": {
+              "Arm_L": {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Arm_R": {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Cam": {
+                "bw_id": "oc9033326c8",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  2.6,
+                  -3,
+                  2.2
+                ],
+                "rotation": [
+                  1.300492,
+                  0,
+                  0.714091
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              "Head": {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Visor"
+                ]
+              },
+              "Key": {
+                "bw_id": "of8d1b8fa25",
+                "name": "Key",
+                "type": "LIGHT",
+                "location": [
+                  3,
+                  -2,
+                  5
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 4
+              },
+              "Leg_L": {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Leg_R": {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ]
+              },
+              "Torso": {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ]
+              }
+            },
+            "object_count": 8,
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE"
+          }
+        },
+        {
+          "op": "export",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "bytes": 13084,
+              "file": "robot.glb",
+              "sha256": "4b021d0564f4ce22a3a6db9b8a48b7633d30d52b059335bc2d9f2d214adca11e"
+            },
+            "obj": {
+              "ok": true,
+              "bytes": 9528,
+              "file": "robot.obj",
+              "sha256": "bd6a7567ef9307a599e1adee5212b5cbf5b5475971958e13aa546a0eddde335e"
+            }
+          }
+        },
+        {
+          "op": "scene.inspect",
+          "op_id": null,
+          "ok": true,
+          "result": {
+            "objects": [
+              {
+                "bw_id": "o78c44b79ad",
+                "name": "Arm_L",
+                "type": "MESH",
+                "location": [
+                  -0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ],
+                "bound_box": [
+                  [
+                    -0.08,
+                    -0.08,
+                    -0.375
+                  ],
+                  [
+                    -0.08,
+                    -0.08,
+                    0.375
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    0.375
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    -0.375
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    -0.375
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    0.375
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    0.375
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    -0.375
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "ob5d4d320d4",
+                "name": "Arm_R",
+                "type": "MESH",
+                "location": [
+                  0.5,
+                  0,
+                  1.25
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.16,
+                  0.16,
+                  0.75
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ],
+                "bound_box": [
+                  [
+                    -0.08,
+                    -0.08,
+                    -0.375
+                  ],
+                  [
+                    -0.08,
+                    -0.08,
+                    0.375
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    0.375
+                  ],
+                  [
+                    -0.08,
+                    0.08,
+                    -0.375
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    -0.375
+                  ],
+                  [
+                    0.08,
+                    -0.08,
+                    0.375
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    0.375
+                  ],
+                  [
+                    0.08,
+                    0.08,
+                    -0.375
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "oc9033326c8",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  2.6,
+                  -3,
+                  2.2
+                ],
+                "rotation": [
+                  1.300492,
+                  0,
+                  0.714091
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              {
+                "bw_id": "oc6be3b3ea9",
+                "name": "Head",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.85
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.45,
+                  0.4,
+                  0.35
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Visor"
+                ],
+                "bound_box": [
+                  [
+                    -0.225,
+                    -0.2,
+                    -0.175
+                  ],
+                  [
+                    -0.225,
+                    -0.2,
+                    0.175
+                  ],
+                  [
+                    -0.225,
+                    0.2,
+                    0.175
+                  ],
+                  [
+                    -0.225,
+                    0.2,
+                    -0.175
+                  ],
+                  [
+                    0.225,
+                    -0.2,
+                    -0.175
+                  ],
+                  [
+                    0.225,
+                    -0.2,
+                    0.175
+                  ],
+                  [
+                    0.225,
+                    0.2,
+                    0.175
+                  ],
+                  [
+                    0.225,
+                    0.2,
+                    -0.175
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "of8d1b8fa25",
+                "name": "Key",
+                "type": "LIGHT",
+                "location": [
+                  3,
+                  -2,
+                  5
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 4
+              },
+              {
+                "bw_id": "o1b7b3657de",
+                "name": "Leg_L",
+                "type": "MESH",
+                "location": [
+                  -0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ],
+                "bound_box": [
+                  [
+                    -0.09,
+                    -0.09,
+                    -0.35
+                  ],
+                  [
+                    -0.09,
+                    -0.09,
+                    0.35
+                  ],
+                  [
+                    -0.09,
+                    0.09,
+                    0.35
+                  ],
+                  [
+                    -0.09,
+                    0.09,
+                    -0.35
+                  ],
+                  [
+                    0.09,
+                    -0.09,
+                    -0.35
+                  ],
+                  [
+                    0.09,
+                    -0.09,
+                    0.35
+                  ],
+                  [
+                    0.09,
+                    0.09,
+                    0.35
+                  ],
+                  [
+                    0.09,
+                    0.09,
+                    -0.35
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "odbe029ab28",
+                "name": "Leg_R",
+                "type": "MESH",
+                "location": [
+                  0.19,
+                  0,
+                  0.35
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.18,
+                  0.18,
+                  0.7
+                ],
+                "verts": 24,
+                "faces": 14,
+                "materials": [
+                  "RobotShell"
+                ],
+                "bound_box": [
+                  [
+                    -0.09,
+                    -0.09,
+                    -0.35
+                  ],
+                  [
+                    -0.09,
+                    -0.09,
+                    0.35
+                  ],
+                  [
+                    -0.09,
+                    0.09,
+                    0.35
+                  ],
+                  [
+                    -0.09,
+                    0.09,
+                    -0.35
+                  ],
+                  [
+                    0.09,
+                    -0.09,
+                    -0.35
+                  ],
+                  [
+                    0.09,
+                    -0.09,
+                    0.35
+                  ],
+                  [
+                    0.09,
+                    0.09,
+                    0.35
+                  ],
+                  [
+                    0.09,
+                    0.09,
+                    -0.35
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o4aa28d5034",
+                "name": "Torso",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  1.2
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.7,
+                  0.4,
+                  0.9
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "RobotShell"
+                ],
+                "bound_box": [
+                  [
+                    -0.35,
+                    -0.2,
+                    -0.45
+                  ],
+                  [
+                    -0.35,
+                    -0.2,
+                    0.45
+                  ],
+                  [
+                    -0.35,
+                    0.2,
+                    0.45
+                  ],
+                  [
+                    -0.35,
+                    0.2,
+                    -0.45
+                  ],
+                  [
+                    0.35,
+                    -0.2,
+                    -0.45
+                  ],
+                  [
+                    0.35,
+                    -0.2,
+                    0.45
+                  ],
+                  [
+                    0.35,
+                    0.2,
+                    0.45
+                  ],
+                  [
+                    0.35,
+                    0.2,
+                    -0.45
+                  ]
+                ],
+                "selected": false
+              }
+            ],
+            "materials": [
+              "Material",
+              "RobotShell",
+              "Visor"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE",
+            "selection": [
+              "Key"
+            ]
+          }
+        }
+      ],
+      "artifacts": {}
+    }
+  ],
+  "trace_id": "20261025-110021-442660-s1-e98500",
+  "elapsed_s": 1.5,
+  "snapshot": {
+    "format": "bw.scene.snapshot/v1",
+    "objects": [
+      {
+        "bw_id": "o78c44b79ad",
+        "name": "Arm_L",
+        "type": "MESH",
+        "location": [
+          -0.5,
+          0,
+          1.25
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -0.08,
+            -0.08,
+            -0.375
+          ],
+          [
+            -0.08,
+            -0.08,
+            0.375
+          ],
+          [
+            -0.08,
+            0.08,
+            -0.375
+          ],
+          [
+            -0.08,
+            0.08,
+            0.375
+          ],
+          [
+            0.08,
+            -0.08,
+            -0.375
+          ],
+          [
+            0.08,
+            -0.08,
+            0.375
+          ],
+          [
+            0.08,
+            0.08,
+            -0.375
+          ],
+          [
+            0.08,
+            0.08,
+            0.375
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            1,
+            0
+          ],
+          [
+            2,
+            6,
+            4,
+            0
+          ],
+          [
+            7,
+            3,
+            1,
+            5
+          ]
+        ],
+        "material_names": [
+          "RobotShell"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": "ob5d4d320d4",
+        "name": "Arm_R",
+        "type": "MESH",
+        "location": [
+          0.5,
+          0,
+          1.25
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -0.08,
+            -0.08,
+            -0.375
+          ],
+          [
+            -0.08,
+            -0.08,
+            0.375
+          ],
+          [
+            -0.08,
+            0.08,
+            -0.375
+          ],
+          [
+            -0.08,
+            0.08,
+            0.375
+          ],
+          [
+            0.08,
+            -0.08,
+            -0.375
+          ],
+          [
+            0.08,
+            -0.08,
+            0.375
+          ],
+          [
+            0.08,
+            0.08,
+            -0.375
+          ],
+          [
+            0.08,
+            0.08,
+            0.375
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            1,
+            0
+          ],
+          [
+            2,
+            6,
+            4,
+            0
+          ],
+          [
+            7,
+            3,
+            1,
+            5
+          ]
+        ],
+        "material_names": [
+          "RobotShell"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": "oc9033326c8",
+        "name": "Cam",
+        "type": "CAMERA",
+        "location": [
+          2.6,
+          -3,
+          2.2
+        ],
+        "rotation": [
+          1.300492,
+          0,
+          0.714091
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "lens": 50,
+        "is_scene_camera": true
+      },
+      {
+        "bw_id": "oc6be3b3ea9",
+        "name": "Head",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          1.85
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -0.225,
+            -0.2,
+            -0.175
+          ],
+          [
+            -0.225,
+            -0.2,
+            0.175
+          ],
+          [
+            -0.225,
+            0.2,
+            -0.175
+          ],
+          [
+            -0.225,
+            0.2,
+            0.175
+          ],
+          [
+            0.225,
+            -0.2,
+            -0.175
+          ],
+          [
+            0.225,
+            -0.2,
+            0.175
+          ],
+          [
+            0.225,
+            0.2,
+            -0.175
+          ],
+          [
+            0.225,
+            0.2,
+            0.175
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            1,
+            0
+          ],
+          [
+            2,
+            6,
+            4,
+            0
+          ],
+          [
+            7,
+            3,
+            1,
+            5
+          ]
+        ],
+        "material_names": [
+          "Visor"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": "of8d1b8fa25",
+        "name": "Key",
+        "type": "LIGHT",
+        "location": [
+          3,
+          -2,
+          5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "light_type": "SUN",
+        "energy": 4
+      },
+      {
+        "bw_id": "o1b7b3657de",
+        "name": "Leg_L",
+        "type": "MESH",
+        "location": [
+          -0.19,
+          0,
+          0.35
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            0,
+            0.09,
+            -0.35
+          ],
+          [
+            0,
+            0.09,
+            0.35
+          ],
+          [
+            0.045,
+            0.077942,
+            -0.35
+          ],
+          [
+            0.045,
+            0.077942,
+            0.35
+          ],
+          [
+            0.077942,
+            0.045,
+            -0.35
+          ],
+          [
+            0.077942,
+            0.045,
+            0.35
+          ],
+          [
+            0.09,
+            0,
+            -0.35
+          ],
+          [
+            0.09,
+            0,
+            0.35
+          ],
+          [
+            0.077942,
+            -0.045,
+            -0.35
+          ],
+          [
+            0.077942,
+            -0.045,
+            0.35
+          ],
+          [
+            0.045,
+            -0.077942,
+            -0.35
+          ],
+          [
+            0.045,
+            -0.077942,
+            0.35
+          ],
+          [
+            0,
+            -0.09,
+            -0.35
+          ],
+          [
+            0,
+            -0.09,
+            0.35
+          ],
+          [
+            -0.045,
+            -0.077942,
+            -0.35
+          ],
+          [
+            -0.045,
+            -0.077942,
+            0.35
+          ],
+          [
+            -0.077942,
+            -0.045,
+            -0.35
+          ],
+          [
+            -0.077942,
+            -0.045,
+            0.35
+          ],
+          [
+            -0.09,
+            0,
+            -0.35
+          ],
+          [
+            -0.09,
+            0,
+            0.35
+          ],
+          [
+            -0.077942,
+            0.045,
+            -0.35
+          ],
+          [
+            -0.077942,
+            0.045,
+            0.35
+          ],
+          [
+            -0.045,
+            0.077942,
+            -0.35
+          ],
+          [
+            -0.045,
+            0.077942,
+            0.35
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            9,
+            8
+          ],
+          [
+            8,
+            9,
+            11,
+            10
+          ],
+          [
+            10,
+            11,
+            13,
+            12
+          ],
+          [
+            12,
+            13,
+            15,
+            14
+          ],
+          [
+            14,
+            15,
+            17,
+            16
+          ],
+          [
+            16,
+            17,
+            19,
+            18
+          ],
+          [
+            18,
+            19,
+            21,
+            20
+          ],
+          [
+            3,
+            1,
+            23,
+            21,
+            19,
+            17,
+            15,
+            13,
+            11,
+            9,
+            7,
+            5
+          ],
+          [
+            20,
+            21,
+            23,
+            22
+          ],
+          [
+            22,
+            23,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            4,
+            6,
+            8,
+            10,
+            12,
+            14,
+            16,
+            18,
+            20,
+            22
+          ]
+        ],
+        "material_names": [
+          "RobotShell"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": "odbe029ab28",
+        "name": "Leg_R",
+        "type": "MESH",
+        "location": [
+          0.19,
+          0,
+          0.35
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            0,
+            0.09,
+            -0.35
+          ],
+          [
+            0,
+            0.09,
+            0.35
+          ],
+          [
+            0.045,
+            0.077942,
+            -0.35
+          ],
+          [
+            0.045,
+            0.077942,
+            0.35
+          ],
+          [
+            0.077942,
+            0.045,
+            -0.35
+          ],
+          [
+            0.077942,
+            0.045,
+            0.35
+          ],
+          [
+            0.09,
+            0,
+            -0.35
+          ],
+          [
+            0.09,
+            0,
+            0.35
+          ],
+          [
+            0.077942,
+            -0.045,
+            -0.35
+          ],
+          [
+            0.077942,
+            -0.045,
+            0.35
+          ],
+          [
+            0.045,
+            -0.077942,
+            -0.35
+          ],
+          [
+            0.045,
+            -0.077942,
+            0.35
+          ],
+          [
+            0,
+            -0.09,
+            -0.35
+          ],
+          [
+            0,
+            -0.09,
+            0.35
+          ],
+          [
+            -0.045,
+            -0.077942,
+            -0.35
+          ],
+          [
+            -0.045,
+            -0.077942,
+            0.35
+          ],
+          [
+            -0.077942,
+            -0.045,
+            -0.35
+          ],
+          [
+            -0.077942,
+            -0.045,
+            0.35
+          ],
+          [
+            -0.09,
+            0,
+            -0.35
+          ],
+          [
+            -0.09,
+            0,
+            0.35
+          ],
+          [
+            -0.077942,
+            0.045,
+            -0.35
+          ],
+          [
+            -0.077942,
+            0.045,
+            0.35
+          ],
+          [
+            -0.045,
+            0.077942,
+            -0.35
+          ],
+          [
+            -0.045,
+            0.077942,
+            0.35
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            9,
+            8
+          ],
+          [
+            8,
+            9,
+            11,
+            10
+          ],
+          [
+            10,
+            11,
+            13,
+            12
+          ],
+          [
+            12,
+            13,
+            15,
+            14
+          ],
+          [
+            14,
+            15,
+            17,
+            16
+          ],
+          [
+            16,
+            17,
+            19,
+            18
+          ],
+          [
+            18,
+            19,
+            21,
+            20
+          ],
+          [
+            3,
+            1,
+            23,
+            21,
+            19,
+            17,
+            15,
+            13,
+            11,
+            9,
+            7,
+            5
+          ],
+          [
+            20,
+            21,
+            23,
+            22
+          ],
+          [
+            22,
+            23,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            4,
+            6,
+            8,
+            10,
+            12,
+            14,
+            16,
+            18,
+            20,
+            22
+          ]
+        ],
+        "material_names": [
+          "RobotShell"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "bw_id": "o4aa28d5034",
+        "name": "Torso",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          1.2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "verts": [
+          [
+            -0.35,
+            -0.2,
+            -0.45
+          ],
+          [
+            -0.35,
+            -0.2,
+            0.45
+          ],
+          [
+            -0.35,
+            0.2,
+            -0.45
+          ],
+          [
+            -0.35,
+            0.2,
+            0.45
+          ],
+          [
+            0.35,
+            -0.2,
+            -0.45
+          ],
+          [
+            0.35,
+            -0.2,
+            0.45
+          ],
+          [
+            0.35,
+            0.2,
+            -0.45
+          ],
+          [
+            0.35,
+            0.2,
+            0.45
+          ]
+        ],
+        "faces": [
+          [
+            0,
+            1,
+            3,
+            2
+          ],
+          [
+            2,
+            3,
+            7,
+            6
+          ],
+          [
+            6,
+            7,
+            5,
+            4
+          ],
+          [
+            4,
+            5,
+            1,
+            0
+          ],
+          [
+            2,
+            6,
+            4,
+            0
+          ],
+          [
+            7,
+            3,
+            1,
+            5
+          ]
+        ],
+        "material_names": [
+          "RobotShell"
+        ],
+        "material_indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    ],
+    "materials": [
+      {
+        "name": "Material",
+        "base_color": [
+          0.8,
+          0.8,
+          0.8,
+          1
+        ],
+        "roughness": 0.5,
+        "metallic": 0
+      },
+      {
+        "name": "RobotShell",
+        "base_color": [
+          0.75,
+          0.78,
+          0.8,
+          1
+        ],
+        "roughness": 0.35,
+        "metallic": 0.6
+      },
+      {
+        "name": "Visor",
+        "base_color": [
+          0.05,
+          0.1,
+          0.15,
+          1
+        ],
+        "roughness": 0.05,
+        "metallic": 0
+      }
+    ]
+  },
+  "artifacts": [
+    "robot.glb",
+    "robot.obj"
+  ],
+  "wall_clock_s": 12.66,
+  "runtime_exit": "ok"
+}

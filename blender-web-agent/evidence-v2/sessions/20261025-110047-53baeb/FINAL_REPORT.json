@@ -1,0 +1,114 @@
+{
+  "summary": "s4_edit_without_duplication: 2 step(s), 4 checks passed",
+  "delivered_artifacts": [
+    "crate_v1.glb",
+    "crate_v2.glb"
+  ],
+  "artifact_index": {
+    "crate_v1.glb": {
+      "bytes": 2096,
+      "sha256": "a74d4dc7f0686d9cdb00d5e292f36c2bbec468dd7ca9ca23285fbe24a187c5cc",
+      "from_blender": true,
+      "independent_verification": {
+        "magic": "glTF",
+        "version": 2,
+        "declared_length": 2096,
+        "actual_length": 2096,
+        "chunks": [
+          {
+            "type": "JSON",
+            "bytes": 1228
+          },
+          {
+            "type": "BIN",
+            "bytes": 840
+          }
+        ],
+        "meshes": 1,
+        "materials": [
+          "Pine"
+        ],
+        "nodes": 1,
+        "accessors": 4,
+        "primitives": 1,
+        "vertices": 24,
+        "generator": "Khronos glTF Blender I/O v5.2.39",
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-110047-53baeb/artifacts/s1-crate_v1.glb"
+    },
+    "crate_v2.glb": {
+      "bytes": 3224,
+      "sha256": "197b38bda7c1094d10b7b9f09b170a38424b3f8f977573439439a5bb01544d2a",
+      "from_blender": true,
+      "independent_verification": {
+        "magic": "glTF",
+        "version": 2,
+        "declared_length": 3224,
+        "actual_length": 3224,
+        "chunks": [
+          {
+            "type": "JSON",
+            "bytes": 1780
+          },
+          {
+            "type": "BIN",
+            "bytes": 1416
+          }
+        ],
+        "meshes": 2,
+        "materials": [
+          "Pine"
+        ],
+        "nodes": 2,
+        "accessors": 6,
+        "primitives": 2,
+        "vertices": 48,
+        "generator": "Khronos glTF Blender I/O v5.2.39",
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-110047-53baeb/artifacts/s2-crate_v2.glb"
+    }
+  },
+  "steps_used": 2,
+  "scene": {
+    "objects": [
+      {
+        "name": "Crate",
+        "bw_id": "o48f6c16d87",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0.4
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "Pine"
+        ]
+      },
+      {
+        "name": "Lid",
+        "bw_id": "o2a9572a90e",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0.85
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "Pine"
+        ]
+      }
+    ],
+    "materials": [
+      "Material",
+      "Material.001",
+      "Pine"
+    ]
+  },
+  "finished_at": "2026-10-25T11:01:07Z"
+}

@@ -1,0 +1,6 @@
+{"ts": "2026-10-25T11:03:06Z", "event": "session_started", "task": "recovery: correct a failed action using the returned error"}
+{"ts": "2026-10-25T11:03:06Z", "event": "execution_started", "step": 1, "trace_id": "20261025-110306-3cb959-s1-ab456f", "ops": 1, "restored_scene": false}
+{"ts": "2026-10-25T11:03:15Z", "event": "execution_finished", "step": 1, "trace_id": "20261025-110306-3cb959-s1-ab456f", "ok": false, "errors": 1, "artifacts": []}
+{"ts": "2026-10-25T11:03:15Z", "event": "execution_started", "step": 2, "trace_id": "20261025-110306-3cb959-s2-231813", "ops": 3, "restored_scene": true}
+{"ts": "2026-10-25T11:03:25Z", "event": "execution_finished", "step": 2, "trace_id": "20261025-110306-3cb959-s2-231813", "ok": true, "errors": 0, "artifacts": []}
+{"ts": "2026-10-25T11:03:25Z", "event": "session_finished", "summary": "Recovered from TARGET_NOT_FOUND by creating the missing object, then applying the transform.", "artifacts": []}

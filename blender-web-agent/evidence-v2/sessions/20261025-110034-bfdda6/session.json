@@ -1,0 +1,1002 @@
+{
+  "session_id": "20261025-110034-bfdda6",
+  "task": "A small architectural scene: floor, walls, column, two lights, a camera",
+  "created_at": 1792926034.1624908,
+  "state": "finished",
+  "decided_by": "arena-llm (external orchestrator)",
+  "budget": {
+    "max_steps": 2,
+    "steps_used": 1
+  },
+  "timeout_s": 300.0,
+  "steps": [
+    {
+      "step": 1,
+      "trace_id": "20261025-110034-bfdda6-s1-bdd1ee",
+      "decided_by": "arena-llm (external orchestrator)",
+      "submitted_at": "2026-10-25T11:00:34Z",
+      "elapsed_s": 12.88,
+      "ok": false,
+      "plan_ok": true,
+      "runtime": {
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_clock_s": 12.87,
+        "stale_processes_killed": 0,
+        "preflight": {
+          "runner": {
+            "where": "/home/user/testtemp/blender-web-agent/harness/run_plan.mjs",
+            "ok": true
+          },
+          "node": {
+            "where": "/usr/local/bin/node",
+            "ok": true
+          },
+          "chromium": {
+            "where": "/tmp/chromium",
+            "ok": true
+          },
+          "libs": {
+            "where": "/tmp/lib",
+            "ok": true
+          },
+          "wasm": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.wasm",
+            "ok": true
+          },
+          "data": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.data",
+            "ok": true
+          }
+        }
+      },
+      "tasks": [
+        "room"
+      ],
+      "ops": [
+        {
+          "task": "room",
+          "op": "scene.reset",
+          "ok": true,
+          "result": {
+            "objects": 0
+          }
+        },
+        {
+          "task": "room",
+          "op": "object.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o3245fc4567",
+            "name": "Floor",
+            "created": true,
+            "verts": 4,
+            "dimensions": [
+              2,
+              2,
+              0
+            ]
+          }
+        },
+        {
+          "task": "room",
+          "op": "object.set_dimensions",
+          "ok": false,
+          "error": {
+            "code": "PRECONDITION_FAILED",
+            "message": "dimensions read back as [6.0, 5.0, 0.0], expected [6.0, 5.0, 0.1]"
+          }
+        },
+        {
+          "task": "room",
+          "op": "object.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o14865039ef",
+            "name": "Wall_N",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        {
+          "task": "room",
+          "op": "object.set_dimensions",
+          "ok": true,
+          "result": {
+            "bw_id": "o14865039ef",
+            "dimensions": [
+              6,
+              0.2,
+              2.8
+            ],
+            "scale_applied": true
+          }
+        },
+        {
+          "task": "room",
+          "op": "object.create",
+          "ok": true,
+          "result": {
+            "bw_id": "oc67215d773",
+            "name": "Wall_W",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        {
+          "task": "room",
+          "op": "object.set_dimensions",
+          "ok": true,
+          "result": {
+            "bw_id": "oc67215d773",
+            "dimensions": [
+              0.2,
+              5,
+              2.8
+            ],
+            "scale_applied": true
+          }
+        },
+        {
+          "task": "room",
+          "op": "object.create",
+          "ok": true,
+          "result": {
+            "bw_id": "oc74652cd27",
+            "name": "Column",
+            "created": true,
+            "verts": 32,
+            "dimensions": [
+              0.3,
+              0.3,
+              2.8
+            ]
+          }
+        },
+        {
+          "task": "room",
+          "op": "material.create",
+          "ok": true,
+          "result": {
+            "material": "Concrete",
+            "created": true,
+            "base_color": [
+              0.72,
+              0.71,
+              0.68
+            ],
+            "roughness": 0.9,
+            "metallic": 0
+          }
+        },
+        {
+          "task": "room",
+          "op": "material.create",
+          "ok": true,
+          "result": {
+            "material": "FloorOak",
+            "created": true,
+            "base_color": [
+              0.42,
+              0.28,
+              0.16
+            ],
+            "roughness": 0.55,
+            "metallic": 0
+          }
+        },
+        {
+          "task": "room",
+          "op": "material.assign",
+          "ok": true,
+          "result": {
+            "bw_id": "o3245fc4567",
+            "materials": [
+              "FloorOak"
+            ]
+          }
+        },
+        {
+          "task": "room",
+          "op": "material.assign",
+          "ok": true,
+          "result": {
+            "bw_id": "o14865039ef",
+            "materials": [
+              "Concrete"
+            ]
+          }
+        },
+        {
+          "task": "room",
+          "op": "material.assign",
+          "ok": true,
+          "result": {
+            "bw_id": "oc67215d773",
+            "materials": [
+              "Concrete"
+            ]
+          }
+        },
+        {
+          "task": "room",
+          "op": "material.assign",
+          "ok": true,
+          "result": {
+            "bw_id": "oc74652cd27",
+            "materials": [
+              "Concrete"
+            ]
+          }
+        },
+        {
+          "task": "room",
+          "op": "camera.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o411338bdbc",
+            "camera": "Cam",
+            "lens": 35,
+            "is_scene_camera": true
+          }
+        },
+        {
+          "task": "room",
+          "op": "light.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o6aaa8e7811",
+            "light": "Daylight",
+            "type": "SUN",
+            "energy": 5
+          }
+        },
+        {
+          "task": "room",
+          "op": "light.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o39bdaa2e04",
+            "light": "Fill",
+            "type": "AREA",
+            "energy": 120
+          }
+        },
+        {
+          "task": "room",
+          "op": "export",
+          "ok": true,
+          "result": {
+            "glb": {
+              "ok": true,
+              "bytes": 8820,
+              "file": "room.glb",
+              "sha256": "242cfee2efe878affea032c32ee8036341ac9ed674b1ba5fea034abe6fe972cc"
+            },
+            "usda": {
+              "ok": true,
+              "bytes": 16872,
+              "file": "room.usda",
+              "sha256": "34ac35f26e08006c7fb3fb38e389af415c3f599bc732b0c2379435a7bb55711a"
+            }
+          }
+        },
+        {
+          "task": "room",
+          "op": "scene.inspect",
+          "ok": true,
+          "result": {
+            "objects": [
+              {
+                "bw_id": "o411338bdbc",
+                "name": "Cam",
+                "type": "CAMERA",
+                "location": [
+                  4.2,
+                  -4.6,
+                  2.4
+                ],
+                "rotation": [
+                  1.380479,
+                  0,
+                  0.739975
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 35,
+                "is_scene_camera": true
+              },
+              {
+                "bw_id": "oc74652cd27",
+                "name": "Column",
+                "type": "MESH",
+                "location": [
+                  1.6,
+                  -1.2,
+                  1.4
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.3,
+                  0.3,
+                  2.8
+                ],
+                "verts": 32,
+                "faces": 18,
+                "materials": [
+                  "Concrete"
+                ],
+                "bound_box": [
+                  [
+                    -0.15,
+                    -0.15,
+                    -1.4
+                  ],
+                  [
+                    -0.15,
+                    -0.15,
+                    1.4
+                  ],
+                  [
+                    -0.15,
+                    0.15,
+                    1.4
+                  ],
+                  [
+                    -0.15,
+                    0.15,
+                    -1.4
+                  ],
+                  [
+                    0.15,
+                    -0.15,
+                    -1.4
+                  ],
+                  [
+                    0.15,
+                    -0.15,
+                    1.4
+                  ],
+                  [
+                    0.15,
+                    0.15,
+                    1.4
+                  ],
+                  [
+                    0.15,
+                    0.15,
+                    -1.4
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o6aaa8e7811",
+                "name": "Daylight",
+                "type": "LIGHT",
+                "location": [
+                  4,
+                  -3,
+                  7
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "SUN",
+                "energy": 5
+              },
+              {
+                "bw_id": "o39bdaa2e04",
+                "name": "Fill",
+                "type": "LIGHT",
+                "location": [
+                  0,
+                  1.5,
+                  2.4
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "AREA",
+                "energy": 120
+              },
+              {
+                "bw_id": "o3245fc4567",
+                "name": "Floor",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  6,
+                  5,
+                  0
+                ],
+                "verts": 4,
+                "faces": 1,
+                "materials": [
+                  "FloorOak"
+                ],
+                "bound_box": [
+                  [
+                    -3,
+                    -2.5,
+                    0
+                  ],
+                  [
+                    -3,
+                    -2.5,
+                    0
+                  ],
+                  [
+                    -3,
+                    2.5,
+                    0
+                  ],
+                  [
+                    -3,
+                    2.5,
+                    0
+                  ],
+                  [
+                    3,
+                    -2.5,
+                    0
+                  ],
+                  [
+                    3,
+                    -2.5,
+                    0
+                  ],
+                  [
+                    3,
+                    2.5,
+                    0
+                  ],
+                  [
+                    3,
+                    2.5,
+                    0
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "o14865039ef",
+                "name": "Wall_N",
+                "type": "MESH",
+                "location": [
+                  0,
+                  2.5,
+                  1.4
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  6,
+                  0.2,
+                  2.8
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Concrete"
+                ],
+                "bound_box": [
+                  [
+                    -3,
+                    -0.1,
+                    -1.4
+                  ],
+                  [
+                    -3,
+                    -0.1,
+                    1.4
+                  ],
+                  [
+                    -3,
+                    0.1,
+                    1.4
+                  ],
+                  [
+                    -3,
+                    0.1,
+                    -1.4
+                  ],
+                  [
+                    3,
+                    -0.1,
+                    -1.4
+                  ],
+                  [
+                    3,
+                    -0.1,
+                    1.4
+                  ],
+                  [
+                    3,
+                    0.1,
+                    1.4
+                  ],
+                  [
+                    3,
+                    0.1,
+                    -1.4
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "oc67215d773",
+                "name": "Wall_W",
+                "type": "MESH",
+                "location": [
+                  -3,
+                  0,
+                  1.4
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0.2,
+                  5,
+                  2.8
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Concrete"
+                ],
+                "bound_box": [
+                  [
+                    -0.1,
+                    -2.5,
+                    -1.4
+                  ],
+                  [
+                    -0.1,
+                    -2.5,
+                    1.4
+                  ],
+                  [
+                    -0.1,
+                    2.5,
+                    1.4
+                  ],
+                  [
+                    -0.1,
+                    2.5,
+                    -1.4
+                  ],
+                  [
+                    0.1,
+                    -2.5,
+                    -1.4
+                  ],
+                  [
+                    0.1,
+                    -2.5,
+                    1.4
+                  ],
+                  [
+                    0.1,
+                    2.5,
+                    1.4
+                  ],
+                  [
+                    0.1,
+                    2.5,
+                    -1.4
+                  ]
+                ],
+                "selected": false
+              }
+            ],
+            "materials": [
+              "Concrete",
+              "FloorOak",
+              "Material"
+            ],
+            "camera": "Cam",
+            "engine": "BLENDER_EEVEE",
+            "selection": [
+              "Fill"
+            ]
+          }
+        }
+      ],
+      "errors": [
+        {
+          "step": 1,
+          "task": "room",
+          "op": "object.set_dimensions",
+          "code": "PRECONDITION_FAILED",
+          "message": "dimensions read back as [6.0, 5.0, 0.0], expected [6.0, 5.0, 0.1]"
+        }
+      ],
+      "artifacts": {
+        "room.glb": {
+          "bytes": 8820,
+          "sha256": "242cfee2efe878affea032c32ee8036341ac9ed674b1ba5fea034abe6fe972cc",
+          "from_blender": true,
+          "independent_verification": {
+            "magic": "glTF",
+            "version": 2,
+            "declared_length": 8820,
+            "actual_length": 8820,
+            "chunks": [
+              {
+                "type": "JSON",
+                "bytes": 3612
+              },
+              {
+                "type": "BIN",
+                "bytes": 5180
+              }
+            ],
+            "meshes": 4,
+            "materials": [
+              "Concrete",
+              "FloorOak"
+            ],
+            "nodes": 4,
+            "accessors": 15,
+            "primitives": 4,
+            "vertices": 148,
+            "generator": "Khronos glTF Blender I/O v5.2.39",
+            "ok": true
+          },
+          "kept_as": "sessions/20261025-110034-bfdda6/artifacts/s1-room.glb"
+        },
+        "room.usda": {
+          "bytes": 16872,
+          "sha256": "34ac35f26e08006c7fb3fb38e389af415c3f599bc732b0c2379435a7bb55711a",
+          "from_blender": true,
+          "independent_verification": {
+            "ok": true,
+            "meshes": 4,
+            "materials": 2,
+            "bytes": 16872
+          },
+          "kept_as": "sessions/20261025-110034-bfdda6/artifacts/s1-room.usda"
+        }
+      },
+      "scene_summary": {
+        "objects": [
+          {
+            "name": "Cam",
+            "bw_id": "o411338bdbc",
+            "type": "CAMERA",
+            "location": [
+              4.2,
+              -4.6,
+              2.4
+            ]
+          },
+          {
+            "name": "Column",
+            "bw_id": "oc74652cd27",
+            "type": "MESH",
+            "location": [
+              1.6,
+              -1.2,
+              1.4
+            ],
+            "verts": 32,
+            "faces": 18,
+            "materials": [
+              "Concrete"
+            ]
+          },
+          {
+            "name": "Daylight",
+            "bw_id": "o6aaa8e7811",
+            "type": "LIGHT",
+            "location": [
+              4,
+              -3,
+              7
+            ]
+          },
+          {
+            "name": "Fill",
+            "bw_id": "o39bdaa2e04",
+            "type": "LIGHT",
+            "location": [
+              0,
+              1.5,
+              2.4
+            ]
+          },
+          {
+            "name": "Floor",
+            "bw_id": "o3245fc4567",
+            "type": "MESH",
+            "location": [
+              0,
+              0,
+              0
+            ],
+            "verts": 4,
+            "faces": 1,
+            "materials": [
+              "FloorOak"
+            ]
+          },
+          {
+            "name": "Wall_N",
+            "bw_id": "o14865039ef",
+            "type": "MESH",
+            "location": [
+              0,
+              2.5,
+              1.4
+            ],
+            "verts": 8,
+            "faces": 6,
+            "materials": [
+              "Concrete"
+            ]
+          },
+          {
+            "name": "Wall_W",
+            "bw_id": "oc67215d773",
+            "type": "MESH",
+            "location": [
+              -3,
+              0,
+              1.4
+            ],
+            "verts": 8,
+            "faces": 6,
+            "materials": [
+              "Concrete"
+            ]
+          }
+        ],
+        "materials": [
+          "Concrete",
+          "FloorOak",
+          "Material"
+        ]
+      },
+      "evidence_dir": "sessions/20261025-110034-bfdda6/steps/step-01",
+      "label": "build"
+    }
+  ],
+  "current_scene": null,
+  "result": {
+    "summary": "s3_architecture: 1 step(s), 4 checks passed",
+    "delivered_artifacts": [
+      "room.glb",
+      "room.usda"
+    ],
+    "artifact_index": {
+      "room.glb": {
+        "bytes": 8820,
+        "sha256": "242cfee2efe878affea032c32ee8036341ac9ed674b1ba5fea034abe6fe972cc",
+        "from_blender": true,
+        "independent_verification": {
+          "magic": "glTF",
+          "version": 2,
+          "declared_length": 8820,
+          "actual_length": 8820,
+          "chunks": [
+            {
+              "type": "JSON",
+              "bytes": 3612
+            },
+            {
+              "type": "BIN",
+              "bytes": 5180
+            }
+          ],
+          "meshes": 4,
+          "materials": [
+            "Concrete",
+            "FloorOak"
+          ],
+          "nodes": 4,
+          "accessors": 15,
+          "primitives": 4,
+          "vertices": 148,
+          "generator": "Khronos glTF Blender I/O v5.2.39",
+          "ok": true
+        },
+        "kept_as": "sessions/20261025-110034-bfdda6/artifacts/s1-room.glb"
+      },
+      "room.usda": {
+        "bytes": 16872,
+        "sha256": "34ac35f26e08006c7fb3fb38e389af415c3f599bc732b0c2379435a7bb55711a",
+        "from_blender": true,
+        "independent_verification": {
+          "ok": true,
+          "meshes": 4,
+          "materials": 2,
+          "bytes": 16872
+        },
+        "kept_as": "sessions/20261025-110034-bfdda6/artifacts/s1-room.usda"
+      }
+    },
+    "steps_used": 1,
+    "scene": {
+      "objects": [
+        {
+          "name": "Cam",
+          "bw_id": "o411338bdbc",
+          "type": "CAMERA",
+          "location": [
+            4.2,
+            -4.6,
+            2.4
+          ]
+        },
+        {
+          "name": "Column",
+          "bw_id": "oc74652cd27",
+          "type": "MESH",
+          "location": [
+            1.6,
+            -1.2,
+            1.4
+          ],
+          "verts": 32,
+          "faces": 18,
+          "materials": [
+            "Concrete"
+          ]
+        },
+        {
+          "name": "Daylight",
+          "bw_id": "o6aaa8e7811",
+          "type": "LIGHT",
+          "location": [
+            4,
+            -3,
+            7
+          ]
+        },
+        {
+          "name": "Fill",
+          "bw_id": "o39bdaa2e04",
+          "type": "LIGHT",
+          "location": [
+            0,
+            1.5,
+            2.4
+          ]
+        },
+        {
+          "name": "Floor",
+          "bw_id": "o3245fc4567",
+          "type": "MESH",
+          "location": [
+            0,
+            0,
+            0
+          ],
+          "verts": 4,
+          "faces": 1,
+          "materials": [
+            "FloorOak"
+          ]
+        },
+        {
+          "name": "Wall_N",
+          "bw_id": "o14865039ef",
+          "type": "MESH",
+          "location": [
+            0,
+            2.5,
+            1.4
+          ],
+          "verts": 8,
+          "faces": 6,
+          "materials": [
+            "Concrete"
+          ]
+        },
+        {
+          "name": "Wall_W",
+          "bw_id": "oc67215d773",
+          "type": "MESH",
+          "location": [
+            -3,
+            0,
+            1.4
+          ],
+          "verts": 8,
+          "faces": 6,
+          "materials": [
+            "Concrete"
+          ]
+        }
+      ],
+      "materials": [
+        "Concrete",
+        "FloorOak",
+        "Material"
+      ]
+    },
+    "finished_at": "2026-10-25T11:00:47Z"
+  }
+}

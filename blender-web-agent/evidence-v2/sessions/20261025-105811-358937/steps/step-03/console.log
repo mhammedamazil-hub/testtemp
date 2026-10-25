@@ -1,0 +1,46 @@
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!
+<string>:226: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+WARNING Unsupported platform emscripten, Draco is unavailable
+INFO Draco compression is unavailable on this platform
+WARNING Unsupported platform emscripten, MeshOptimizer is unavailable
+INFO MeshOptimizer compression is unavailable on this platform
+10:59:08 | INFO: Starting glTF 2.0 export
+10:59:08 | INFO: Extracting primitive: Cockpit
+10:59:09 | INFO: Primitives created: 1
+10:59:09 | INFO: Extracting primitive: Fuselage
+10:59:09 | INFO: Primitives created: 1
+10:59:09 | INFO: Extracting primitive: Wing_L
+10:59:09 | INFO: Primitives created: 1
+10:59:09 | INFO: Extracting primitive: Wing_R
+10:59:09 | INFO: Primitives created: 1
+10:59:09 | INFO: Finished glTF 2.0 export in 0.1660001277923584 s
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Writing to /tmp/bw_export/spacecraft.obj
+OBJ export of 'spacecraft.obj' took 9.46 ms
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft.obj'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Info: File exported successfully
+10:59:09 | INFO: Data are loaded, start creating Blender stuff
+10:59:09 | INFO: Blender create Mesh node Cockpit
+10:59:09 | INFO: Blender create Mesh node Fuselage
+10:59:09 | INFO: Blender create Mesh node Wing_L
+10:59:09 | INFO: Blender create Mesh node Wing_R
+10:59:09 | INFO: glTF import finished in 0.06s
+OBJ import of 'spacecraft.obj' took 29.92 ms
+<string>:193: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft.obj'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+BW_RESULT {"schema": "bw.agent.ops/v2", "blender": "5.2.0 LTS", "plan_ok": true, "tasks": [{"id": "deliver", "goal": "Export GLB and OBJ and prove each re-imports into a clean scene", "ops": [{"op": "export", "op_id": null, "ok": true, "result": {"glb": {"ok": true, "bytes": 17556, "file": "spacecraft.glb", "sha256": "76555bca829d1a5e49a80163e02e0b10bb2be2f3e2663f57cc430b4d6a4c2c61"}, "obj": {"ok": true, "bytes": 11883, "file": "spacecraft.obj", "sha256": "2884fe1ea4c809a2108aa0fb2178fbef9f7e20a6b67a96410dc92053da63927d"}}}, {"op": "validate.roundtrip", "op_id": null, "ok": true, "result": {"glb": {"ok": true, "objects": 4, "meshes": 4, "verts": 528, "materials": 4}, "obj": {"ok": true, "objects": 4, "meshes": 4, "verts": 134, "materials": 4}}}], "artifacts": {}}], "trace_id": "20261025-105811-358937-s3-375df5", "elapsed_s": 1.42, "snapshot": {"format": "bw.scene.snapshot/v1", "objects": [{"bw_id": null, "name": "Cockpit", "type": "MESH", "location": [0.0, 0.0, 0.0], "rotation": [1.570796, -0.0, 0.0], "scale": [1.0, 1.0, 1.0], "verts": [[0.0, 1.75, 1.35], [0.0, 1.3, 0.9], [0.0, 0.85, 1.35], [0.1125, 1.689711, 1.155144], [0.194856, 1.525, 1.0125], [0.225, 1.3, 0.960289], [0.194856, 1.075, 1.0125], [0.1125, 0.910289, 1.155144], [0.194856, 1.689711, 1.2375], [0.3375, 1.525, 1.155144], [0.389711, 1.3, 1.125], [0.3375, 1.075, 1.155144], [0.194856, 0.910289, 1.2375], [0.225, 1.689711, 1.35], [0.389711, 1.525, 1.35], [0.45, 1.3, 1.35], [0.389711, 1.075, 1.35], [0.225, 0.910289, 1.35], [0.194856, 1.689711, 1.4625], [0.3375, 1.525, 1.544856], [0.389711, 1.3, 1.575], [0.3375, 1.075, 1.544856], [0.194856, 0.910289, 1.4625], [0.1125, 1.689711, 1.544856], [0.194856, 1.525, 1.6875], [0.225, 1.3, 1.739711], [0.194856, 1.075, 1.6875], [0.1125, 0.910289, 1.544856], [0.0, 1.689711, 1.575], [0.0, 1.525, 1.739711], [0.0, 1.3, 1.8], [0.0, 1.075, 1.739711], [0.0, 0.910289, 1.575], [-0.1125, 1.689711, 1.544856], [-0.194856, 1.525, 1.6875], [-0.225, 1.3, 1.739711], [-0.194856, 1.075, 1.687
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/spacecraft.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+[shell] artifact spacecraft.glb -> 200
+BW_DONE
+[shell] artifact upload failed: TypeError: Cannot read properties of null (reading 'name')
+
+Blender quit
+[shell] EXIT 0

@@ -1,0 +1,552 @@
+{
+  "session_id": "20261025-110306-3cb959",
+  "task": "recovery: correct a failed action using the returned error",
+  "created_at": 1792926186.6855807,
+  "state": "finished",
+  "decided_by": "arena-llm (external orchestrator)",
+  "budget": {
+    "max_steps": 4,
+    "steps_used": 2
+  },
+  "timeout_s": 300.0,
+  "steps": [
+    {
+      "step": 1,
+      "trace_id": "20261025-110306-3cb959-s1-ab456f",
+      "decided_by": "arena-llm (external orchestrator)",
+      "submitted_at": "2026-10-25T11:03:06Z",
+      "elapsed_s": 8.78,
+      "ok": false,
+      "plan_ok": true,
+      "runtime": {
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_clock_s": 8.77,
+        "stale_processes_killed": 0,
+        "preflight": {
+          "runner": {
+            "where": "/home/user/testtemp/blender-web-agent/harness/run_plan.mjs",
+            "ok": true
+          },
+          "node": {
+            "where": "/usr/local/bin/node",
+            "ok": true
+          },
+          "chromium": {
+            "where": "/tmp/chromium",
+            "ok": true
+          },
+          "libs": {
+            "where": "/tmp/lib",
+            "ok": true
+          },
+          "wasm": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.wasm",
+            "ok": true
+          },
+          "data": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.data",
+            "ok": true
+          }
+        }
+      },
+      "tasks": [
+        "try"
+      ],
+      "ops": [
+        {
+          "task": "try",
+          "op": "object.transform",
+          "ok": false,
+          "error": {
+            "code": "TARGET_NOT_FOUND",
+            "message": "no object named 'Widget'"
+          }
+        }
+      ],
+      "errors": [
+        {
+          "step": 1,
+          "task": "try",
+          "op": "object.transform",
+          "code": "TARGET_NOT_FOUND",
+          "message": "no object named 'Widget'"
+        }
+      ],
+      "artifacts": {},
+      "scene_summary": {
+        "objects": [
+          {
+            "name": "Camera",
+            "bw_id": null,
+            "type": "CAMERA",
+            "location": [
+              7.358891,
+              -6.925791,
+              4.958309
+            ]
+          },
+          {
+            "name": "Cube",
+            "bw_id": null,
+            "type": "MESH",
+            "location": [
+              0,
+              0,
+              0
+            ],
+            "verts": 8,
+            "faces": 6,
+            "materials": [
+              "Material"
+            ]
+          },
+          {
+            "name": "Light",
+            "bw_id": null,
+            "type": "LIGHT",
+            "location": [
+              4.076245,
+              1.005454,
+              5.903862
+            ]
+          }
+        ],
+        "materials": [
+          "Dots Stroke",
+          "Material"
+        ]
+      },
+      "evidence_dir": "sessions/20261025-110306-3cb959/steps/step-01"
+    },
+    {
+      "step": 2,
+      "trace_id": "20261025-110306-3cb959-s2-231813",
+      "decided_by": "arena-llm (external orchestrator)",
+      "submitted_at": "2026-10-25T11:03:15Z",
+      "elapsed_s": 9.46,
+      "ok": true,
+      "plan_ok": true,
+      "runtime": {
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_clock_s": 9.45,
+        "stale_processes_killed": 0,
+        "preflight": {
+          "runner": {
+            "where": "/home/user/testtemp/blender-web-agent/harness/run_plan.mjs",
+            "ok": true
+          },
+          "node": {
+            "where": "/usr/local/bin/node",
+            "ok": true
+          },
+          "chromium": {
+            "where": "/tmp/chromium",
+            "ok": true
+          },
+          "libs": {
+            "where": "/tmp/lib",
+            "ok": true
+          },
+          "wasm": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.wasm",
+            "ok": true
+          },
+          "data": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.data",
+            "ok": true
+          }
+        }
+      },
+      "tasks": [
+        "fix"
+      ],
+      "ops": [
+        {
+          "task": "fix",
+          "op": "object.create",
+          "ok": true,
+          "result": {
+            "bw_id": "o2f21d9f557",
+            "name": "Widget",
+            "created": true,
+            "verts": 8,
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        {
+          "task": "fix",
+          "op": "object.transform",
+          "ok": true,
+          "result": {
+            "bw_id": "o2f21d9f557",
+            "location": [
+              1,
+              2,
+              3
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ],
+            "dimensions": [
+              2,
+              2,
+              2
+            ]
+          }
+        },
+        {
+          "task": "fix",
+          "op": "scene.inspect",
+          "ok": true,
+          "result": {
+            "objects": [
+              {
+                "bw_id": "o66b1df2b77",
+                "name": "Camera",
+                "type": "CAMERA",
+                "location": [
+                  7.358891,
+                  -6.925791,
+                  4.958309
+                ],
+                "rotation": [
+                  1.109319,
+                  0,
+                  0.814928
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "lens": 50,
+                "is_scene_camera": true
+              },
+              {
+                "bw_id": "oa498927a12",
+                "name": "Cube",
+                "type": "MESH",
+                "location": [
+                  0,
+                  0,
+                  0
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [
+                  "Material"
+                ],
+                "bound_box": [
+                  [
+                    -1,
+                    -1,
+                    -1
+                  ],
+                  [
+                    -1,
+                    -1,
+                    1
+                  ],
+                  [
+                    -1,
+                    1,
+                    1
+                  ],
+                  [
+                    -1,
+                    1,
+                    -1
+                  ],
+                  [
+                    1,
+                    -1,
+                    -1
+                  ],
+                  [
+                    1,
+                    -1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    -1
+                  ]
+                ],
+                "selected": false
+              },
+              {
+                "bw_id": "obba0900523",
+                "name": "Light",
+                "type": "LIGHT",
+                "location": [
+                  4.076245,
+                  1.005454,
+                  5.903862
+                ],
+                "rotation": [
+                  0.650328,
+                  0.055217,
+                  1.866391
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  0,
+                  0,
+                  0
+                ],
+                "light_type": "POINT",
+                "energy": 1000
+              },
+              {
+                "bw_id": "o2f21d9f557",
+                "name": "Widget",
+                "type": "MESH",
+                "location": [
+                  1,
+                  2,
+                  3
+                ],
+                "rotation": [
+                  0,
+                  0,
+                  0
+                ],
+                "scale": [
+                  1,
+                  1,
+                  1
+                ],
+                "dimensions": [
+                  2,
+                  2,
+                  2
+                ],
+                "verts": 8,
+                "faces": 6,
+                "materials": [],
+                "bound_box": [
+                  [
+                    -1,
+                    -1,
+                    -1
+                  ],
+                  [
+                    -1,
+                    -1,
+                    1
+                  ],
+                  [
+                    -1,
+                    1,
+                    1
+                  ],
+                  [
+                    -1,
+                    1,
+                    -1
+                  ],
+                  [
+                    1,
+                    -1,
+                    -1
+                  ],
+                  [
+                    1,
+                    -1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    1
+                  ],
+                  [
+                    1,
+                    1,
+                    -1
+                  ]
+                ],
+                "selected": true
+              }
+            ],
+            "materials": [
+              "Dots Stroke",
+              "Material"
+            ],
+            "camera": "Camera",
+            "engine": "BLENDER_EEVEE",
+            "selection": [
+              "Widget"
+            ]
+          }
+        }
+      ],
+      "errors": [],
+      "artifacts": {},
+      "scene_summary": {
+        "objects": [
+          {
+            "name": "Camera",
+            "bw_id": "o66b1df2b77",
+            "type": "CAMERA",
+            "location": [
+              7.358891,
+              -6.925791,
+              4.958309
+            ]
+          },
+          {
+            "name": "Cube",
+            "bw_id": "oa498927a12",
+            "type": "MESH",
+            "location": [
+              0,
+              0,
+              0
+            ],
+            "verts": 8,
+            "faces": 6,
+            "materials": [
+              "Material"
+            ]
+          },
+          {
+            "name": "Light",
+            "bw_id": "obba0900523",
+            "type": "LIGHT",
+            "location": [
+              4.076245,
+              1.005454,
+              5.903862
+            ]
+          },
+          {
+            "name": "Widget",
+            "bw_id": "o2f21d9f557",
+            "type": "MESH",
+            "location": [
+              1,
+              2,
+              3
+            ],
+            "verts": 8,
+            "faces": 6,
+            "materials": []
+          }
+        ],
+        "materials": [
+          "Dots Stroke",
+          "Material"
+        ]
+      },
+      "evidence_dir": "sessions/20261025-110306-3cb959/steps/step-02"
+    }
+  ],
+  "current_scene": null,
+  "result": {
+    "summary": "Recovered from TARGET_NOT_FOUND by creating the missing object, then applying the transform.",
+    "delivered_artifacts": [],
+    "artifact_index": {},
+    "steps_used": 2,
+    "scene": {
+      "objects": [
+        {
+          "name": "Camera",
+          "bw_id": "o66b1df2b77",
+          "type": "CAMERA",
+          "location": [
+            7.358891,
+            -6.925791,
+            4.958309
+          ]
+        },
+        {
+          "name": "Cube",
+          "bw_id": "oa498927a12",
+          "type": "MESH",
+          "location": [
+            0,
+            0,
+            0
+          ],
+          "verts": 8,
+          "faces": 6,
+          "materials": [
+            "Material"
+          ]
+        },
+        {
+          "name": "Light",
+          "bw_id": "obba0900523",
+          "type": "LIGHT",
+          "location": [
+            4.076245,
+            1.005454,
+            5.903862
+          ]
+        },
+        {
+          "name": "Widget",
+          "bw_id": "o2f21d9f557",
+          "type": "MESH",
+          "location": [
+            1,
+            2,
+            3
+          ],
+          "verts": 8,
+          "faces": 6,
+          "materials": []
+        }
+      ],
+      "materials": [
+        "Dots Stroke",
+        "Material"
+      ]
+    },
+    "finished_at": "2026-10-25T11:03:25Z"
+  }
+}

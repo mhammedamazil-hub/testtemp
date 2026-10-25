@@ -1,0 +1,105 @@
+{
+  "schema": "bw.agent.ops/v2",
+  "tasks": [
+    {
+      "id": "formats",
+      "ops": [
+        {
+          "op": "scene.reset"
+        },
+        {
+          "op": "object.create",
+          "type": "cube",
+          "name": "Slab",
+          "size": 2.0,
+          "location": [
+            0,
+            0,
+            0.5
+          ]
+        },
+        {
+          "op": "object.set_dimensions",
+          "target": "Slab",
+          "dimensions": [
+            1.2,
+            0.8,
+            0.2
+          ]
+        },
+        {
+          "op": "object.create",
+          "type": "sphere",
+          "name": "Ball",
+          "radius": 0.3,
+          "segments": 16,
+          "rings": 8,
+          "location": [
+            0,
+            0,
+            0.9
+          ]
+        },
+        {
+          "op": "material.create",
+          "name": "Slate",
+          "base_color": [
+            0.3,
+            0.32,
+            0.36
+          ],
+          "roughness": 0.6
+        },
+        {
+          "op": "material.create",
+          "name": "Copper",
+          "base_color": [
+            0.85,
+            0.45,
+            0.25
+          ],
+          "roughness": 0.25,
+          "metallic": 1.0
+        },
+        {
+          "op": "material.assign",
+          "material": "Slate",
+          "target": "Slab"
+        },
+        {
+          "op": "material.assign",
+          "material": "Copper",
+          "target": "Ball"
+        },
+        {
+          "op": "export",
+          "prefix": "multi",
+          "formats": [
+            "glb",
+            "gltf",
+            "obj",
+            "stl",
+            "ply",
+            "usda",
+            "blend"
+          ]
+        },
+        {
+          "op": "validate.roundtrip",
+          "prefix": "multi",
+          "formats": [
+            "glb",
+            "gltf",
+            "obj",
+            "stl",
+            "ply",
+            "usda",
+            "blend"
+          ]
+        }
+      ]
+    }
+  ],
+  "trace_id": "20261025-110107-e83a4b-s1-db4edb",
+  "limits": {}
+}

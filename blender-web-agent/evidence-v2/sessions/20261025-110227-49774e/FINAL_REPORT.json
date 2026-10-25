@@ -1,0 +1,182 @@
+{
+  "summary": "s5_all_formats: 1 step(s), 3 checks passed",
+  "delivered_artifacts": [
+    "multi.blend",
+    "multi.glb",
+    "multi.gltf",
+    "multi.obj",
+    "multi.ply",
+    "multi.stl",
+    "multi.usda"
+  ],
+  "artifact_index": {
+    "multi.blend": {
+      "bytes": 99366,
+      "sha256": "c15ca238cca4b3a282ffb878617270c9563eba705ba38f23c3eff4612ec619f3",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "compression": "zstd",
+        "magic": "28b52ffd"
+      },
+      "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.blend"
+    },
+    "multi.glb": {
+      "bytes": 19780,
+      "sha256": "c82429a7dcd8be08e982f75b0f0e08e4bc35dc6cafb3f4498bcb74a6b7e3714f",
+      "from_blender": true,
+      "independent_verification": {
+        "magic": "glTF",
+        "version": 2,
+        "declared_length": 19780,
+        "actual_length": 19780,
+        "chunks": [
+          {
+            "type": "JSON",
+            "bytes": 2208
+          },
+          {
+            "type": "BIN",
+            "bytes": 17544
+          }
+        ],
+        "meshes": 2,
+        "materials": [
+          "Copper",
+          "Slate"
+        ],
+        "nodes": 2,
+        "accessors": 8,
+        "primitives": 2,
+        "vertices": 504,
+        "generator": "Khronos glTF Blender I/O v5.2.39",
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.glb"
+    },
+    "multi.gltf": {
+      "bytes": 3101,
+      "sha256": "c8cd22f5a4e301299ee8af898a3dd3293f1bbe3efd703e209393c2a09b845fc9",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "meshes": 2,
+        "materials": [
+          "Copper",
+          "Slate"
+        ],
+        "primitives": 2,
+        "vertices": 504,
+        "buffers": [
+          {
+            "uri": "multi.bin",
+            "declared": 17544,
+            "exists": false,
+            "actual": null
+          }
+        ]
+      },
+      "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.gltf"
+    },
+    "multi.obj": {
+      "bytes": 15771,
+      "sha256": "33e3c87acd656d4c50a9b30657a2688242ebc4545c1c56853a92fc34c3acbad6",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "vertices": 122,
+        "faces": 134
+      },
+      "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.obj"
+    },
+    "multi.ply": {
+      "bytes": 5703,
+      "sha256": "e5e76fe2b6072226bd894cc3a9e9da94d6b3d93952426014e1fe9dcf006d7e9e",
+      "from_blender": true,
+      "independent_verification": {
+        "format": "format binary_little_endian 1.0",
+        "elements": {
+          "vertex": 165,
+          "face": 134
+        },
+        "ok": true
+      },
+      "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.ply"
+    },
+    "multi.stl": {
+      "bytes": 11884,
+      "sha256": "c3a28dedb966feb1db1c208fd17e7eca969bb9ea3412f573dd58af2aa917b846",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "format": "binary",
+        "triangles": 236,
+        "expected_bytes": 11884,
+        "actual_bytes": 11884
+      },
+      "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.stl"
+    },
+    "multi.usda": {
+      "bytes": 35612,
+      "sha256": "30f575a1dae113e3df20ab4f5045985ff70ee89774bcdd9178b5a4f673e5f0f5",
+      "from_blender": true,
+      "independent_verification": {
+        "ok": true,
+        "meshes": 2,
+        "materials": 2,
+        "bytes": 35612
+      },
+      "kept_as": "sessions/20261025-110227-49774e/artifacts/s1-multi.usda"
+    }
+  },
+  "steps_used": 1,
+  "scene": {
+    "objects": [
+      {
+        "name": "_materials",
+        "bw_id": null,
+        "type": "EMPTY",
+        "location": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "Cube",
+        "bw_id": "o260c97c165",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0.5
+        ],
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+          "Slate"
+        ]
+      },
+      {
+        "name": "Sphere",
+        "bw_id": "o84b9ad17db",
+        "type": "MESH",
+        "location": [
+          0,
+          0,
+          0.9
+        ],
+        "verts": 114,
+        "faces": 128,
+        "materials": [
+          "Copper"
+        ]
+      }
+    ],
+    "materials": [
+      "Copper",
+      "Slate"
+    ]
+  },
+  "finished_at": "2026-10-25T11:02:38Z"
+}

@@ -1,0 +1,43 @@
+Failed to load resource: the server responded with a status of 404 (Not Found)
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!
+<string>:493: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+WARNING Unsupported platform emscripten, Draco is unavailable
+INFO Draco compression is unavailable on this platform
+WARNING Unsupported platform emscripten, MeshOptimizer is unavailable
+INFO MeshOptimizer compression is unavailable on this platform
+10:57:42 | INFO: Starting glTF 2.0 export
+10:57:42 | INFO: Extracting primitive: Cube.001
+10:57:42 | INFO: Primitives created: 1
+10:57:42 | INFO: Extracting primitive: Cone
+10:57:42 | INFO: Primitives created: 1
+10:57:42 | INFO: Extracting primitive: Cube
+10:57:42 | INFO: Primitives created: 1
+10:57:42 | INFO: Finished glTF 2.0 export in 0.19099998474121094 s
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t3_house.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+PLY export of 't3_house.ply' took 11.54 ms
+<string>:602: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t3_house.ply'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Info: File exported successfully
+10:57:43 | INFO: Data are loaded, start creating Blender stuff
+10:57:43 | INFO: Blender create Mesh node Cube.001
+10:57:43 | INFO: Blender create Mesh node Cone
+10:57:43 | INFO: Blender create Mesh node Cube
+10:57:43 | INFO: glTF import finished in 0.05s
+PLY import of 't3_house.ply' took 4.89 ms
+<string>:193: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t3_house.ply'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:831: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/t3_house.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+BW_RESULT {"schema": "bw.agent.ops/v2", "blender": "5.2.0 LTS", "plan_ok": true, "tasks": [{"id": "t3_house", "goal": "House: walls, conical roof, chimney made by extruding a face", "ops": [{"op": "scene.reset", "op_id": null, "ok": true, "result": {"objects": 0}, "scene": {"objects": {}, "object_count": 0, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "o4c98ab5c9a", "name": "Walls", "created": true, "verts": 8, "dimensions": [2.0, 2.0, 2.0]}, "scene": {"objects": {"Walls": {"bw_id": "o4c98ab5c9a", "name": "Walls", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.0], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.set_dimensions", "op_id": null, "ok": true, "result": {"bw_id": "o4c98ab5c9a", "dimensions": [2.8, 2.0, 2.0], "scale_applied": true}, "scene": {"objects": {"Walls": {"bw_id": "o4c98ab5c9a", "name": "Walls", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.8, 2.0, 2.0], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": ["Material"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "o150efccedc", "name": "Roof", "created": true, "verts": 33, "dimensions": [3.8, 3.8, 1.2]}, "scene": {"objects": {"Roof": {"bw_id": "o150efccedc", "name": "Roof", "type": "MESH", "location": [0.0, 0.0, 2.6], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [3.8, 3.8, 1.2], "verts": 33, "faces": 33, "materials": []}, "Walls": {"bw_id": "o4c98ab5c9a", "name": "Walls", "type": "MESH", "location": [0.0, 0.0, 1.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.8, 2.0, 2.0], "verts": 8, "faces": 6, "materials": [
+[shell] artifact t3_house.glb -> 200
+BW_DONE
+[shell] artifact upload failed: TypeError: Cannot read properties of null (reading 'name')
+
+Blender quit
+[shell] EXIT 0

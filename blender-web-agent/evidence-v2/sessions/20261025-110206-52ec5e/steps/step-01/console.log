@@ -1,0 +1,26 @@
+Failed to load resource: the server responded with a status of 404 (Not Found)
+[shell] runtime initialized
+[bw] WM-worker WebGPU preinit FAILED: navigator.gpu.requestAdapter() returned null
+Blender 5.2.0 LTS
+Unable to find the Python binary, the multiprocessing module may not be functional!
+<string>:504: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+WARNING Unsupported platform emscripten, Draco is unavailable
+INFO Draco compression is unavailable on this platform
+WARNING Unsupported platform emscripten, MeshOptimizer is unavailable
+INFO MeshOptimizer compression is unavailable on this platform
+11:02:15 | INFO: Starting glTF 2.0 export
+11:02:15 | INFO: Extracting primitive: Cube
+11:02:15 | INFO: Primitives created: 1
+11:02:15 | INFO: Finished glTF 2.0 export in 0.1549999713897705 s
+<string>:613: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/crate_v1.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<string>:196: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+<string>:842: ResourceWarning: unclosed file <_io.BufferedReader name='/tmp/bw_export/crate_v1.glb'>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+BW_RESULT {"schema": "bw.agent.ops/v2", "blender": "5.2.0 LTS", "plan_ok": true, "tasks": [{"id": "crate", "goal": "", "ops": [{"op": "scene.reset", "op_id": null, "ok": true, "result": {"objects": 0}, "scene": {"objects": {}, "object_count": 0, "materials": [], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.create", "op_id": null, "ok": true, "result": {"bw_id": "od738d21696", "name": "Crate", "created": true, "verts": 8, "dimensions": [2.0, 2.0, 2.0]}, "scene": {"objects": {"Crate": {"bw_id": "od738d21696", "name": "Crate", "type": "MESH", "location": [0.0, 0.0, 0.4], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [2.0, 2.0, 2.0], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": [], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "object.set_dimensions", "op_id": null, "ok": true, "result": {"bw_id": "od738d21696", "dimensions": [0.8, 0.6, 0.8], "scale_applied": true}, "scene": {"objects": {"Crate": {"bw_id": "od738d21696", "name": "Crate", "type": "MESH", "location": [0.0, 0.0, 0.4], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [0.8, 0.6, 0.8], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": [], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "material.create", "op_id": null, "ok": true, "result": {"material": "Pine", "created": true, "base_color": [0.55, 0.38, 0.2], "roughness": 0.7, "metallic": 0.0}, "scene": {"objects": {"Crate": {"bw_id": "od738d21696", "name": "Crate", "type": "MESH", "location": [0.0, 0.0, 0.4], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0], "dimensions": [0.8, 0.6, 0.8], "verts": 8, "faces": 6, "materials": []}}, "object_count": 1, "materials": ["Pine"], "camera": null, "engine": "BLENDER_EEVEE"}}, {"op": "material.assign", "op_id": null, "ok": true, "result": {"bw_id": "od738d21696", "materials": ["Pine"]}, "scene": {"objects": {"Crate": {"bw_id": "od738d21696", "name": "Crate", "type": "MESH", "location": [0.0, 
+BW_DONE
+[shell] artifact upload failed: TypeError: Cannot read properties of null (reading 'name')
+
+Blender quit
+[shell] EXIT 0

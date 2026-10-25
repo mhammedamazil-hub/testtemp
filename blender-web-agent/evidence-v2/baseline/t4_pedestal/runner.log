@@ -1,0 +1,8 @@
+CMD ['node', '/home/user/testtemp/blender-web-agent/harness/run_plan.mjs', '--plan', '/home/user/testtemp/blender-web-agent/evidence-v2/baseline/t4_pedestal/plan.json', '--out', '/home/user/testtemp/blender-web-agent/evidence-v2/baseline/t4_pedestal', '--bin', '/home/user/bw/blender-web-local/bin', '--lib-dir', '/tmp/lib', '--chromium', '/tmp/chromium', '--timeout-ms', '300000']
+EXIT 0
+TIMED_OUT False
+ELAPSED 11.26s
+--- stdout ---
+RESULT plan_ok elapsed=11.06s artifacts=2
+
+--- stderr ---

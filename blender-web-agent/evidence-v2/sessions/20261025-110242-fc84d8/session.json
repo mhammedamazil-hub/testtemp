@@ -1,0 +1,158 @@
+{
+  "session_id": "20261025-110242-fc84d8",
+  "task": "recovery test: runtime timeout must not fabricate success",
+  "created_at": 1792926162.9697633,
+  "state": "awaiting_decision",
+  "decided_by": "arena-llm (external orchestrator)",
+  "budget": {
+    "max_steps": 3,
+    "steps_used": 2
+  },
+  "timeout_s": 6.0,
+  "steps": [
+    {
+      "step": 1,
+      "trace_id": "20261025-110242-fc84d8-s1-a577e0",
+      "decided_by": "arena-llm (external orchestrator)",
+      "submitted_at": "2026-10-25T11:02:43Z",
+      "elapsed_s": 6.52,
+      "ok": false,
+      "plan_ok": false,
+      "runtime": {
+        "exit_code": 3,
+        "timed_out": false,
+        "wall_clock_s": 6.51,
+        "stale_processes_killed": 0,
+        "preflight": {
+          "runner": {
+            "where": "/home/user/testtemp/blender-web-agent/harness/run_plan.mjs",
+            "ok": true
+          },
+          "node": {
+            "where": "/usr/local/bin/node",
+            "ok": true
+          },
+          "chromium": {
+            "where": "/tmp/chromium",
+            "ok": true
+          },
+          "libs": {
+            "where": "/tmp/lib",
+            "ok": true
+          },
+          "wasm": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.wasm",
+            "ok": true
+          },
+          "data": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.data",
+            "ok": true
+          }
+        }
+      },
+      "tasks": [
+        "slow"
+      ],
+      "ops": [],
+      "errors": [
+        {
+          "step": 1,
+          "code": "RUNTIME_ERROR",
+          "message": "runtime failure"
+        }
+      ],
+      "artifacts": {},
+      "scene_summary": null,
+      "evidence_dir": "sessions/20261025-110242-fc84d8/steps/step-01"
+    },
+    {
+      "step": 2,
+      "trace_id": "20261025-110242-fc84d8-s2-269ad2",
+      "decided_by": "arena-llm (external orchestrator)",
+      "submitted_at": "2026-10-25T11:02:54Z",
+      "elapsed_s": 6.49,
+      "ok": false,
+      "plan_ok": false,
+      "runtime": {
+        "exit_code": 3,
+        "timed_out": false,
+        "wall_clock_s": 6.48,
+        "stale_processes_killed": 0,
+        "preflight": {
+          "runner": {
+            "where": "/home/user/testtemp/blender-web-agent/harness/run_plan.mjs",
+            "ok": true
+          },
+          "node": {
+            "where": "/usr/local/bin/node",
+            "ok": true
+          },
+          "chromium": {
+            "where": "/tmp/chromium",
+            "ok": true
+          },
+          "libs": {
+            "where": "/tmp/lib",
+            "ok": true
+          },
+          "wasm": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.wasm",
+            "ok": true
+          },
+          "data": {
+            "where": "/home/user/bw/blender-web-local/bin/blender_browser.data",
+            "ok": true
+          }
+        }
+      },
+      "tasks": [
+        "slow"
+      ],
+      "ops": [],
+      "errors": [
+        {
+          "step": 2,
+          "code": "RUNTIME_TIMEOUT",
+          "message": "runtime produced no result within 6.26s",
+          "runtime": {
+            "exit_code": 3,
+            "timed_out": false,
+            "wall_clock_s": 6.48,
+            "stale_processes_killed": 0,
+            "preflight": {
+              "runner": {
+                "where": "/home/user/testtemp/blender-web-agent/harness/run_plan.mjs",
+                "ok": true
+              },
+              "node": {
+                "where": "/usr/local/bin/node",
+                "ok": true
+              },
+              "chromium": {
+                "where": "/tmp/chromium",
+                "ok": true
+              },
+              "libs": {
+                "where": "/tmp/lib",
+                "ok": true
+              },
+              "wasm": {
+                "where": "/home/user/bw/blender-web-local/bin/blender_browser.wasm",
+                "ok": true
+              },
+              "data": {
+                "where": "/home/user/bw/blender-web-local/bin/blender_browser.data",
+                "ok": true
+              }
+            }
+          }
+        }
+      ],
+      "artifacts": {},
+      "scene_summary": null,
+      "evidence_dir": "sessions/20261025-110242-fc84d8/steps/step-02"
+    }
+  ],
+  "current_scene": null,
+  "result": null
+}
