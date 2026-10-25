@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Alchemist of "coffe" — 5-Minute AI Cinema & Multi-Engine Video Studio</title>
+  <style>
+    :root {
+      --bg: #080605;
+      --panel: #130f0c;
+      --border: rgba(218, 165, 92, 0.22);
+      --gold: #e2a857;
+      --gold-bright: #ffd48a;
+      --text: #f3ece2;
+      --muted: #a69888;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: radial-gradient(circle at 50% 0%, #1d140d 0%, var(--bg) 70%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 22px 18px 48px;
+      transition: background 0.5s ease;
+    }
+    body.lights-off {
+      background: #020101;
+    }
+    header {
+      width: 100%;
+      max-width: 1180px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 18px;
+    }
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .brand-eyebrow {
+      font-size: 0.72rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--gold);
+      font-weight: 600;
+    }
+    .brand h1 {
+      font-size: 1.45rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #fffdf9;
+    }
+    .header-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      background: rgba(226, 168, 87, 0.12);
+      color: var(--gold-bright);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.84rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover {
+      background: rgba(226, 168, 87, 0.24);
+      border-color: var(--gold);
+    }
+    .btn.active {
+      background: linear-gradient(135deg, #d8963e, #9c5b16);
+      color: #fff;
+      border-color: var(--gold-bright);
+      box-shadow: 0 4px 16px rgba(216, 150, 62, 0.35);
+    }
+    .screening-tabs {
+      width: 100%;
+      max-width: 1180px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .tab-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: left;
+    }
+    .tab-card:hover {
+      border-color: var(--gold);
+      transform: translateY(-1px);
+    }
+    .tab-card.active {
+      background: linear-gradient(180deg, rgba(226, 168, 87, 0.18), rgba(22, 16, 12, 0.95));
+      border-color: var(--gold-bright);
+      box-shadow: 0 6px 24px rgba(226, 168, 87, 0.2);
+    }
+    .tab-badge {
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--gold);
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+    .tab-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 3px;
+    }
+    .tab-desc {
+      font-size: 0.77rem;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    .cinema-stage {
+      position: relative;
+      width: 100%;
+      max-width: 1180px;
+      background: #050404;
+      border: 1px solid rgba(226, 168, 87, 0.28);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 22px 70px rgba(0, 0, 0, 0.85), 0 0 60px rgba(212, 148, 58, 0.14);
+      margin-bottom: 16px;
+    }
+    video, #simCanvas {
+      width: 100%;
+      display: block;
+      aspect-ratio: 16 / 9;
+      background: #000;
+    }
+    #simContainer {
+      display: none;
+      position: relative;
+    }
+    .sim-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: #100c09;
+      border-top: 1px solid var(--border);
+    }
+    .sim-sliders {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+    }
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    .slider-group input[type="range"] {
+      accent-color: var(--gold);
+      width: 120px;
+    }
+    .chapters-bar {
+      width: 100%;
+      max-width: 1180px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 780px) {
+      .chapters-bar {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    .chapter-btn {
+      background: rgba(19, 15, 12, 0.9);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 11px;
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+    .chapter-btn:hover, .chapter-btn.active {
+      border-color: var(--gold-bright);
+      background: rgba(226, 168, 87, 0.15);
+    }
+    .chapter-time {
+      font-size: 0.7rem;
+      color: var(--gold);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    .chapter-name {
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-top: 2px;
+      color: #fff;
+    }
+    .footer-bar {
+      width: 100%;
+      max-width: 1180px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .footer-info {
+      font-size: 0.83rem;
+      color: var(--muted);
+    }
+    .footer-info strong {
+      color: var(--gold-bright);
+    }
+    .download-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-eyebrow">Grand AI Cinema &amp; Fluid Synthesis Theater</span>
+      <h1>THE ALCHEMIST OF &ldquo;COFFE&rdquo;</h1>
+    </div>
+    <div class="header-controls">
+      <button class="btn" id="lightsBtn" onclick="toggleLights()">Dim Theater Lights</button>
+      <a class="btn" id="activeDownloadBtn" href="cinema_5min_feature_film.mp4" download>Download Current Video</a>
+    </div>
+  </header>
+
+  <div class="screening-tabs">
+    <div class="tab-card active" id="tab-feature" onclick="switchRoom('feature')">
+      <div class="tab-badge">Room 1 • 05:00 Feature Film</div>
+      <div class="tab-title">The Alchemist of Coffe (5-Min Movie)</div>
+      <div class="tab-desc">5 Acts • AI Voice Narration • Original Score • Dense Optical Flow &amp; Fluid Physics</div>
+    </div>
+    <div class="tab-card" id="tab-fluid" onclick="switchRoom('fluid')">
+      <div class="tab-badge">Room 2 • Poiseuille Fluid Engine</div>
+      <div class="tab-title">&ldquo;coffe&rdquo; Pour — Fluid Physics Cut</div>
+      <div class="tab-desc">Geodesic tube wavefront, Poiseuille velocity profile &amp; dual-phase UV crema advection</div>
+    </div>
+    <div class="tab-card" id="tab-optflow" onclick="switchRoom('optflow')">
+      <div class="tab-badge">Room 3 • Dense Optical Flow</div>
+      <div class="tab-title">&ldquo;coffe&rdquo; Pour — AI Optical-Flow Cut</div>
+      <div class="tab-desc">Bidirectional DISOpticalFlow morphing across AI states + macro camera tracking</div>
+    </div>
+    <div class="tab-card" id="tab-webgl" onclick="switchRoom('webgl')">
+      <div class="tab-badge">Room 4 • Live Interactive Physics</div>
+      <div class="tab-title">Real-Time &ldquo;coffe&rdquo; Particle Simulator</div>
+      <div class="tab-desc">Interactive 1,400-particle fluid physics engine with live controls &amp; WebM video recorder</div>
+    </div>
+  </div>
+
+  <div class="chapters-bar" id="chaptersBar">
+    <button class="chapter-btn active" onclick="seekAct(0)">
+      <div class="chapter-time">ACT I • 00:00 – 01:00</div>
+      <div class="chapter-name">The Nebula of Origin</div>
+    </button>
+    <button class="chapter-btn" onclick="seekAct(60)">
+      <div class="chapter-time">ACT II • 01:00 – 02:00</div>
+      <div class="chapter-name">The Clockwork Roastery</div>
+    </button>
+    <button class="chapter-btn" onclick="seekAct(120)">
+      <div class="chapter-time">ACT III • 02:00 – 03:00</div>
+      <div class="chapter-name">Glass Labyrinth of &ldquo;coffe&rdquo;</div>
+    </button>
+    <button class="chapter-btn" onclick="seekAct(180)">
+      <div class="chapter-time">ACT IV • 03:00 – 04:00</div>
+      <div class="chapter-name">Ocean Inside the Cup</div>
+    </button>
+    <button class="chapter-btn" onclick="seekAct(240)">
+      <div class="chapter-time">ACT V • 04:00 – 05:00</div>
+      <div class="chapter-name">The Last Drop &amp; Credits</div>
+    </button>
+  </div>
+
+  <div class="cinema-stage">
+    <video id="mainVideo" src="cinema_5min_feature_film.mp4" controls autoplay playsinline></video>
+
+    <div id="simContainer">
+      <canvas id="simCanvas" width="1408" height="768"></canvas>
+      <div class="sim-toolbar">
+        <div class="sim-sliders">
+          <div class="slider-group">
+            <label>Pour Rate: <span id="lblRate">100%</span></label>
+            <input type="range" id="slRate" min="0" max="160" value="100" />
+          </div>
+          <div class="slider-group">
+            <label>Flow Speed: <span id="lblSpeed">1.0x</span></label>
+            <input type="range" id="slSpeed" min="30" max="200" value="100" />
+          </div>
+          <div class="slider-group">
+            <label>Golden Crema Foam: <span id="lblCrema">65%</span></label>
+            <input type="range" id="slCrema" min="10" max="100" value="65" />
+          </div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" onclick="resetSim()">Reset Empty Glass</button>
+          <button class="btn active" id="recBtn" onclick="toggleRecordSim()">Record 5s WebM Video</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-bar">
+    <div class="footer-info" id="roomStatusText">
+      <strong>Now Playing:</strong> The Alchemist of Coffe — 5:00 Full AI Cinema Feature Film (1152&times;648 HD, Stereo AAC)
+    </div>
+    <div class="download-links">
+      <a class="btn" href="cinema_5min_feature_film.mp4" download>5-Min Feature (.mp4)</a>
+      <a class="btn" href="coffe_pouring_video.mp4" download>Fluid Physics Cut (.mp4)</a>
+      <a class="btn" href="coffe_optical_flow_cut.mp4" download>Optical Flow Cut (.mp4)</a>
+    </div>
+  </div>
+
+  <script>
+    const videoEl = document.getElementById('mainVideo');
+    const simContainer = document.getElementById('simContainer');
+    const chaptersBar = document.getElementById('chaptersBar');
+    const statusText = document.getElementById('roomStatusText');
+    const activeDl = document.getElementById('activeDownloadBtn');
+    let currentRoom = 'feature';
+    let simRunning = false;
+
+    const ROOM_CONFIG = {
+      feature: {
+        src: 'cinema_5min_feature_film.mp4',
+        loop: false,
+        status: '<strong>Now Playing:</strong> The Alchemist of Coffe — 5:00 Full AI Cinema Feature Film (5 Acts, AI Voice Narration & Original Score)'
+      },
+      fluid: {
+        src: 'coffe_pouring_video.mp4',
+        loop: true,
+        status: '<strong>Now Playing:</strong> "coffe" Pour — Poiseuille Fluid-Physics & Dual-Phase UV Crema Advection Cut'
+      },
+      optflow: {
+        src: 'coffe_optical_flow_cut.mp4',
+        loop: true,
+        status: '<strong>Now Playing:</strong> "coffe" Pour — Bidirectional Dense Optical-Flow (DISOpticalFlow) & Macro Tracking Cut'
+      }
+    };
+
+    function switchRoom(room) {
+      currentRoom = room;
+      document.querySelectorAll('.tab-card').forEach(el => el.classList.remove('active'));
+      document.getElementById('tab-' + room).classList.add('active');
+
+      if (room === 'webgl') {
+        videoEl.pause();
+        videoEl.style.display = 'none';
+        chaptersBar.style.display = 'none';
+        simContainer.style.display = 'block';
+        statusText.innerHTML = '<strong>Interactive Engine:</strong> Real-Time Glass Tube Fluid Particle Simulation (Adjust sliders or record WebM video)';
+        startSimEngine();
+      } else {
+        simRunning = false;
+        simContainer.style.display = 'none';
+        videoEl.style.display = 'block';
+        chaptersBar.style.display = (room === 'feature') ? 'grid' : 'none';
+        const cfg = ROOM_CONFIG[room];
+        videoEl.src = cfg.src;
+        videoEl.loop = cfg.loop;
+        activeDl.href = cfg.src;
+        statusText.innerHTML = cfg.status;
+        videoEl.play().catch(() => {});
+      }
+    }
+
+    function seekAct(seconds) {
+      if (currentRoom !== 'feature') switchRoom('feature');
+      videoEl.currentTime = seconds;
+      videoEl.play().catch(() => {});
+      updateActiveChapter(seconds);
+    }
+
+    function updateActiveChapter(t) {
+      const idx = Math.min(4, Math.floor(t / 60));
+      const btns = chaptersBar.querySelectorAll('.chapter-btn');
+      btns.forEach((b, i) => b.classList.toggle('active', i === idx));
+    }
+
+    videoEl.addEventListener('timeupdate', () => {
+      if (currentRoom === 'feature') {
+        updateActiveChapter(videoEl.currentTime);
+      }
+    });
+
+    function toggleLights() {
+      document.body.classList.toggle('lights-off');
+      const btn = document.getElementById('lightsBtn');
+      btn.textContent = document.body.classList.contains('lights-off') ? 'Restore Theater Lights' : 'Dim Theater Lights';
+    }
+
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+    const bgPlate = new Image();
+    bgPlate.src = 'assets/ai_frame_1_empty.png';
+
+    const PATH_MAIN = [
+      [432, 60], [412, 95], [400, 140], [394, 185], [393, 252],
+      [352, 268], [325, 310], [318, 360], [332, 412], [368, 444], [415, 444], [450, 418], [488, 380]
+    ];
+    const PATH_O_TOP = [
+      [488, 380], [500, 330], [520, 286], [560, 264], [605, 264], [645, 274], [676, 272]
+    ];
+    const PATH_O_BOT = [
+      [488, 380], [520, 426], [566, 448], [616, 440], [646, 398], [650, 340], [645, 282], [676, 272]
+    ];
+    const PATH_F1_HOOK = [[722, 268], [728, 212], [752, 178], [788, 172]];
+    const PATH_F1_STEM = [[722, 268], [723, 335], [724, 395], [724, 446]];
+    const PATH_F2_HOOK = [[850, 268], [856, 212], [880, 178], [916, 172]];
+    const PATH_F2_STEM = [[850, 268], [851, 335], [852, 395], [852, 446]];
+    const PATH_E_TOP = [
+      [940, 272], [988, 264], [1038, 268], [1078, 296], [1092, 338], [1045, 348], [975, 348]
+    ];
+    const PATH_E_BOT = [
+      [940, 272], [946, 335], [958, 398], [990, 438], [1028, 456], [1028, 476], [1030, 526]
+    ];
+
+    let particles = [];
+    let cupFill = 0;
+
+    function resetSim() {
+      particles = [];
+      cupFill = 0;
+    }
+
+    function evalPolyline(pts, u) {
+      const n = pts.length - 1;
+      const pos = Math.max(0, Math.min(0.9999, u)) * n;
+      const i = Math.floor(pos);
+      const f = pos - i;
+      return [
+        pts[i][0] * (1 - f) + pts[i + 1][0] * f,
+        pts[i][1] * (1 - f) + pts[i + 1][1] * f
+      ];
+    }
+
+    function spawnParticles(rateMult, cremaRatio) {
+      const count = Math.ceil(5 * rateMult);
+      for (let i = 0; i < count; i++) {
+        if (particles.length > 1500) break;
+        const isCrema = Math.random() < cremaRatio;
+        particles.push({
+          stage: 'c',
+          u: 0,
+          branch: Math.random(),
+          offsetR: (Math.random() - 0.5) * 24,
+          rad: isCrema ? (6 + Math.random() * 7) : (8 + Math.random() * 9),
+          isCrema,
+          speed: (0.008 + Math.random() * 0.004) * (1 - 0.35 * Math.abs(Math.random() - 0.5))
+        });
+      }
+    }
+
+    function startSimEngine() {
+      if (simRunning) return;
+      simRunning = true;
+      function loop() {
+        if (!simRunning) return;
+        const rate = parseFloat(document.getElementById('slRate').value) / 100;
+        const spd = parseFloat(document.getElementById('slSpeed').value) / 100;
+        const crema = parseFloat(document.getElementById('slCrema').value) / 100;
+        document.getElementById('lblRate').textContent = Math.round(rate * 100) + '%';
+        document.getElementById('lblSpeed').textContent = spd.toFixed(1) + 'x';
+        document.getElementById('lblCrema').textContent = Math.round(crema * 100) + '%';
+
+        if (rate > 0.02) spawnParticles(rate, crema);
+
+        if (bgPlate.complete) {
+          ctx.drawImage(bgPlate, 0, 0, canvas.width, canvas.height);
+        } else {
+          ctx.fillStyle = '#120a06';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.u += p.speed * spd;
+          let xy = [0, 0];
+
+          if (p.stage === 'c') {
+            xy = evalPolyline(PATH_MAIN, p.u);
+            if (p.u >= 1) { p.stage = 'o'; p.u = 0; }
+          } else if (p.stage === 'o') {
+            xy = evalPolyline(p.branch < 0.52 ? PATH_O_TOP : PATH_O_BOT, p.u);
+            if (p.u >= 1) { p.stage = 'f1'; p.u = 0; }
+          } else if (p.stage === 'f1') {
+            if (p.branch < 0.25) {
+              xy = evalPolyline(PATH_F1_HOOK, Math.sin(p.u * Math.PI));
+            } else if (p.branch < 0.55) {
+              xy = evalPolyline(PATH_F1_STEM, Math.sin(p.u * Math.PI));
+            } else {
+              xy = [676 + p.u * (808 - 676), 268];
+            }
+            if (p.u >= 1) { p.stage = 'f2'; p.u = 0; }
+          } else if (p.stage === 'f2') {
+            if (p.branch < 0.25) {
+              xy = evalPolyline(PATH_F2_HOOK, Math.sin(p.u * Math.PI));
+            } else if (p.branch < 0.55) {
+              xy = evalPolyline(PATH_F2_STEM, Math.sin(p.u * Math.PI));
+            } else {
+              xy = [808 + p.u * (940 - 808), 270];
+            }
+            if (p.u >= 1) { p.stage = 'e'; p.u = 0; }
+          } else if (p.stage === 'e') {
+            if (p.branch < 0.35 && p.u < 0.7) {
+              xy = evalPolyline(PATH_E_TOP, p.u / 0.7);
+            } else {
+              xy = evalPolyline(PATH_E_BOT, p.u);
+            }
+            if (p.u >= 1) {
+              cupFill = Math.min(1, cupFill + 0.0018);
+              particles.splice(i, 1);
+              continue;
+            }
+          }
+
+          const px = xy[0] + p.offsetR * 0.55;
+          const py = xy[1] + p.offsetR * 0.55;
+          const grad = ctx.createRadialGradient(px, py, 1, px, py, p.rad);
+          if (p.isCrema) {
+            grad.addColorStop(0, 'rgba(238, 176, 84, 0.85)');
+            grad.addColorStop(1, 'rgba(165, 98, 28, 0)');
+          } else {
+            grad.addColorStop(0, 'rgba(42, 16, 6, 0.92)');
+            grad.addColorStop(1, 'rgba(22, 8, 3, 0)');
+          }
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(px, py, p.rad, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        if (cupFill > 0.01) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.ellipse(1030, 526, 114 * Math.min(1, 0.4 + cupFill * 0.6), 14, 0, 0, Math.PI * 2);
+          const cupGrad = ctx.createRadialGradient(1030, 526, 4, 1030, 526, 114);
+          cupGrad.addColorStop(0, 'rgba(245, 192, 108, 0.95)');
+          cupGrad.addColorStop(0.7, 'rgba(182, 112, 42, 0.92)');
+          cupGrad.addColorStop(1, 'rgba(72, 34, 12, 0.85)');
+          ctx.fillStyle = cupGrad;
+          ctx.fill();
+          ctx.restore();
+        }
+
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+    }
+
+    function toggleRecordSim() {
+      const btn = document.getElementById('recBtn');
+      const stream = canvas.captureStream(30);
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'coffe_realtime_simulation.webm';
+        a.click();
+        btn.textContent = 'Record 5s WebM Video';
+        btn.disabled = false;
+      };
+      btn.textContent = 'Recording 5s...';
+      btn.disabled = true;
+      recorder.start();
+      setTimeout(() => recorder.stop(), 5000);
+    }
+  </script>
+</body>
+</html>
