@@ -1,0 +1,713 @@
+{
+ "schema": "bw.agent.ops/v1",
+ "author": "arena-llm",
+ "tasks": [
+  {
+   "id": "t1_table",
+   "goal": "Build a table: slab top on four cylindrical legs, wood and metal materials, then export",
+   "stream_prefix": "t1_table",
+   "ops": [
+    {
+     "op": "scene.reset"
+    },
+    {
+     "op": "object.create",
+     "type": "cube",
+     "name": "TableTop",
+     "size": 2.0,
+     "location": [
+      0,
+      0,
+      1.2
+     ]
+    },
+    {
+     "op": "object.transform",
+     "name": "TableTop",
+     "scale": [
+      1.2,
+      0.7,
+      0.06
+     ]
+    },
+    {
+     "op": "object.create",
+     "type": "cylinder",
+     "name": "Leg_FL",
+     "radius": 0.08,
+     "depth": 1.2,
+     "location": [
+      -0.9,
+      -0.5,
+      0.6
+     ]
+    },
+    {
+     "op": "object.create",
+     "type": "cylinder",
+     "name": "Leg_FR",
+     "radius": 0.08,
+     "depth": 1.2,
+     "location": [
+      0.9,
+      -0.5,
+      0.6
+     ]
+    },
+    {
+     "op": "object.create",
+     "type": "cylinder",
+     "name": "Leg_BL",
+     "radius": 0.08,
+     "depth": 1.2,
+     "location": [
+      -0.9,
+      0.5,
+      0.6
+     ]
+    },
+    {
+     "op": "object.create",
+     "type": "cylinder",
+     "name": "Leg_BR",
+     "radius": 0.08,
+     "depth": 1.2,
+     "location": [
+      0.9,
+      0.5,
+      0.6
+     ]
+    },
+    {
+     "op": "material.create",
+     "name": "Wood",
+     "base_color": [
+      0.45,
+      0.26,
+      0.12
+     ],
+     "roughness": 0.6
+    },
+    {
+     "op": "material.create",
+     "name": "Steel",
+     "base_color": [
+      0.7,
+      0.72,
+      0.75
+     ],
+     "roughness": 0.25,
+     "metallic": 0.9
+    },
+    {
+     "op": "material.assign",
+     "material": "Wood",
+     "object": "TableTop"
+    },
+    {
+     "op": "material.assign",
+     "material": "Steel",
+     "object": "Leg_FL"
+    },
+    {
+     "op": "material.assign",
+     "material": "Steel",
+     "object": "Leg_FR"
+    },
+    {
+     "op": "material.assign",
+     "material": "Steel",
+     "object": "Leg_BL"
+    },
+    {
+     "op": "material.assign",
+     "material": "Steel",
+     "object": "Leg_BR"
+    },
+    {
+     "op": "camera.create",
+     "name": "Cam",
+     "location": [
+      4.5,
+      -4.5,
+      3.5
+     ],
+     "look_at": [
+      0,
+      0,
+      0.9
+     ]
+    },
+    {
+     "op": "light.create",
+     "type": "SUN",
+     "location": [
+      3,
+      3,
+      6
+     ],
+     "energy": 3.0
+    },
+    {
+     "op": "scene.inspect"
+    },
+    {
+     "op": "export",
+     "prefix": "t1_table",
+     "formats": [
+      "glb",
+      "obj"
+     ]
+    },
+    {
+     "op": "validate.roundtrip",
+     "prefix": "t1_table",
+     "formats": [
+      "glb",
+      "obj"
+     ]
+    }
+   ],
+   "expect": {
+    "meshes": 5,
+    "materials": 2
+   }
+  },
+  {
+   "id": "t2_robot",
+   "goal": "Build a robot head: beveled cube head with two spherical eyes and coloured materials",
+   "stream_prefix": "t2_robot",
+   "ops": [
+    {
+     "op": "scene.reset"
+    },
+    {
+     "op": "object.create",
+     "type": "cube",
+     "name": "Head",
+     "size": 2.0,
+     "location": [
+      0,
+      0,
+      1.0
+     ]
+    },
+    {
+     "op": "mesh.bevel",
+     "object": "Head",
+     "width": 0.18,
+     "segments": 3
+    },
+    {
+     "op": "object.create",
+     "type": "sphere",
+     "name": "Eye_L",
+     "radius": 0.28,
+     "location": [
+      -0.38,
+      -0.86,
+      1.25
+     ]
+    },
+    {
+     "op": "object.create",
+     "type": "sphere",
+     "name": "Eye_R",
+     "radius": 0.28,
+     "location": [
+      0.38,
+      -0.86,
+      1.25
+     ]
+    },
+    {
+     "op": "material.create",
+     "name": "Shell",
+     "base_color": [
+      0.15,
+      0.45,
+      0.85
+     ],
+     "roughness": 0.35,
+     "metallic": 0.4
+    },
+    {
+     "op": "material.create",
+     "name": "EyeGlow",
+     "base_color": [
+      1.0,
+      0.85,
+      0.2
+     ],
+     "roughness": 0.1
+    },
+    {
+     "op": "material.assign",
+     "material": "Shell",
+     "object": "Head"
+    },
+    {
+     "op": "material.assign",
+     "material": "EyeGlow",
+     "object": "Eye_L"
+    },
+    {
+     "op": "material.assign",
+     "material": "EyeGlow",
+     "object": "Eye_R"
+    },
+    {
+     "op": "camera.create",
+     "name": "Cam",
+     "location": [
+      3.2,
+      -3.6,
+      2.4
+     ],
+     "look_at": [
+      0,
+      0,
+      1.2
+     ]
+    },
+    {
+     "op": "light.create",
+     "type": "SUN",
+     "location": [
+      2,
+      2,
+      5
+     ],
+     "energy": 4.0
+    },
+    {
+     "op": "scene.inspect"
+    },
+    {
+     "op": "export",
+     "prefix": "t2_robot",
+     "formats": [
+      "glb",
+      "stl"
+     ]
+    },
+    {
+     "op": "validate.roundtrip",
+     "prefix": "t2_robot",
+     "formats": [
+      "glb",
+      "stl"
+     ]
+    }
+   ],
+   "expect": {
+    "meshes": 3,
+    "materials": 2
+   }
+  },
+  {
+   "id": "t3_house",
+   "goal": "Build a house: walls, a conical roof, and a chimney made by extruding a face",
+   "stream_prefix": "t3_house",
+   "ops": [
+    {
+     "op": "scene.reset"
+    },
+    {
+     "op": "object.create",
+     "type": "cube",
+     "name": "Walls",
+     "size": 2.0,
+     "location": [
+      0,
+      0,
+      1.0
+     ]
+    },
+    {
+     "op": "object.transform",
+     "name": "Walls",
+     "scale": [
+      1.4,
+      1.0,
+      1.0
+     ]
+    },
+    {
+     "op": "object.create",
+     "type": "cone",
+     "name": "Roof",
+     "radius": 1.9,
+     "depth": 1.2,
+     "location": [
+      0,
+      0,
+      2.6
+     ]
+    },
+    {
+     "op": "object.create",
+     "type": "cube",
+     "name": "Chimney",
+     "size": 0.5,
+     "location": [
+      0.7,
+      0.3,
+      2.2
+     ]
+    },
+    {
+     "op": "mesh.extrude",
+     "object": "Chimney",
+     "distance": 0.9,
+     "axis": "Z"
+    },
+    {
+     "op": "material.create",
+     "name": "Plaster",
+     "base_color": [
+      0.92,
+      0.9,
+      0.84
+     ],
+     "roughness": 0.8
+    },
+    {
+     "op": "material.create",
+     "name": "RoofTile",
+     "base_color": [
+      0.55,
+      0.12,
+      0.1
+     ],
+     "roughness": 0.65
+    },
+    {
+     "op": "material.assign",
+     "material": "Plaster",
+     "object": "Walls"
+    },
+    {
+     "op": "material.assign",
+     "material": "RoofTile",
+     "object": "Roof"
+    },
+    {
+     "op": "material.assign",
+     "material": "Plaster",
+     "object": "Chimney"
+    },
+    {
+     "op": "camera.create",
+     "name": "Cam",
+     "location": [
+      5.5,
+      -5.5,
+      4.2
+     ],
+     "look_at": [
+      0,
+      0,
+      1.6
+     ]
+    },
+    {
+     "op": "light.create",
+     "type": "SUN",
+     "location": [
+      4,
+      2,
+      6
+     ],
+     "energy": 5.0
+    },
+    {
+     "op": "scene.inspect"
+    },
+    {
+     "op": "export",
+     "prefix": "t3_house",
+     "formats": [
+      "glb",
+      "ply"
+     ]
+    },
+    {
+     "op": "validate.roundtrip",
+     "prefix": "t3_house",
+     "formats": [
+      "glb",
+      "ply"
+     ]
+    }
+   ],
+   "expect": {
+    "meshes": 3,
+    "materials": 2
+   }
+  },
+  {
+   "id": "t4_pedestal",
+   "goal": "Build a metallic pedestal: beveled cylinder, rotated, with a polished material",
+   "stream_prefix": "t4_pedestal",
+   "ops": [
+    {
+     "op": "scene.reset"
+    },
+    {
+     "op": "object.create",
+     "type": "cylinder",
+     "name": "Base",
+     "radius": 0.9,
+     "depth": 0.25,
+     "location": [
+      0,
+      0,
+      0.12
+     ]
+    },
+    {
+     "op": "mesh.bevel",
+     "object": "Base",
+     "width": 0.04,
+     "segments": 2
+    },
+    {
+     "op": "object.create",
+     "type": "cylinder",
+     "name": "Column",
+     "radius": 0.35,
+     "depth": 1.6,
+     "location": [
+      0,
+      0,
+      1.05
+     ]
+    },
+    {
+     "op": "mesh.bevel",
+     "object": "Column",
+     "width": 0.03,
+     "segments": 2
+    },
+    {
+     "op": "object.create",
+     "type": "cube",
+     "name": "Plinth",
+     "size": 0.7,
+     "location": [
+      0,
+      0,
+      2.05
+     ]
+    },
+    {
+     "op": "object.transform",
+     "name": "Plinth",
+     "rotation_deg": [
+      0,
+      0,
+      45
+     ]
+    },
+    {
+     "op": "material.create",
+     "name": "Brass",
+     "base_color": [
+      0.8,
+      0.6,
+      0.2
+     ],
+     "roughness": 0.15,
+     "metallic": 1.0
+    },
+    {
+     "op": "material.assign",
+     "material": "Brass",
+     "object": "Base"
+    },
+    {
+     "op": "material.assign",
+     "material": "Brass",
+     "object": "Column"
+    },
+    {
+     "op": "material.assign",
+     "material": "Brass",
+     "object": "Plinth"
+    },
+    {
+     "op": "camera.create",
+     "name": "Cam",
+     "location": [
+      3.4,
+      -3.4,
+      2.8
+     ],
+     "look_at": [
+      0,
+      0,
+      1.3
+     ]
+    },
+    {
+     "op": "light.create",
+     "type": "SUN",
+     "location": [
+      3,
+      3,
+      6
+     ],
+     "energy": 4.0
+    },
+    {
+     "op": "scene.inspect"
+    },
+    {
+     "op": "export",
+     "prefix": "t4_pedestal",
+     "formats": [
+      "glb",
+      "usda"
+     ]
+    },
+    {
+     "op": "validate.roundtrip",
+     "prefix": "t4_pedestal",
+     "formats": [
+      "glb",
+      "usda"
+     ]
+    }
+   ],
+   "expect": {
+    "meshes": 3,
+    "materials": 1
+   }
+  },
+  {
+   "id": "t5_full",
+   "goal": "Full pipeline: model with extrude and bevel, material, camera, light, export GLB + glTF-separate + .blend, then re-import each",
+   "stream_prefix": "t5_full",
+   "ops": [
+    {
+     "op": "scene.reset"
+    },
+    {
+     "op": "object.create",
+     "type": "cube",
+     "name": "Block",
+     "size": 2.0,
+     "location": [
+      0,
+      0,
+      1.0
+     ]
+    },
+    {
+     "op": "mesh.extrude",
+     "object": "Block",
+     "distance": 0.8,
+     "axis": "Z"
+    },
+    {
+     "op": "mesh.bevel",
+     "object": "Block",
+     "width": 0.05,
+     "segments": 2
+    },
+    {
+     "op": "object.create",
+     "type": "sphere",
+     "name": "Orb",
+     "radius": 0.55,
+     "location": [
+      1.7,
+      0,
+      1.4
+     ]
+    },
+    {
+     "op": "material.create",
+     "name": "Slate",
+     "base_color": [
+      0.2,
+      0.22,
+      0.26
+     ],
+     "roughness": 0.5
+    },
+    {
+     "op": "material.create",
+     "name": "Gold",
+     "base_color": [
+      0.95,
+      0.75,
+      0.25
+     ],
+     "roughness": 0.2,
+     "metallic": 1.0
+    },
+    {
+     "op": "material.assign",
+     "material": "Slate",
+     "object": "Block"
+    },
+    {
+     "op": "material.assign",
+     "material": "Gold",
+     "object": "Orb"
+    },
+    {
+     "op": "camera.create",
+     "name": "Cam",
+     "location": [
+      5,
+      -5,
+      3.6
+     ],
+     "look_at": [
+      0.6,
+      0,
+      1.2
+     ]
+    },
+    {
+     "op": "light.create",
+     "type": "SUN",
+     "location": [
+      4,
+      3,
+      7
+     ],
+     "energy": 4.5
+    },
+    {
+     "op": "scene.inspect"
+    },
+    {
+     "op": "export",
+     "prefix": "t5_full",
+     "formats": [
+      "glb",
+      "gltf",
+      "blend"
+     ]
+    },
+    {
+     "op": "validate.roundtrip",
+     "prefix": "t5_full",
+     "formats": [
+      "glb",
+      "gltf",
+      "blend"
+     ]
+    }
+   ],
+   "expect": {
+    "meshes": 2,
+    "materials": 2
+   }
+  }
+ ]
+}

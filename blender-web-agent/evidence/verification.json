@@ -1,0 +1,140 @@
+{
+ "verified": 5,
+ "total": 5,
+ "files": {
+  "runs/t1_table/t1_table.glb": {
+   "magic": "glTF",
+   "version": 2,
+   "declared_length": 30640,
+   "actual_length": 30640,
+   "chunks": [
+    {
+     "type": "JSON",
+     "bytes": 4452
+    },
+    {
+     "type": "BIN",
+     "bytes": 26160
+    }
+   ],
+   "meshes": 5,
+   "materials": [
+    "Steel",
+    "Wood"
+   ],
+   "nodes": 5,
+   "accessors": 17,
+   "primitives": 5,
+   "vertices": 792,
+   "generator": "Khronos glTF Blender I/O v5.2.39",
+   "ok": true
+  },
+  "runs/t2_robot/t2_robot.glb": {
+   "magic": "glTF",
+   "version": 2,
+   "declared_length": 149104,
+   "actual_length": 149104,
+   "chunks": [
+    {
+     "type": "JSON",
+     "bytes": 2924
+    },
+    {
+     "type": "BIN",
+     "bytes": 146152
+    }
+   ],
+   "meshes": 3,
+   "materials": [
+    "EyeGlow",
+    "Shell"
+   ],
+   "nodes": 3,
+   "accessors": 11,
+   "primitives": 3,
+   "vertices": 4352,
+   "generator": "Khronos glTF Blender I/O v5.2.39",
+   "ok": true
+  },
+  "runs/t3_house/t3_house.glb": {
+   "magic": "glTF",
+   "version": 2,
+   "declared_length": 9432,
+   "actual_length": 9432,
+   "chunks": [
+    {
+     "type": "JSON",
+     "bytes": 2952
+    },
+    {
+     "type": "BIN",
+     "bytes": 6452
+    }
+   ],
+   "meshes": 3,
+   "materials": [
+    "Plaster",
+    "RoofTile"
+   ],
+   "nodes": 3,
+   "accessors": 12,
+   "primitives": 3,
+   "vertices": 184,
+   "generator": "Khronos glTF Blender I/O v5.2.39",
+   "ok": true
+  },
+  "runs/t4_pedestal/t4_pedestal.glb": {
+   "magic": "glTF",
+   "version": 2,
+   "declared_length": 50992,
+   "actual_length": 50992,
+   "chunks": [
+    {
+     "type": "JSON",
+     "bytes": 2788
+    },
+    {
+     "type": "BIN",
+     "bytes": 48176
+    }
+   ],
+   "meshes": 3,
+   "materials": [
+    "Brass"
+   ],
+   "nodes": 3,
+   "accessors": 11,
+   "primitives": 3,
+   "vertices": 1432,
+   "generator": "Khronos glTF Blender I/O v5.2.39",
+   "ok": true
+  },
+  "runs/t5_full/t5_full.glb": {
+   "magic": "glTF",
+   "version": 2,
+   "declared_length": 79868,
+   "actual_length": 79868,
+   "chunks": [
+    {
+     "type": "JSON",
+     "bytes": 2120
+    },
+    {
+     "type": "BIN",
+     "bytes": 77720
+    }
+   ],
+   "meshes": 2,
+   "materials": [
+    "Slate",
+    "Gold"
+   ],
+   "nodes": 2,
+   "accessors": 8,
+   "primitives": 2,
+   "vertices": 2224,
+   "generator": "Khronos glTF Blender I/O v5.2.39",
+   "ok": true
+  }
+ }
+}

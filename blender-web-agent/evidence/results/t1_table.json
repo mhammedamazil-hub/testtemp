@@ -1,0 +1,270 @@
+{
+ "schema": "bw.agent.ops/v1",
+ "blender": "5.2.0 LTS",
+ "plan_ok": true,
+ "tasks": [
+  {
+   "id": "t1_table",
+   "goal": "Build a table: slab top on four cylindrical legs, wood and metal materials, then export",
+   "ops": [
+    {
+     "op": "scene.reset",
+     "ok": true,
+     "result": {
+      "objects": 0,
+      "materials": 0
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "TableTop",
+      "verts": 8,
+      "faces": 6
+     }
+    },
+    {
+     "op": "object.transform",
+     "ok": true,
+     "result": {
+      "name": "TableTop",
+      "location": [
+       0,
+       0,
+       1.2000000476837158
+      ],
+      "scale": [
+       1.2000000476837158,
+       0.699999988079071,
+       0.05999999865889549
+      ]
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Leg_FL",
+      "verts": 64,
+      "faces": 34
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Leg_FR",
+      "verts": 64,
+      "faces": 34
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Leg_BL",
+      "verts": 64,
+      "faces": 34
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Leg_BR",
+      "verts": 64,
+      "faces": 34
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "Wood",
+      "base_color": [
+       0.44999998807907104,
+       0.25999999046325684,
+       0.11999999731779099,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "Steel",
+      "base_color": [
+       0.699999988079071,
+       0.7200000286102295,
+       0.75,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "TableTop",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Leg_FL",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Leg_FR",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Leg_BL",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Leg_BR",
+      "slots": 1
+     }
+    },
+    {
+     "op": "camera.create",
+     "ok": true,
+     "result": {
+      "camera": "Cam"
+     }
+    },
+    {
+     "op": "light.create",
+     "ok": true,
+     "result": {
+      "light": "Sun",
+      "type": "SUN"
+     }
+    },
+    {
+     "op": "scene.inspect",
+     "ok": true,
+     "result": {
+      "objects": {
+       "Cam": {
+        "type": "CAMERA",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       },
+       "Leg_BL": {
+        "type": "MESH",
+        "verts": 64,
+        "faces": 34,
+        "materials": [
+         "Steel"
+        ]
+       },
+       "Leg_BR": {
+        "type": "MESH",
+        "verts": 64,
+        "faces": 34,
+        "materials": [
+         "Steel"
+        ]
+       },
+       "Leg_FL": {
+        "type": "MESH",
+        "verts": 64,
+        "faces": 34,
+        "materials": [
+         "Steel"
+        ]
+       },
+       "Leg_FR": {
+        "type": "MESH",
+        "verts": 64,
+        "faces": 34,
+        "materials": [
+         "Steel"
+        ]
+       },
+       "Sun": {
+        "type": "LIGHT",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       },
+       "TableTop": {
+        "type": "MESH",
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+         "Wood"
+        ]
+       }
+      },
+      "materials": [
+       "Steel",
+       "Wood"
+      ],
+      "camera": "Cam",
+      "engine": "BLENDER_EEVEE"
+     }
+    },
+    {
+     "op": "export",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "bytes": 30640,
+       "sha256": "95389f264c2aec6b"
+      },
+      "obj": {
+       "ok": true,
+       "bytes": 31754,
+       "sha256": "73a24e09fc58aeed"
+      }
+     }
+    },
+    {
+     "op": "validate.roundtrip",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "objects": 5,
+       "meshes": 5,
+       "verts": 792,
+       "materials": 2
+      },
+      "obj": {
+       "ok": true,
+       "objects": 5,
+       "meshes": 5,
+       "verts": 264,
+       "materials": 2
+      }
+     }
+    }
+   ],
+   "artifacts": {
+    "glb_sha256": "95389f264c2aec6b28fd0414052f2d9b915f5f6dd84a10b96d28b99e1d66e7ae",
+    "glb_bytes": 30640
+   }
+  }
+ ]
+}

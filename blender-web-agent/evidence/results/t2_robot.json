@@ -1,0 +1,211 @@
+{
+ "schema": "bw.agent.ops/v1",
+ "blender": "5.2.0 LTS",
+ "plan_ok": true,
+ "tasks": [
+  {
+   "id": "t2_robot",
+   "goal": "Build a robot head: beveled cube head with two spherical eyes and coloured materials",
+   "ops": [
+    {
+     "op": "scene.reset",
+     "ok": true,
+     "result": {
+      "objects": 0,
+      "materials": 0
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Head",
+      "verts": 8,
+      "faces": 6
+     }
+    },
+    {
+     "op": "mesh.bevel",
+     "ok": true,
+     "result": {
+      "verts": 96,
+      "faces": 98
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Eye_L",
+      "verts": 482,
+      "faces": 512
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Eye_R",
+      "verts": 482,
+      "faces": 512
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "Shell",
+      "base_color": [
+       0.15000000596046448,
+       0.44999998807907104,
+       0.8500000238418579,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "EyeGlow",
+      "base_color": [
+       1,
+       0.8500000238418579,
+       0.20000000298023224,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Head",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Eye_L",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Eye_R",
+      "slots": 1
+     }
+    },
+    {
+     "op": "camera.create",
+     "ok": true,
+     "result": {
+      "camera": "Cam"
+     }
+    },
+    {
+     "op": "light.create",
+     "ok": true,
+     "result": {
+      "light": "Sun",
+      "type": "SUN"
+     }
+    },
+    {
+     "op": "scene.inspect",
+     "ok": true,
+     "result": {
+      "objects": {
+       "Cam": {
+        "type": "CAMERA",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       },
+       "Eye_L": {
+        "type": "MESH",
+        "verts": 482,
+        "faces": 512,
+        "materials": [
+         "EyeGlow"
+        ]
+       },
+       "Eye_R": {
+        "type": "MESH",
+        "verts": 482,
+        "faces": 512,
+        "materials": [
+         "EyeGlow"
+        ]
+       },
+       "Head": {
+        "type": "MESH",
+        "verts": 96,
+        "faces": 98,
+        "materials": [
+         "Shell"
+        ]
+       },
+       "Sun": {
+        "type": "LIGHT",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       }
+      },
+      "materials": [
+       "EyeGlow",
+       "Shell"
+      ],
+      "camera": "Cam",
+      "engine": "BLENDER_EEVEE"
+     }
+    },
+    {
+     "op": "export",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "bytes": 149104,
+       "sha256": "0e73aafe4e332069"
+      },
+      "stl": {
+       "ok": true,
+       "bytes": 105484,
+       "sha256": "3abc8c9bde3373dd"
+      }
+     }
+    },
+    {
+     "op": "validate.roundtrip",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "objects": 3,
+       "meshes": 3,
+       "verts": 4352,
+       "materials": 2
+      },
+      "stl": {
+       "ok": true,
+       "objects": 1,
+       "meshes": 1,
+       "verts": 1060,
+       "materials": 0
+      }
+     }
+    }
+   ],
+   "artifacts": {
+    "glb_sha256": "0e73aafe4e33206978bf459ffd22a5940528cc7e61c0690ef813448f48812549",
+    "glb_bytes": 149104
+   }
+  }
+ ]
+}

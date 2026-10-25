@@ -54,5 +54,16 @@ python3 -m agent.reason state
 python3 -m agent.reason act --json '{"action":"navigate","url":"https://pypi.org/project/requests/","reason":"start"}'
 ```
 
+# Real Blender WebAssembly driven by a JSON operation API (see docs/BLENDER_WEB.md)
+python3 blender-web-agent/harness/server.py &          # COOP/COEP server on :8090
+LD_LIBRARY_PATH=/tmp/lib node blender-web-agent/harness/runall.mjs   # 5 E2E tasks
+python3 blender-web-agent/harness/verify_artifacts.py runs/t5_full/t5_full.glb
+```
+
+See [docs/BLENDER_WEB.md](docs/BLENDER_WEB.md) for the Blender-wasm mission
+report: what really runs (5/5 tasks, 7 export formats round-tripped), why the
+windowed UI cannot be verified without hardware WebGPU, why Obscura cannot host
+this runtime, and why GitHub Pages is incompatible with it.
+
 See [docs/OBSCURA.md](docs/OBSCURA.md) for the install details, the design
 notes, and the current status of the binary download in this sandbox.

@@ -1,0 +1,67 @@
+[
+ {
+  "id": "t1_table",
+  "ok": true,
+  "done": true,
+  "seconds": 10,
+  "artifacts": [
+   "t1_table.glb"
+  ],
+  "exportBytes": {
+   "glb_sha256": "95389f264c2aec6b28fd0414052f2d9b915f5f6dd84a10b96d28b99e1d66e7ae",
+   "glb_bytes": 30640
+  }
+ },
+ {
+  "id": "t2_robot",
+  "ok": true,
+  "done": true,
+  "seconds": 10,
+  "artifacts": [
+   "t2_robot.glb"
+  ],
+  "exportBytes": {
+   "glb_sha256": "0e73aafe4e33206978bf459ffd22a5940528cc7e61c0690ef813448f48812549",
+   "glb_bytes": 149104
+  }
+ },
+ {
+  "id": "t3_house",
+  "ok": true,
+  "done": true,
+  "seconds": 10,
+  "artifacts": [
+   "t3_house.glb"
+  ],
+  "exportBytes": {
+   "glb_sha256": "e25899c5df06a224a5868406ef7960be28fb5ac2925d9a6cd6d3cca61f29f103",
+   "glb_bytes": 9432
+  }
+ },
+ {
+  "id": "t4_pedestal",
+  "ok": true,
+  "done": true,
+  "seconds": 10,
+  "artifacts": [
+   "t4_pedestal.glb"
+  ],
+  "exportBytes": {
+   "glb_sha256": "890d93c5db3468c54cdd74b8b9f0205bbff396cd417a18d37ae8c6307320aa82",
+   "glb_bytes": 50992
+  }
+ },
+ {
+  "id": "t5_full",
+  "ok": true,
+  "done": true,
+  "seconds": 10,
+  "artifacts": [
+   "t5_full.glb"
+  ],
+  "exportBytes": {
+   "glb_sha256": "47da8f9a180bcd3b36099f63f7e9621a5f349b93c6a2d2e900f34ab43af7ae3a",
+   "glb_bytes": 79868
+  }
+ }
+]

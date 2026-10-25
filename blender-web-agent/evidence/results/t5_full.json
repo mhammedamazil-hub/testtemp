@@ -1,0 +1,205 @@
+{
+ "schema": "bw.agent.ops/v1",
+ "blender": "5.2.0 LTS",
+ "plan_ok": true,
+ "tasks": [
+  {
+   "id": "t5_full",
+   "goal": "Full pipeline: model with extrude and bevel, material, camera, light, export GLB + glTF-separate + .blend, then re-import each",
+   "ops": [
+    {
+     "op": "scene.reset",
+     "ok": true,
+     "result": {
+      "objects": 0,
+      "materials": 0
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Block",
+      "verts": 8,
+      "faces": 6
+     }
+    },
+    {
+     "op": "mesh.extrude",
+     "ok": true,
+     "result": {
+      "verts": 12,
+      "faces": 10
+     }
+    },
+    {
+     "op": "mesh.bevel",
+     "ok": true,
+     "result": {
+      "verts": 68,
+      "faces": 66
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Orb",
+      "verts": 482,
+      "faces": 512
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "Slate",
+      "base_color": [
+       0.20000000298023224,
+       0.2199999988079071,
+       0.25999999046325684,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "Gold",
+      "base_color": [
+       0.949999988079071,
+       0.75,
+       0.25,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Block",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Orb",
+      "slots": 1
+     }
+    },
+    {
+     "op": "camera.create",
+     "ok": true,
+     "result": {
+      "camera": "Cam"
+     }
+    },
+    {
+     "op": "light.create",
+     "ok": true,
+     "result": {
+      "light": "Sun",
+      "type": "SUN"
+     }
+    },
+    {
+     "op": "scene.inspect",
+     "ok": true,
+     "result": {
+      "objects": {
+       "Block": {
+        "type": "MESH",
+        "verts": 68,
+        "faces": 66,
+        "materials": [
+         "Slate"
+        ]
+       },
+       "Cam": {
+        "type": "CAMERA",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       },
+       "Orb": {
+        "type": "MESH",
+        "verts": 482,
+        "faces": 512,
+        "materials": [
+         "Gold"
+        ]
+       },
+       "Sun": {
+        "type": "LIGHT",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       }
+      },
+      "materials": [
+       "Gold",
+       "Slate"
+      ],
+      "camera": "Cam",
+      "engine": "BLENDER_EEVEE"
+     }
+    },
+    {
+     "op": "export",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "bytes": 79868,
+       "sha256": "47da8f9a180bcd3b"
+      },
+      "gltf": {
+       "ok": true,
+       "bytes": 3014,
+       "sha256": "8843bf89ccdb6203"
+      },
+      "blend": {
+       "ok": true,
+       "bytes": 115209,
+       "sha256": "06fbdbfba5ea9827"
+      }
+     }
+    },
+    {
+     "op": "validate.roundtrip",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "objects": 2,
+       "meshes": 2,
+       "verts": 2224,
+       "materials": 2
+      },
+      "gltf": {
+       "ok": true,
+       "objects": 2,
+       "meshes": 2,
+       "verts": 2224,
+       "materials": 2
+      },
+      "blend": {
+       "ok": true,
+       "mode": "header-check",
+       "magic": "28b52ffda00806",
+       "compression": "zstd"
+      }
+     }
+    }
+   ],
+   "artifacts": {
+    "glb_sha256": "47da8f9a180bcd3b36099f63f7e9621a5f349b93c6a2d2e900f34ab43af7ae3a",
+    "glb_bytes": 79868
+   }
+  }
+ ]
+}

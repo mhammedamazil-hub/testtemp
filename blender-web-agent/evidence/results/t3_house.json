@@ -1,0 +1,228 @@
+{
+ "schema": "bw.agent.ops/v1",
+ "blender": "5.2.0 LTS",
+ "plan_ok": true,
+ "tasks": [
+  {
+   "id": "t3_house",
+   "goal": "Build a house: walls, a conical roof, and a chimney made by extruding a face",
+   "ops": [
+    {
+     "op": "scene.reset",
+     "ok": true,
+     "result": {
+      "objects": 0,
+      "materials": 0
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Walls",
+      "verts": 8,
+      "faces": 6
+     }
+    },
+    {
+     "op": "object.transform",
+     "ok": true,
+     "result": {
+      "name": "Walls",
+      "location": [
+       0,
+       0,
+       1
+      ],
+      "scale": [
+       1.399999976158142,
+       1,
+       1
+      ]
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Roof",
+      "verts": 33,
+      "faces": 33
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Chimney",
+      "verts": 8,
+      "faces": 6
+     }
+    },
+    {
+     "op": "mesh.extrude",
+     "ok": true,
+     "result": {
+      "verts": 12,
+      "faces": 10
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "Plaster",
+      "base_color": [
+       0.9200000166893005,
+       0.8999999761581421,
+       0.8399999737739563,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "RoofTile",
+      "base_color": [
+       0.550000011920929,
+       0.11999999731779099,
+       0.10000000149011612,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Walls",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Roof",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Chimney",
+      "slots": 1
+     }
+    },
+    {
+     "op": "camera.create",
+     "ok": true,
+     "result": {
+      "camera": "Cam"
+     }
+    },
+    {
+     "op": "light.create",
+     "ok": true,
+     "result": {
+      "light": "Sun",
+      "type": "SUN"
+     }
+    },
+    {
+     "op": "scene.inspect",
+     "ok": true,
+     "result": {
+      "objects": {
+       "Cam": {
+        "type": "CAMERA",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       },
+       "Chimney": {
+        "type": "MESH",
+        "verts": 12,
+        "faces": 10,
+        "materials": [
+         "Plaster"
+        ]
+       },
+       "Roof": {
+        "type": "MESH",
+        "verts": 33,
+        "faces": 33,
+        "materials": [
+         "RoofTile"
+        ]
+       },
+       "Sun": {
+        "type": "LIGHT",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       },
+       "Walls": {
+        "type": "MESH",
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+         "Plaster"
+        ]
+       }
+      },
+      "materials": [
+       "Plaster",
+       "RoofTile"
+      ],
+      "camera": "Cam",
+      "engine": "BLENDER_EEVEE"
+     }
+    },
+    {
+     "op": "export",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "bytes": 9432,
+       "sha256": "e25899c5df06a224"
+      },
+      "ply": {
+       "ok": true,
+       "bytes": 3028,
+       "sha256": "c93f9620b35c55c4"
+      }
+     }
+    },
+    {
+     "op": "validate.roundtrip",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "objects": 3,
+       "meshes": 3,
+       "verts": 184,
+       "materials": 2
+      },
+      "ply": {
+       "ok": true,
+       "objects": 1,
+       "meshes": 1,
+       "verts": 98,
+       "materials": 0
+      }
+     }
+    }
+   ],
+   "artifacts": {
+    "glb_sha256": "e25899c5df06a224a5868406ef7960be28fb5ac2925d9a6cd6d3cca61f29f103",
+    "glb_bytes": 9432
+   }
+  }
+ ]
+}

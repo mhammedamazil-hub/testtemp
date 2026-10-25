@@ -1,0 +1,222 @@
+{
+ "schema": "bw.agent.ops/v1",
+ "blender": "5.2.0 LTS",
+ "plan_ok": true,
+ "tasks": [
+  {
+   "id": "t4_pedestal",
+   "goal": "Build a metallic pedestal: beveled cylinder, rotated, with a polished material",
+   "ops": [
+    {
+     "op": "scene.reset",
+     "ok": true,
+     "result": {
+      "objects": 0,
+      "materials": 0
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Base",
+      "verts": 64,
+      "faces": 34
+     }
+    },
+    {
+     "op": "mesh.bevel",
+     "ok": true,
+     "result": {
+      "verts": 192,
+      "faces": 162
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Column",
+      "verts": 64,
+      "faces": 34
+     }
+    },
+    {
+     "op": "mesh.bevel",
+     "ok": true,
+     "result": {
+      "verts": 192,
+      "faces": 162
+     }
+    },
+    {
+     "op": "object.create",
+     "ok": true,
+     "result": {
+      "name": "Plinth",
+      "verts": 8,
+      "faces": 6
+     }
+    },
+    {
+     "op": "object.transform",
+     "ok": true,
+     "result": {
+      "name": "Plinth",
+      "location": [
+       0,
+       0,
+       2.049999952316284
+      ],
+      "scale": [
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.create",
+     "ok": true,
+     "result": {
+      "material": "Brass",
+      "base_color": [
+       0.800000011920929,
+       0.6000000238418579,
+       0.20000000298023224,
+       1
+      ]
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Base",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Column",
+      "slots": 1
+     }
+    },
+    {
+     "op": "material.assign",
+     "ok": true,
+     "result": {
+      "object": "Plinth",
+      "slots": 1
+     }
+    },
+    {
+     "op": "camera.create",
+     "ok": true,
+     "result": {
+      "camera": "Cam"
+     }
+    },
+    {
+     "op": "light.create",
+     "ok": true,
+     "result": {
+      "light": "Sun",
+      "type": "SUN"
+     }
+    },
+    {
+     "op": "scene.inspect",
+     "ok": true,
+     "result": {
+      "objects": {
+       "Base": {
+        "type": "MESH",
+        "verts": 192,
+        "faces": 162,
+        "materials": [
+         "Brass"
+        ]
+       },
+       "Cam": {
+        "type": "CAMERA",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       },
+       "Column": {
+        "type": "MESH",
+        "verts": 192,
+        "faces": 162,
+        "materials": [
+         "Brass"
+        ]
+       },
+       "Plinth": {
+        "type": "MESH",
+        "verts": 8,
+        "faces": 6,
+        "materials": [
+         "Brass"
+        ]
+       },
+       "Sun": {
+        "type": "LIGHT",
+        "verts": null,
+        "faces": null,
+        "materials": []
+       }
+      },
+      "materials": [
+       "Brass"
+      ],
+      "camera": "Cam",
+      "engine": "BLENDER_EEVEE"
+     }
+    },
+    {
+     "op": "export",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "bytes": 50992,
+       "sha256": "890d93c5db3468c5"
+      },
+      "usda": {
+       "ok": true,
+       "bytes": 95207,
+       "sha256": "864a0693dbc431e8"
+      }
+     }
+    },
+    {
+     "op": "validate.roundtrip",
+     "ok": true,
+     "result": {
+      "glb": {
+       "ok": true,
+       "objects": 3,
+       "meshes": 3,
+       "verts": 1432,
+       "materials": 1
+      },
+      "usda": {
+       "ok": true,
+       "objects": 6,
+       "meshes": 3,
+       "verts": 392,
+       "materials": 1
+      }
+     }
+    }
+   ],
+   "artifacts": {
+    "glb_sha256": "890d93c5db3468c54cdd74b8b9f0205bbff396cd417a18d37ae8c6307320aa82",
+    "glb_bytes": 50992
+   }
+  }
+ ]
+}
