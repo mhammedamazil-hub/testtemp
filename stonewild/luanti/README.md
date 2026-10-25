@@ -10,7 +10,7 @@ Stonewild Realms is an original voxel-survival game overlay for the open-source 
 - health, nourishment, regeneration/starvation, drowning/fall damage, starter items, 3×3 crafting, four tools, lanterns, and persistent worlds/inventories;
 - Luanti's mature Android touch controls plus desktop keyboard/mouse controls;
 - standalone Stonewild Android identity (`org.stonewild.realms`), original icon/menu art, and a focused local-play interface;
-- reproducible arm64 APK and Linux Mint `.deb` workflows.
+- a reproducible universal Android APK (arm64 phone/tablet support plus x86-64 for exact-package emulator validation) and Linux Mint `.deb` workflows.
 
 This is an early playable survival foundation, **not** a claim of feature parity with Minecraft or a finished game. Creatures, advanced equipment progression, agriculture, weather, structures, multiplayer polish, audio, and broader content remain future phases.
 

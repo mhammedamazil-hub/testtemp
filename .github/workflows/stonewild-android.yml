@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  android-arm64:
-    name: Luanti 5.17 arm64 debug APK
+  android-universal:
+    name: Luanti 5.17 install-tested universal APK
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
@@ -49,7 +49,9 @@ jobs:
             "platforms;android-34" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
-            "ndk;29.0.14206865"
+            "ndk;29.0.14206865" \
+            "emulator" \
+            "system-images;android-30;google_apis;x86_64"
 
       - name: Cache Gradle and Luanti Android dependencies
         uses: actions/cache@v6
@@ -79,15 +81,20 @@ jobs:
       - name: Verify signature, identity, ABI, and embedded game
         run: |
           set -euo pipefail
-          APK=/tmp/stonewild-android-output/stonewild-realms-arm64-debug.apk
+          APK=/tmp/stonewild-android-output/stonewild-realms-universal-debug.apk
           test -s "$APK"
+          cat /tmp/stonewild-android-output/APK_SIZE.txt
+          cat /tmp/stonewild-android-output/SHA256SUMS.txt
+          (cd /tmp/stonewild-android-output && sha256sum --check SHA256SUMS.txt)
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/badging.txt
           grep -q "package: name='org.stonewild.realms'" /tmp/badging.txt
           grep -q "application-label:'Stonewild Realms'" /tmp/badging.txt
           unzip -l "$APK" | tee /tmp/apk-files.txt
           grep -q 'lib/arm64-v8a/libluanti.so' /tmp/apk-files.txt
-          ! grep -qE 'lib/(x86|x86_64|armeabi-v7a)/' /tmp/apk-files.txt
+          grep -q 'lib/x86_64/libluanti.so' /tmp/apk-files.txt
+          ! grep -qE 'lib/(x86/|armeabi-v7a/)' /tmp/apk-files.txt
           unzip -p "$APK" assets/assets.zip > /tmp/stonewild-assets.zip
           unzip -t /tmp/stonewild-assets.zip
           unzip -l /tmp/stonewild-assets.zip | tee /tmp/assets-files.txt
@@ -99,10 +106,61 @@ jobs:
           ! grep -q 'games/devtest/' /tmp/assets-files.txt
           unzip -p /tmp/stonewild-assets.zip games/stonewild/game.conf | grep -q 'title = Stonewild Realms'
 
-      - name: Upload Stonewild Realms APK
+      - name: Install and launch the exact published APK in Android
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          APK=/tmp/stonewild-android-output/stonewild-realms-universal-debug.apk
+          echo no | avdmanager create avd \
+            --force \
+            --name stonewild-ci \
+            --package 'system-images;android-30;google_apis;x86_64' \
+            --device 'pixel_2'
+          if [[ -e /dev/kvm ]]; then sudo chmod 666 /dev/kvm; fi
+          "$ANDROID_HOME/emulator/emulator" \
+            -avd stonewild-ci \
+            -no-window -no-audio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect \
+            > /tmp/stonewild-emulator.log 2>&1 &
+          emulator_pid=$!
+          cleanup() {
+            adb emu kill >/dev/null 2>&1 || true
+            kill "$emulator_pid" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          timeout --kill-after=5s 180s adb wait-for-device
+          booted=0
+          for attempt in $(seq 1 60); do
+            if [[ "$(timeout 8s adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == "1" ]]; then
+              booted=1
+              break
+            fi
+            sleep 3
+          done
+          test "$booted" -eq 1
+          adb install -r "$APK" | tee /tmp/stonewild-install.txt
+          grep -q Success /tmp/stonewild-install.txt
+          adb shell pm path org.stonewild.realms | grep -q '^package:'
+          adb logcat -c
+          adb shell monkey -p org.stonewild.realms -c android.intent.category.LAUNCHER 1
+          running=0
+          for attempt in $(seq 1 30); do
+            if [[ -n "$(adb shell pidof org.stonewild.realms 2>/dev/null | tr -d '\r')" ]]; then
+              running=1
+              break
+            fi
+            sleep 2
+          done
+          test "$running" -eq 1
+          sleep 20
+          adb exec-out screencap -p > /tmp/stonewild-android-output/emulator-launch.png
+          adb logcat -d -t 1200 > /tmp/stonewild-logcat.txt
+          ! grep -E 'FATAL EXCEPTION|ANR in org\.stonewild\.realms|Fatal signal.*luanti' /tmp/stonewild-logcat.txt
+
+      - name: Upload Stonewild Realms compatibility APK
         uses: actions/upload-artifact@v7
         with:
-          name: stonewild-realms-arm64-debug-${{ github.run_number }}
-          path: /tmp/stonewild-android-output/stonewild-realms-arm64-debug.apk
+          name: stonewild-realms-universal-debug-${{ github.run_number }}
+          path: /tmp/stonewild-android-output/
           if-no-files-found: error
           retention-days: 14

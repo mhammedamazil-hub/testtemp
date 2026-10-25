@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the pinned arm64 Stonewild Realms debug APK.
+# Build the pinned, emulator-tested Stonewild Realms universal debug APK.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,7 +10,7 @@ if [[ -z "${OUTPUT_DIR}" ]]; then
 fi
 mkdir -p "${OUTPUT_DIR}"
 OUTPUT_DIR="$(cd -- "${OUTPUT_DIR}" && pwd)"
-OUTPUT_APK="${OUTPUT_DIR}/stonewild-realms-arm64-debug.apk"
+OUTPUT_APK="${OUTPUT_DIR}/stonewild-realms-universal-debug.apk"
 if [[ -e "${OUTPUT_APK}" ]]; then
   echo "refusing to overwrite existing output: ${OUTPUT_APK}" >&2
   exit 2
@@ -27,10 +27,15 @@ trap cleanup EXIT
 )
 
 APK="$(find "${WORK_ROOT}/source/android/app/build/outputs/apk" \
-  -type f -name '*arm64-v8a-debug.apk' -print -quit)"
+  -type f -name '*universal-debug.apk' -print -quit)"
 if [[ -z "${APK}" || ! -s "${APK}" ]]; then
-  echo "Gradle completed but the arm64 debug APK was not found" >&2
+  echo "Gradle completed but the universal debug APK was not found" >&2
   exit 1
 fi
 cp "${APK}" "${OUTPUT_APK}"
-printf 'Built %s\n' "${OUTPUT_APK}"
+(
+  cd "${OUTPUT_DIR}"
+  sha256sum "$(basename -- "${OUTPUT_APK}")" > SHA256SUMS.txt
+  stat --printf='APK_BYTES=%s\n' "$(basename -- "${OUTPUT_APK}")" > APK_SIZE.txt
+)
+printf 'Built %s (%s bytes)\n' "${OUTPUT_APK}" "$(stat --printf='%s' "${OUTPUT_APK}")"

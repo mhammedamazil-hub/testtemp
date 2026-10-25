@@ -85,10 +85,18 @@ replace_exact(
     '\t\t}\n',
 )
 
-# The standalone APK targets current 64-bit Android phones and tablets.
+# Build one self-contained APK. arm64-v8a is the production phone/tablet ABI;
+# x86_64 is included so the exact same APK can be parser/install/launch-tested
+# in a hardware-accelerated Android emulator before publication.
 abi_list = "'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'"
-replace_exact(app_gradle, abi_list, "'arm64-v8a'")
-replace_exact(root / "android/native/build.gradle", abi_list, "'arm64-v8a'")
+universal_abis = "'arm64-v8a', 'x86_64'"
+replace_exact(app_gradle, abi_list, universal_abis)
+replace_exact(root / "android/native/build.gradle", abi_list, universal_abis)
+replace_exact(
+    app_gradle,
+    "\t\t\tinclude 'arm64-v8a', 'x86_64'\n\t\t}\n",
+    "\t\t\tinclude 'arm64-v8a', 'x86_64'\n\t\t\tuniversalApk true\n\t\t}\n",
+)
 
 manifest = root / "android/app/src/main/AndroidManifest.xml"
 replace_exact(manifest, 'net.minetest.minetest.fileprovider', f'{app_id}.fileprovider')
