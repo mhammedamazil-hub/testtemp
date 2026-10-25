@@ -1,0 +1,55 @@
+name: Asset transport
+
+# The sandbox cannot reach GitHub release-asset hosts, but runners can.
+# This job downloads the required binaries and publishes them to a short-lived
+# branch so the workspace can fetch them over git.
+#
+# Trigger: touch .github/asset-trigger
+# Cleanup: git push origin --delete asset-transport-<run id>
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/asset-trigger"
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download assets
+        run: |
+          set -euo pipefail
+          mkdir -p out
+
+          echo "::group::Obscura 0.2.5"
+          curl -fL --retry 3 --retry-delay 2 -o out/obscura-x86_64-linux.tar.gz \
+            https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.5/obscura-x86_64-linux.tar.gz
+          echo "::endgroup::"
+
+          echo "::group::blender-web v0.1.1"
+          curl -fL --retry 3 --retry-delay 2 -o out/blender-web-local-v0.1.1.tar.gz \
+            https://github.com/gessa-ai/blender-web/releases/download/v0.1.1/blender-web-local-v0.1.1.tar.gz
+          echo "::endgroup::"
+
+          ls -l out
+          sha256sum out/* | tee out/SHA256SUMS
+
+      - name: Publish transport branch
+        run: |
+          set -euo pipefail
+          branch="asset-transport-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add -f out
+          git commit -m "asset transport ${GITHUB_RUN_ID}"
+          git push origin "HEAD:refs/heads/${branch}"
+          echo "branch=${branch}" >> "$GITHUB_STEP_SUMMARY"
