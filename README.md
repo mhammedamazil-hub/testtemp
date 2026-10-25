@@ -9,6 +9,9 @@ Scratch repository. Contents:
   machine's OS and architecture.
 * `tests/` — unit tests for the browser tools.
 * `examples/` — a deterministic browser agent and a JS-only SPA fixture.
+* `agent/` — research agent v2: iterative observe/decide/act loop, budgets,
+  source ledger, pluggable (unconnected) LLM policy.
+* `evals/` — 7 graded research tasks and the harness that runs them.
 
 ## Quick start
 
@@ -38,6 +41,9 @@ python3 -m unittest tests.test_live -v          # live; skipped without a binary
 # End-to-end agent run (see docs/AGENT_RUN.md for recorded output)
 python3 examples/browser_agent_demo.py browse
 python3 examples/browser_agent_demo.py js-heavy
+
+# Research agent v2 + evaluation (see docs/AGENT_V2.md)
+python3 -m evals.run_evals
 ```
 
 See [docs/OBSCURA.md](docs/OBSCURA.md) for the install details, the design

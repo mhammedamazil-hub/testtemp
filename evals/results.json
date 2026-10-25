@@ -1,0 +1,259 @@
+{
+  "generated_at": "2026-10-25T03:59:59Z",
+  "selector": "heuristic",
+  "llm_connected": false,
+  "ground_truth": {
+    "values": {
+      "obscura_latest_release": "v0.2.5",
+      "obscura_license": "Apache-2.0",
+      "requests_version": "2.34.2",
+      "requests_requires_python": ">=3.10"
+    },
+    "live": {
+      "obscura_latest_release": true,
+      "obscura_license": true,
+      "requests_version": true,
+      "requests_requires_python": true
+    }
+  },
+  "summary": {
+    "passed": 7,
+    "total": 7
+  },
+  "results": [
+    {
+      "id": "T1_github_release",
+      "description": "Two-step: open the Obscura repo, follow 'Releases', report the latest version tag.",
+      "expectation": "answer == GitHub API releases/latest tag_name",
+      "passed": true,
+      "note": "answer 'v0.2.5' matches ground truth",
+      "status": "complete",
+      "answer": "v0.2.5",
+      "steps": 2,
+      "pages_used": 2,
+      "claims": [
+        {
+          "id": "c1",
+          "claim": "v0.2.5",
+          "source_url": "https://github.com/h4ckf0r0day/obscura/releases",
+          "evidence": "v0.2.5",
+          "evidence_sha256": "fc5700a9056ff9401919d091157c7c56217ba5327ff12c15eaf1b346428c32d3",
+          "method": "browser_evaluate (rendered DOM)",
+          "step": 3,
+          "verified": true,
+          "verification": "re-queried DOM: evidence present, 6 occurrence(s)"
+        }
+      ],
+      "error": null,
+      "urls_visited": [
+        "https://github.com/h4ckf0r0day/obscura",
+        "https://github.com/h4ckf0r0day/obscura/releases"
+      ],
+      "logs": [
+        "objective: What is the most recent Obscura release version?",
+        "start    : https://github.com/h4ckf0r0day/obscura",
+        "step 1: navigate \u2014 no page observed yet",
+        "  observed: 'GitHub - h4ckf0r0day/obscura: The headless browser for AI agents and w', 248 links, 19997 chars, 0 match(es)",
+        "step 2: follow \u2014 following link matching ['releases', 'release']",
+        "  observed: 'Releases \u00b7 h4ckf0r0day/obscura \u00b7 GitHub', 300 links, 19997 chars, 10 match(es)",
+        "step 3: finish \u2014 answer pattern matched",
+        "status   : complete \u2014 Found 'v0.2.5' on https://github.com/h4ckf0r0day/obscura/releases"
+      ],
+      "elapsed_s": 4.13
+    },
+    {
+      "id": "T2_github_license",
+      "description": "Single page: read the licence shown on the repo page.",
+      "expectation": "answer == GitHub API license.spdx_id",
+      "passed": true,
+      "note": "answer 'Apache-2.0' matches ground truth",
+      "status": "complete",
+      "answer": "Apache-2.0",
+      "steps": 1,
+      "pages_used": 1,
+      "claims": [
+        {
+          "id": "c1",
+          "claim": "Apache-2.0",
+          "source_url": "https://github.com/h4ckf0r0day/obscura",
+          "evidence": "Apache-2.0 license",
+          "evidence_sha256": "62d28665bf7f79a2d9832cbafc659cd9b63fba151b0d11c97ae6035017d91289",
+          "method": "browser_evaluate (rendered DOM)",
+          "step": 2,
+          "verified": true,
+          "verification": "re-queried DOM: evidence present, 3 occurrence(s)"
+        }
+      ],
+      "error": null,
+      "urls_visited": [
+        "https://github.com/h4ckf0r0day/obscura"
+      ],
+      "logs": [
+        "objective: Which licence does the Obscura repository use?",
+        "start    : https://github.com/h4ckf0r0day/obscura",
+        "step 1: navigate \u2014 no page observed yet",
+        "  observed: 'GitHub - h4ckf0r0day/obscura: The headless browser for AI agents and w', 248 links, 19997 chars, 1 match(es)",
+        "step 2: finish \u2014 answer pattern matched",
+        "status   : complete \u2014 Found 'Apache-2.0' on https://github.com/h4ckf0r0day/obscura"
+      ],
+      "elapsed_s": 2.03
+    },
+    {
+      "id": "T3_pypi_version",
+      "description": "Single page: read the current version of 'requests'.",
+      "expectation": "answer == PyPI JSON info.version",
+      "passed": true,
+      "note": "answer '2.34.2' matches ground truth",
+      "status": "complete",
+      "answer": "2.34.2",
+      "steps": 1,
+      "pages_used": 1,
+      "claims": [
+        {
+          "id": "c1",
+          "claim": "2.34.2",
+          "source_url": "https://pypi.org/project/requests/",
+          "evidence": "requests 2.34.2",
+          "evidence_sha256": "28a898ede4b10d1ffcb603fddcc18d6666197bb061a1e27b328bbd85ddd76b16",
+          "method": "browser_evaluate (rendered DOM)",
+          "step": 2,
+          "verified": true,
+          "verification": "re-queried DOM: evidence present, 1 occurrence(s)"
+        }
+      ],
+      "error": null,
+      "urls_visited": [
+        "https://pypi.org/project/requests/"
+      ],
+      "logs": [
+        "objective: What is the current version of the requests package on PyPI?",
+        "start    : https://pypi.org/project/requests/",
+        "step 1: navigate \u2014 no page observed yet",
+        "  observed: 'requests \u00b7 PyPI', 296 links, 5042 chars, 1 match(es)",
+        "step 2: finish \u2014 answer pattern matched",
+        "status   : complete \u2014 Found '2.34.2' on https://pypi.org/project/requests/"
+      ],
+      "elapsed_s": 2.89
+    },
+    {
+      "id": "T4_pypi_requires_python",
+      "description": "Single page: read the declared Python requirement.",
+      "expectation": "answer == PyPI JSON info.requires_python",
+      "passed": true,
+      "note": "answer '>=3.10' matches ground truth",
+      "status": "complete",
+      "answer": ">=3.10",
+      "steps": 1,
+      "pages_used": 1,
+      "claims": [
+        {
+          "id": "c1",
+          "claim": ">=3.10",
+          "source_url": "https://pypi.org/project/requests/",
+          "evidence": "Python >=3.10",
+          "evidence_sha256": "9a4efacb109a15721b8b16c7c1d2e1a0f59426df76193de27a54431395647d87",
+          "method": "browser_evaluate (rendered DOM)",
+          "step": 2,
+          "verified": true,
+          "verification": "re-queried DOM: evidence present, 1 occurrence(s)"
+        }
+      ],
+      "error": null,
+      "urls_visited": [
+        "https://pypi.org/project/requests/"
+      ],
+      "logs": [
+        "objective: What Python versions does the requests package require?",
+        "start    : https://pypi.org/project/requests/",
+        "step 1: navigate \u2014 no page observed yet",
+        "  observed: 'requests \u00b7 PyPI', 296 links, 5042 chars, 1 match(es)",
+        "step 2: finish \u2014 answer pattern matched",
+        "status   : complete \u2014 Found '>=3.10' on https://pypi.org/project/requests/"
+      ],
+      "elapsed_s": 2.24
+    },
+    {
+      "id": "T5_absent_fact",
+      "description": "Negative control: ask for a version that does not exist. The agent must not fabricate one.",
+      "expectation": "status not_found, no claim recorded",
+      "passed": true,
+      "note": "correctly reported the fact as absent",
+      "status": "not_found",
+      "answer": null,
+      "steps": 1,
+      "pages_used": 1,
+      "claims": [],
+      "error": null,
+      "urls_visited": [
+        "https://github.com/h4ckf0r0day/obscura/releases"
+      ],
+      "logs": [
+        "objective: Which v99.x release of Obscura is documented on the releases page?",
+        "start    : https://github.com/h4ckf0r0day/obscura/releases",
+        "step 1: navigate \u2014 no page observed yet",
+        "  observed: 'Releases \u00b7 h4ckf0r0day/obscura \u00b7 GitHub', 300 links, 19997 chars, 0 match(es)",
+        "step 2: finish \u2014 exhausted available actions",
+        "status   : not_found \u2014 objective not satisfied: no matching content found"
+      ],
+      "elapsed_s": 1.75
+    },
+    {
+      "id": "T6_blocked_host",
+      "description": "Expected failure: example.com is not on this sandbox's allowlist.",
+      "expectation": "failed, classified network_blocked",
+      "passed": true,
+      "note": "classified network_blocked, no fabricated claims",
+      "status": "failed",
+      "answer": null,
+      "steps": 1,
+      "pages_used": 1,
+      "claims": [],
+      "error": {
+        "kind": "network_blocked",
+        "message": "obscura exited with status 1: Error: Failed to navigate to https://example.com: Network error: Network error: https://example.com/: error sending request for url (https://example.com/): client error (Connect): tls handshake eof",
+        "url": "https://example.com"
+      },
+      "urls_visited": [
+        "https://example.com"
+      ],
+      "logs": [
+        "objective: What does example.com say?",
+        "start    : https://example.com",
+        "step 1: navigate \u2014 no page observed yet",
+        "  failure: network_blocked \u2014 obscura exited with status 1: Error: Failed to navigate to https://example.com: Network error: Netwo",
+        "step 2: finish \u2014 page unavailable, not retryable here",
+        "status   : failed \u2014 Could not load https://example.com: network_blocked: network_blocked"
+      ],
+      "elapsed_s": 0.02
+    },
+    {
+      "id": "T7_redirect_to_blocked",
+      "description": "Expected failure: pypi.org/help/ redirects to docs.pypi.org, which the sandbox does not allow. Navigation starts fine and ends blocked.",
+      "expectation": "failed, classified network_blocked",
+      "passed": true,
+      "note": "classified network_blocked, no fabricated claims",
+      "status": "failed",
+      "answer": null,
+      "steps": 1,
+      "pages_used": 1,
+      "claims": [],
+      "error": {
+        "kind": "network_blocked",
+        "message": "obscura exited with status 1: Error: Failed to navigate to https://pypi.org/help/: Network error: Network error: https://docs.pypi.org/: error sending request for url (https://docs.pypi.org/): client error (Connect): tls handshake eof",
+        "url": "https://pypi.org/help/"
+      },
+      "urls_visited": [
+        "https://pypi.org/help/"
+      ],
+      "logs": [
+        "objective: What does the PyPI help page say?",
+        "start    : https://pypi.org/help/",
+        "step 1: navigate \u2014 no page observed yet",
+        "  failure: network_blocked \u2014 obscura exited with status 1: Error: Failed to navigate to https://pypi.org/help/: Network error: Ne",
+        "step 2: finish \u2014 page unavailable, not retryable here",
+        "status   : failed \u2014 Could not load https://pypi.org/help/: network_blocked: network_blocked"
+      ],
+      "elapsed_s": 0.14
+    }
+  ]
+}
