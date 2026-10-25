@@ -75,3 +75,20 @@ serve it).
 
 See [docs/OBSCURA.md](docs/OBSCURA.md) for the install details, the design
 notes, and the current status of the binary download in this sandbox.
+
+## Composio app integrations
+
+The agent can search and run actions across connected apps (Gmail, GitHub and
+others) through the official [Composio](https://composio.dev) Python SDK. Calls
+go through the same tool-calling interface as the browser tools, via
+`agent_tools.AgentToolRegistry`. Sensitive actions (sending, deleting, paying,
+connecting an account) need a person to type `APPROVE` at an interactive
+terminal. Every call is written to an audit log. Setup, permissions and the
+live-verification status are in [docs/COMPOSIO.md](docs/COMPOSIO.md).
+
+```bash
+pip install -r requirements-composio.txt
+export COMPOSIO_API_KEY=...            # never commit this
+export COMPOSIO_USER_ID=you@example.com
+python -m agent_tools.composio_cli doctor
+```

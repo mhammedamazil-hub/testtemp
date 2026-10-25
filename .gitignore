@@ -11,3 +11,6 @@ __pycache__/
 
 # Transient native-LLM session state (the trace is committed instead)
 evals/.native_session.json
+
+# Composio audit log (records what ran; may include account identifiers)
+logs/

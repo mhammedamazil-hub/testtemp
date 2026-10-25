@@ -11,10 +11,14 @@ from .browser import (
     ToolError,
     find_obscura,
 )
+from .composio_tools import ComposioTools
+from .registry import AgentToolRegistry
 
 __all__ = [
     "TOOL_SCHEMAS",
+    "AgentToolRegistry",
     "BrowserTools",
+    "ComposioTools",
     "ObscuraClient",
     "ToolError",
     "find_obscura",
