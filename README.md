@@ -12,6 +12,8 @@ Scratch repository. Contents:
 * `agent/` — research agent v2: iterative observe/decide/act loop, budgets,
   source ledger, pluggable (unconnected) LLM policy.
 * `evals/` — 7 graded research tasks and the harness that runs them.
+* `agent/native.py`, `agent/reason.py` — decision gateway that lets the native
+  Arena agent drive the loop turn by turn (see `docs/NATIVE_LLM.md`).
 
 ## Quick start
 
@@ -44,6 +46,12 @@ python3 examples/browser_agent_demo.py js-heavy
 
 # Research agent v2 + evaluation (see docs/AGENT_V2.md)
 python3 -m evals.run_evals
+
+# Native-model decision gateway (see docs/NATIVE_LLM.md)
+python3 -m agent.reason start --url https://pypi.org/project/requests/ \
+  --question "What is the current version of requests?" --force
+python3 -m agent.reason state
+python3 -m agent.reason act --json '{"action":"navigate","url":"https://pypi.org/project/requests/","reason":"start"}'
 ```
 
 See [docs/OBSCURA.md](docs/OBSCURA.md) for the install details, the design

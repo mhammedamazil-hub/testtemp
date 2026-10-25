@@ -1,0 +1,280 @@
+{
+  "state": "finished",
+  "objective": {
+    "question": "What is the latest Obscura release tag, and how many downloadable assets does that release publish?",
+    "start_url": "https://github.com/h4ckf0r0day/obscura",
+    "answer_pattern": null,
+    "link_keywords": [],
+    "max_hops": 3,
+    "expects_answer": true
+  },
+  "decisions": [
+    {
+      "step": 1,
+      "at": "2026-10-25T04:10:56Z",
+      "action": "navigate",
+      "url": "https://github.com/h4ckf0r0day/obscura",
+      "link_index": null,
+      "expression": null,
+      "claim": null,
+      "reason": "No page observed yet; open the repository landing page.",
+      "decision_source": "native-arena-agent",
+      "state_fingerprint": "9e7d069c1b9baa7b",
+      "decision_sha256": "bade44cf91134db4"
+    },
+    {
+      "step": 2,
+      "at": "2026-10-25T04:11:25Z",
+      "action": "follow",
+      "url": "https://github.com/h4ckf0r0day/obscura/releases",
+      "link_index": 167,
+      "expression": null,
+      "claim": null,
+      "reason": "The landing page lists no version tag. The Releases link leads to the page that names the latest tag.",
+      "decision_source": "native-arena-agent",
+      "state_fingerprint": "4273954e6e31fa3f",
+      "decision_sha256": "1a419fcec849f096"
+    },
+    {
+      "step": 3,
+      "at": "2026-10-25T04:11:33Z",
+      "action": "eval",
+      "url": null,
+      "link_index": null,
+      "expression": "JSON.stringify(Array.from(document.querySelectorAll(\"a[href*=\\\"/releases/tag/\\\"]\")).slice(0,5).map(a=>a.getAttribute(\"href\")))",
+      "claim": null,
+      "reason": "Visible text is truncated and the tag anchors are not in the first 80 links; query the DOM for release tag URLs.",
+      "decision_source": "native-arena-agent",
+      "state_fingerprint": "3bf7abdf0328c2cd",
+      "decision_sha256": "76bda0791d8a93d5"
+    },
+    {
+      "step": 4,
+      "at": "2026-10-25T04:11:43Z",
+      "action": "navigate",
+      "url": "https://github.com/h4ckf0r0day/obscura/releases/tag/v0.2.5",
+      "link_index": null,
+      "expression": null,
+      "claim": null,
+      "reason": "The eval showed v0.2.5 is the newest tag link on the releases page. Its own page lists the downloadable assets needed for the second half of the question.",
+      "decision_source": "native-arena-agent",
+      "state_fingerprint": "43e3d544c9d53e76",
+      "decision_sha256": "3c029f62b3e30212"
+    },
+    {
+      "step": 5,
+      "at": "2026-10-25T04:11:51Z",
+      "action": "eval",
+      "url": null,
+      "link_index": null,
+      "expression": "JSON.stringify({assets: Array.from(document.querySelectorAll(\"a[href*=\\\"/releases/download/\\\"]\")).map(a=>a.getAttribute(\"href\").split(\"/\").pop()).filter((v,i,arr)=>arr.indexOf(v)===i), heading: (document.querySelector(\"h2\")||{}).textContent})",
+      "claim": null,
+      "reason": "The asset list is below the 4000-char excerpt; count download links in the DOM.",
+      "decision_source": "native-arena-agent",
+      "state_fingerprint": "c478a4bbd4369154",
+      "decision_sha256": "3bf6066445ebca7b"
+    },
+    {
+      "step": 6,
+      "at": "2026-10-25T04:12:16Z",
+      "action": "navigate",
+      "url": "https://github.com/h4ckf0r0day/obscura/releases/expanded_assets/v0.2.5",
+      "link_index": null,
+      "expression": null,
+      "claim": null,
+      "reason": "The release page loads its asset list from this include-fragment URL, which the engine did not fetch. This URL was read from the page DOM, not invented, but it is outside the link table so I use the explicit unseen-URL flag.",
+      "decision_source": "native-arena-agent",
+      "state_fingerprint": "d9f23aaff24e4f20",
+      "decision_sha256": "9943ba61fde6993c"
+    },
+    {
+      "step": 7,
+      "at": "2026-10-25T04:12:26Z",
+      "action": "finish",
+      "url": null,
+      "link_index": null,
+      "expression": null,
+      "claim": "Release v0.2.5 publishes 20 downloadable assets, including obscura-x86_64-linux.tar.gz.",
+      "reason": "Both parts of the question are now observed: the tag on /releases and the asset enumeration on the expanded_assets fragment.",
+      "decision_source": "native-arena-agent",
+      "state_fingerprint": "9d93061108a7d5ac",
+      "decision_sha256": "eb9d071b38573f25"
+    }
+  ],
+  "claims": {
+    "claims": [
+      {
+        "id": "c1",
+        "claim": "Release v0.2.5 publishes 20 downloadable assets, including obscura-x86_64-linux.tar.gz.",
+        "source_url": "https://github.com/h4ckf0r0day/obscura/releases/expanded_assets/v0.2.5",
+        "evidence": "obscura-x86_64-linux.tar.gz",
+        "evidence_sha256": "e915c113c99452479b11208f278733f78c22b71141cf75d1133e5aae629f14b5",
+        "method": "browser_evaluate (rendered DOM)",
+        "step": 6,
+        "verified": true,
+        "verification": "re-queried DOM: evidence present, 1 occurrence(s)"
+      }
+    ],
+    "total": 1,
+    "verified": 1,
+    "unverified": 0
+  },
+  "budget": {
+    "max_steps": 8,
+    "max_pages": 6,
+    "max_seconds": 120.0,
+    "steps_used": 6,
+    "pages_used": 6,
+    "elapsed_s": 92.82,
+    "exceeded": "page limit reached (6)"
+  },
+  "result": {
+    "objective": {
+      "question": "What is the latest Obscura release tag, and how many downloadable assets does that release publish?",
+      "start_url": "https://github.com/h4ckf0r0day/obscura",
+      "answer_pattern": null,
+      "link_keywords": [],
+      "max_hops": 3,
+      "expects_answer": true
+    },
+    "status": "complete",
+    "answer": "Release v0.2.5 publishes 20 downloadable assets, including obscura-x86_64-linux.tar.gz.",
+    "summary": "Latest tag is v0.2.5 (seen on the releases page); its expanded asset list renders 20 downloadable files, 4 Linux, 4 macOS aarch64, 4 macOS x86_64 and 4 Windows zips plus 4 no-render variants.",
+    "selector": "heuristic",
+    "llm_connected": false,
+    "claims": {
+      "claims": [
+        {
+          "id": "c1",
+          "claim": "Release v0.2.5 publishes 20 downloadable assets, including obscura-x86_64-linux.tar.gz.",
+          "source_url": "https://github.com/h4ckf0r0day/obscura/releases/expanded_assets/v0.2.5",
+          "evidence": "obscura-x86_64-linux.tar.gz",
+          "evidence_sha256": "e915c113c99452479b11208f278733f78c22b71141cf75d1133e5aae629f14b5",
+          "method": "browser_evaluate (rendered DOM)",
+          "step": 6,
+          "verified": true,
+          "verification": "re-queried DOM: evidence present, 1 occurrence(s)"
+        }
+      ],
+      "total": 1,
+      "verified": 1,
+      "unverified": 0
+    },
+    "steps": [
+      {
+        "step": 1,
+        "action": "navigate",
+        "url": "https://github.com/h4ckf0r0day/obscura",
+        "title": "GitHub - h4ckf0r0day/obscura: The headless browser for AI agents and web scraping \u00b7 GitHub",
+        "text_excerpt": "Skip to content\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nNavigation Menu\nSign in\nAppearance settings\nPlatform\nAI CODE CREATION\nGitHub CopilotWrite better code with AI\nGitHub Copilot appDirect agents from issue to merge\nMCP RegistryIntegrate external tools\nDEVELOPER WORKFLOWS\nActionsAutomate any workflow\nCodespacesInstant dev environments\nIssuesPlan and track work\nCode ReviewManage code changes\nCode QualityEnforce quality at merge\nAPPLICATION SECURITY\nGitHub Advanced SecurityFind and fix vulnerabilities\nCode securitySecure your code as you build\nSecret protectionStop leaks before they start\nEXPLORE\nWhy GitHub\nDoc",
+        "link_count": 248,
+        "js_result": null,
+        "failure": null,
+        "elapsed_s": 1.11,
+        "extras": {
+          "hops": 0,
+          "retries": 0,
+          "matches": []
+        }
+      },
+      {
+        "step": 2,
+        "action": "follow",
+        "url": "https://github.com/h4ckf0r0day/obscura/releases",
+        "title": "Releases \u00b7 h4ckf0r0day/obscura \u00b7 GitHub",
+        "text_excerpt": "Skip to content\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nNavigation Menu\nSign in\nAppearance settings\nPlatform\nAI CODE CREATION\nGitHub CopilotWrite better code with AI\nGitHub Copilot appDirect agents from issue to merge\nMCP RegistryIntegrate external tools\nDEVELOPER WORKFLOWS\nActionsAutomate any workflow\nCodespacesInstant dev environments\nIssuesPlan and track work\nCode ReviewManage code changes\nCode QualityEnforce quality at merge\nAPPLICATION SECURITY\nGitHub Advanced SecurityFind and fix vulnerabilities\nCode securitySecure your code as you build\nSecret protectionStop leaks before they start\nEXPLORE\nWhy GitHub\nDoc",
+        "link_count": 300,
+        "js_result": null,
+        "failure": null,
+        "elapsed_s": 1.6,
+        "extras": {
+          "hops": 1,
+          "retries": 0,
+          "matches": []
+        }
+      },
+      {
+        "step": 3,
+        "action": "eval",
+        "url": "https://github.com/h4ckf0r0day/obscura/releases",
+        "title": "",
+        "text_excerpt": "",
+        "link_count": 0,
+        "js_result": [
+          "/h4ckf0r0day/obscura/releases/tag/v0.2.5",
+          "/h4ckf0r0day/obscura/releases/tag/v0.2.5",
+          "/h4ckf0r0day/obscura/releases/tag/v0.2.4",
+          "/h4ckf0r0day/obscura/releases/tag/v0.2.3",
+          "/h4ckf0r0day/obscura/releases/tag/v0.2.2"
+        ],
+        "failure": null,
+        "elapsed_s": 2.11,
+        "extras": {
+          "hops": 0,
+          "matches": []
+        }
+      },
+      {
+        "step": 4,
+        "action": "navigate",
+        "url": "https://github.com/h4ckf0r0day/obscura/releases/tag/v0.2.5",
+        "title": "Release v0.2.5 \u00b7 h4ckf0r0day/obscura \u00b7 GitHub",
+        "text_excerpt": "Skip to content\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nNavigation Menu\nSign in\nAppearance settings\nPlatform\nAI CODE CREATION\nGitHub CopilotWrite better code with AI\nGitHub Copilot appDirect agents from issue to merge\nMCP RegistryIntegrate external tools\nDEVELOPER WORKFLOWS\nActionsAutomate any workflow\nCodespacesInstant dev environments\nIssuesPlan and track work\nCode ReviewManage code changes\nCode QualityEnforce quality at merge\nAPPLICATION SECURITY\nGitHub Advanced SecurityFind and fix vulnerabilities\nCode securitySecure your code as you build\nSecret protectionStop leaks before they start\nEXPLORE\nWhy GitHub\nDoc",
+        "link_count": 195,
+        "js_result": null,
+        "failure": null,
+        "elapsed_s": 0.76,
+        "extras": {
+          "hops": 0,
+          "retries": 0,
+          "matches": []
+        }
+      },
+      {
+        "step": 5,
+        "action": "eval",
+        "url": "https://github.com/h4ckf0r0day/obscura/releases/tag/v0.2.5",
+        "title": "",
+        "text_excerpt": "",
+        "link_count": 0,
+        "js_result": {
+          "assets": [],
+          "heading": "Navigation Menu"
+        },
+        "failure": null,
+        "elapsed_s": 0.61,
+        "extras": {
+          "hops": 0,
+          "matches": []
+        }
+      },
+      {
+        "step": 6,
+        "action": "navigate",
+        "url": "https://github.com/h4ckf0r0day/obscura/releases/expanded_assets/v0.2.5",
+        "title": "",
+        "text_excerpt": "obscura-aarch64-linux-no-render-stealth.tar.gz\n\nsha256:934e1deb8ed0f4bf98a11e7e23c4736b5a7e414f50ab17fc5495778fe25bf2e5\n\n\n\n\n\n\n\n43 MB\n2026-10-17T15:46:11Z\n\n\n\n\nobscura-aarch64-linux-no-render.tar.gz\n\nsha256:95a17b377b7604ca7f32d0fc1b5ff5148027c78eee9e644872145640d05fba8e\n\n\n\n\n\n\n\n39.9 MB\n2026-10-17T15:46:11Z\n\n\n\n\nobscura-aarch64-linux-stealth.tar.gz\n\nsha256:e28ed5ff2dbabe8d820c7b1ef56e6005399aff15912c7774777719e66a021a32\n\n\n\n\n\n\n\n69.3 MB\n2026-10-17T15:46:11Z\n\n\n\n\nobscura-aarch64-linux.tar.gz\n\nsha256:24c549a348b1d464e80aa3f643bc0c874b0a2942fb7836c683528028d0fbb190\n\n\n\n\n\n\n\n66.3 MB\n2026-10-17T15:46:11Z\n\n\n",
+        "link_count": 22,
+        "js_result": null,
+        "failure": null,
+        "elapsed_s": 0.31,
+        "extras": {
+          "hops": 0,
+          "retries": 0,
+          "matches": []
+        }
+      }
+    ],
+    "budget": {
+      "max_steps": 8,
+      "max_pages": 6,
+      "max_seconds": 120.0,
+      "steps_used": 6,
+      "pages_used": 6,
+      "elapsed_s": 89.71,
+      "exceeded": "page limit reached (6)"
+    },
+    "error": null,
+    "elapsed_s": 0.3
+  }
+}

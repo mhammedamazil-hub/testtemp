@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-25T03:59:59Z",
+  "generated_at": "2026-10-25T04:13:35Z",
   "selector": "heuristic",
   "llm_connected": false,
   "ground_truth": {
@@ -59,7 +59,7 @@
         "step 3: finish \u2014 answer pattern matched",
         "status   : complete \u2014 Found 'v0.2.5' on https://github.com/h4ckf0r0day/obscura/releases"
       ],
-      "elapsed_s": 4.13
+      "elapsed_s": 4.02
     },
     {
       "id": "T2_github_license",
@@ -96,7 +96,7 @@
         "step 2: finish \u2014 answer pattern matched",
         "status   : complete \u2014 Found 'Apache-2.0' on https://github.com/h4ckf0r0day/obscura"
       ],
-      "elapsed_s": 2.03
+      "elapsed_s": 1.57
     },
     {
       "id": "T3_pypi_version",
@@ -133,7 +133,7 @@
         "step 2: finish \u2014 answer pattern matched",
         "status   : complete \u2014 Found '2.34.2' on https://pypi.org/project/requests/"
       ],
-      "elapsed_s": 2.89
+      "elapsed_s": 2.12
     },
     {
       "id": "T4_pypi_requires_python",
@@ -195,7 +195,7 @@
         "step 2: finish \u2014 exhausted available actions",
         "status   : not_found \u2014 objective not satisfied: no matching content found"
       ],
-      "elapsed_s": 1.75
+      "elapsed_s": 1.66
     },
     {
       "id": "T6_blocked_host",
@@ -253,7 +253,7 @@
         "step 2: finish \u2014 page unavailable, not retryable here",
         "status   : failed \u2014 Could not load https://pypi.org/help/: network_blocked: network_blocked"
       ],
-      "elapsed_s": 0.14
+      "elapsed_s": 0.17
     }
   ]
 }

@@ -8,3 +8,6 @@ __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
+
+# Transient native-LLM session state (the trace is committed instead)
+evals/.native_session.json

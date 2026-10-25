@@ -22,6 +22,14 @@ from .policies import ActionSelector, HeuristicSelector
 from .types import (Action, FailureKind, FailureReport, Link, Observation,
                     Objective, Status)
 
+class ActionRejected(ValueError):
+    """The requested action is not executable in the current state."""
+
+
+class BudgetExhausted(RuntimeError):
+    """A step or page limit would be exceeded."""
+
+
 #: One process per observation: the adapter is stateless, so each step
 #: navigates and extracts in a single call.
 OBSERVE_JS = """
@@ -304,6 +312,88 @@ class ResearchAgent:
                          f"{len(observation.links)} links, "
                          f"{len(observation.text)} chars, "
                          f"{len(observation.extras['matches'])} match(es)")
+
+    # -- externally driven stepping (native-LLM sessions) -----------------
+    def begin(self, objective: Objective) -> None:
+        """Reset to the pre-observation state so a session can step manually."""
+        self.objective = objective
+        self.claims = SourceLedger()
+        self._history: List[Observation] = []
+        self._current: Optional[Observation] = None
+        self._hops = 0
+        self._session_started = time.monotonic()
+
+    @property
+    def history(self) -> List[Observation]:
+        return list(getattr(self, "_history", []))
+
+    @property
+    def current(self) -> Optional[Observation]:
+        return getattr(self, "_current", None)
+
+    def step(self, action: Action) -> Observation:
+        """Execute exactly one action and return the resulting observation.
+
+        Used when the decision comes from outside this process (a native model
+        turn). Budget checks happen here, so an external driver cannot exceed
+        the same limits the internal loop obeys.
+        """
+        if not hasattr(self, "_history"):
+            raise RuntimeError("call begin() before step()")
+        if not self.budget.can_step():
+            raise BudgetExhausted(self.budget.exceeded_reason())
+        self.budget.spend_step()
+
+        current = self._current
+        kind = action.kind
+
+        if kind == "navigate":
+            url = action.url or self.objective.start_url
+            observation = self._guarded_page(url, "navigate", self._hops)
+
+        elif kind == "follow":
+            if current is None:
+                raise ActionRejected("follow requested before any page was loaded")
+            if action.link_index is None or not (0 <= action.link_index < len(current.links)):
+                raise ActionRejected(
+                    f"link_index {action.link_index} out of range "
+                    f"(0..{len(current.links) - 1})")
+            url = current.links[action.link_index].url
+            self._hops += 1
+            observation = self._guarded_page(url, "follow", self._hops)
+
+        elif kind == "eval":
+            if current is None:
+                raise ActionRejected("eval requested before any page was loaded")
+            if not self.budget.can_page():
+                raise BudgetExhausted(self.budget.exceeded_reason())
+            observation = self._eval_on(current.url, action.expression or "", self._hops)
+
+        else:
+            raise ActionRejected(f"step() cannot execute action {kind!r}")
+
+        observation.extras["matches"] = self._find_matches(
+            observation.text, self.objective.answer_pattern)
+        if observation.extras["matches"]:
+            observation.extras["evidence_line"] = self._evidence_line(
+                observation.text, observation.extras["matches"][0])
+
+        self._history.append(observation)
+        self._current = observation
+        return observation
+
+    def _guarded_page(self, url: str, name: str, hops: int) -> Observation:
+        if not self.budget.can_page():
+            raise BudgetExhausted(self.budget.exceeded_reason())
+        return self._run_with_retries(url, name, hops)
+
+    def finish_externally(self, action: Action) -> RunResult:
+        """Close a session with the model's claim, verifying it first."""
+        if not hasattr(self, "_history"):
+            raise RuntimeError("call begin() before finish_externally()")
+        return self._handle_finish(action, self.objective, self._history,
+                                   self._current, getattr(self, "_session_started",
+                                                          time.monotonic()))
 
     def _run_with_retries(self, url: str, action_name: str,
                           hops: int) -> Observation:
