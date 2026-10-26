@@ -32,11 +32,13 @@ log "=== 4/6 X11 stack + Xvfb ==="
 bash "$HERE/build_stack.sh" all
 
 log "=== 5/6 window manager, desktop and applications ==="
+# build_apps first: it provides autoconf/automake/libtool, which the
+# openbox chain's autoreconf/libtoolize bootstrap steps depend on.
+bash "$HERE/build_apps.sh" all
 bash "$HERE/build_suckless.sh" all
 # Openbox is the required WM (dwm above stays available as a fallback);
 # this also builds its glib/pango/libxml2/gettext chain.
 bash "$HERE/build_openbox.sh" all
-bash "$HERE/build_apps.sh" all
 if [ "$WANT_BLENDER" = 1 ]; then
   # bison/libxkbcommon/libglvnd must exist before the bpy wheel can dlopen
   bash "$HERE/build_extras.sh" all
