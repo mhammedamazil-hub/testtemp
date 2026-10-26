@@ -9,6 +9,7 @@ stage() { local name="$1"; shift; [ -f "$MARK/$name" ] && { log "SKIP $name"; re
 # ---------- autotools chain (unblocks autogen-only packages) ----------
 s_m4() {
   # docs need help2man/makeinfo (absent): build lib + binary only
+  pin_timestamps "$VM_SRC/m4"
   rm -rf "$VM_BUILD/b-m4"; mkdir -p "$VM_BUILD/b-m4"
   ( cd "$VM_BUILD/b-m4" && "$VM_SRC/m4/configure" --prefix="$VM_PREFIX" \
       --libdir="$VM_PREFIX/lib" && make -C lib && make -C src install )
@@ -44,7 +45,7 @@ s_mbedtls() {
 # ---------- dillo browser (autogen-only upstream tree) ----------
 s_dillo() {
   ( cd "$VM_SRC/dillo" && \
-    autoreconf -fi && \
+    autoreconf -fi && pin_timestamps "$VM_SRC/dillo" && \
     "$VM_SRC/dillo/configure" --prefix="$VM_PREFIX" --libdir="$VM_PREFIX/lib" \
       --disable-dbg --enable-cookies --disable-openssl \
       --with-mbedtls-inc="$VM_PREFIX/include" \
@@ -76,6 +77,7 @@ s_libvnc() {
 }
 s_x11vnc() {
   ( cd "$VM_SRC/x11vnc" && [ -x configure ] || autoreconf -fi ) || return 1
+  pin_timestamps "$VM_SRC/x11vnc"
   rm -rf "$VM_BUILD/b-x11vnc"; mkdir -p "$VM_BUILD/b-x11vnc"
   ( cd "$VM_BUILD/b-x11vnc" && \
     "$VM_SRC/x11vnc/configure" --prefix="$VM_PREFIX" --without-avahi --without-systemd && \

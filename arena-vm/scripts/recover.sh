@@ -6,7 +6,7 @@
 #   recover.sh            full build + start desktop (no tablet bridge)
 #   recover.sh --tablet   also start the noVNC tablet bridge
 #   recover.sh --blender  also install the ~520MB bpy wheel
-set -uo pipefail
+set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/env.sh"
 WANT_TABLET=0; WANT_BLENDER=0

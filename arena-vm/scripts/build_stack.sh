@@ -17,6 +17,7 @@ stage() { # stage name ; runs remaining args as a command
 
 # gettext is unavailable; install no-op shims so NLS make rules still pass
 s_shims() {
+  mkdir -p "$VM_PREFIX/bin"
   install -m755 "$VM_ROOT/scripts/shims/xgettext" "$VM_PREFIX/bin/xgettext"
   install -m755 "$VM_ROOT/scripts/shims/msgfmt"   "$VM_PREFIX/bin/msgfmt"
   ln -sf xgettext "$VM_PREFIX/bin/msgmerge"
@@ -84,6 +85,7 @@ s_extlibs() {
 # ---------- S12-S17 server font/kbd stack ----------
 s_gperf() {
   # gperf's top-level make wants makeinfo (absent); install lib + binary only
+  pin_timestamps "$VM_SRC/gperf"
   rm -rf "$VM_BUILD/b-gperf"; mkdir -p "$VM_BUILD/b-gperf"
   ( cd "$VM_BUILD/b-gperf" && "$VM_SRC/gperf/configure" --prefix="$VM_PREFIX" --libdir="$VM_PREFIX/lib" \
       && make -C lib install && make -C src install )
@@ -136,8 +138,8 @@ s_xkbcommon(){ meson_build "$VM_SRC/libxkbcommon" -Denable-wayland=false -Denabl
 s_glvnd() {
   # Headless GL dispatch stubs: libraries resolve at runtime via glvnd; no GPU
   # driver is present, so GL context creation is impossible but linking works.
-  meson_build "$VM_SRC/libglvnd" -Dgles1=disabled -Dgles2=disabled -Dglx=disabled \
-    -Degl=false -Dglvnd=true -Dx11=enabled -Dtests=false
+  meson_build "$VM_SRC/libglvnd" -Dx11=enabled -Degl=false -Dglx=disabled \
+    -Dgles1=disabled -Dgles2=disabled -Dheaders=true
 }
 
 case "${1:-all}" in

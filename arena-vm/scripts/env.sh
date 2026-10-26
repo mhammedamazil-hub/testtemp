@@ -44,15 +44,19 @@ apply_patch() {
   ( cd "$src" && patch -N -p1 --no-backup-if-mismatch -s < "$p" ) || fail "patch $name"
 }
 
+# Pin every mtime in a source tree to one fixed timestamp. GNU make treats
+# equal mtimes as up-to-date, which neutralizes autotools remake rules that
+# would otherwise demand autoreconf tools absent from this image.
+pin_timestamps() {
+  local src="$1"
+  find "$src" -type f -exec touch -h -d '2020-01-01 00:00:00 UTC' {} +
+}
+
 # configure-based build (autotools dist trees carry a pre-generated configure)
 conf_build() {
   local src="$1"; shift
   log "configure+make: $(basename "$src")"
-  # Git checkouts can make generated files look older than their sources,
-  # which would trigger autoreconf (unavailable). Pin EVERY file to one
-  # fixed timestamp: GNU make treats equal mtimes as up-to-date, which
-  # neutralizes all autotools remake rules in bootstrap self-builds.
-  find "$src" -type f -exec touch -h -d '2020-01-01 00:00:00 UTC' {} +
+  pin_timestamps "$src"
   rm -rf "$VM_BUILD/b-$(basename "$src")"
   mkdir -p "$VM_BUILD/b-$(basename "$src")"
   ( cd "$VM_BUILD/b-$(basename "$src")" && \
