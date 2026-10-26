@@ -1,5 +1,9 @@
 # Arena-VM build status — 2026-10-26
 
+> **New here? Read [SKILL.md](../SKILL.md) first** — the complete
+> from-scratch setup and desktop-control guide for an AI with no prior
+> context (fast-path rebuild commands, vmc.py cookbook, troubleshooting).
+
 Living status document for the AI-controllable virtual graphical Linux
 computer. Source of truth for what is built, verified, and still pending.
 All paths relative to `arena-vm/`. Acceptance evidence in `evidence/`.
