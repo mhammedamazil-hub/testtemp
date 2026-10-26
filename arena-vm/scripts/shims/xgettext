@@ -1,0 +1,12 @@
+#!/bin/sh
+# Minimal gettext shim: satisfy make rules that refresh .po/.pot files.
+# Produces an empty output file; real i18n catalogs are not needed.
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then out="$a"; fi
+  case "$a" in -o*=*) out="${a#-o=}";; --output=*) out="${a#--output=}";; esac
+  prev="$a"
+done
+[ -n "$out" ] && : > "$out"
+exit 0

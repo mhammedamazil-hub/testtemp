@@ -1,0 +1,11 @@
+#!/bin/sh
+# Minimal help2man shim: touch the requested .1 output.
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then out="$a"; fi
+  case "$a" in -o=*) out="${a#-o=}";; --output=*) out="${a#--output=}";; esac
+  prev="$a"
+done
+[ -n "$out" ] && : > "$out"
+exit 0

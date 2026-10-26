@@ -1,0 +1,18 @@
+#!/bin/sh
+# Minimal texinfo/help2man shim: satisfy documentation make rules by creating
+# an empty output file. Real manuals are not needed for the toolchain.
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ] || [ "$prev" = "--output" ]; then out="$a"; fi
+  case "$a" in -o=*) out="${a#-o=}";; --output=*) out="${a#--output=}";; esac
+  prev="$a"
+done
+# last non-flag argument is also commonly the output target
+if [ -z "$out" ]; then
+  for a in "$@"; do
+    case "$a" in -*) ;; *) out="$a";; esac
+  done
+fi
+[ -n "$out" ] && : > "$out"
+exit 0

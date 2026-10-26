@@ -1,0 +1,31 @@
+diff --git a/src/Glyph.c b/src/Glyph.c
+index 48e40c3..5148484 100644
+--- a/src/Glyph.c
++++ b/src/Glyph.c
+@@ -477,7 +477,7 @@ XRenderCompositeText8 (Display			    *dpy,
+ 	{
+ 	    int this_chars = nchars > MAX_8 ? MAX_8 : nchars;
+ 
+-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
+ 	    elt->len = this_chars;
+ 	    elt->deltax = xDst;
+ 	    elt->deltay = yDst;
+@@ -588,7 +588,7 @@ XRenderCompositeText16 (Display			    *dpy,
+ 	    int this_chars = nchars > MAX_16 ? MAX_16 : nchars;
+ 	    int this_bytes = this_chars * 2;
+ 
+-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
+ 	    elt->len = this_chars;
+ 	    elt->deltax = xDst;
+ 	    elt->deltay = yDst;
+@@ -694,7 +694,7 @@ XRenderCompositeText32 (Display			    *dpy,
+ 	{
+ 	    int this_chars = nchars > MAX_32 ? MAX_32 : nchars;
+ 	    int this_bytes = this_chars * 4;
+-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
+ 	    elt->len = this_chars;
+ 	    elt->deltax = xDst;
+ 	    elt->deltay = yDst;

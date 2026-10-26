@@ -1,0 +1,11 @@
+#!/bin/sh
+# Minimal gettext shim: create empty .mo output so NLS make rules succeed.
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ] || [ "$prev" = "--output-file" ]; then out="$a"; fi
+  case "$a" in -o=*) out="${a#-o=}";; --output-file=*) out="${a#--output-file=}";; esac
+  prev="$a"
+done
+[ -n "$out" ] && : > "$out"
+exit 0
