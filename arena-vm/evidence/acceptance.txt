@@ -1,9 +1,9 @@
-PASS     T1_xvfb_running                    753003 /home/user/testtemp/arena-vm/local/bin/Xvfb :99 -screen 0 1280x800x24 -ac -nolisten tcp -fp /home/user/testtemp/arena-vm/local/share/fonts/X11/misc
+PASS     T1_xvfb_running                    1073692 /home/user/testtemp/arena-vm/local/bin/Xvfb :99 -screen 0 1280x800x24 -ac -nolisten tcp -fp /home/user/testtemp/arena-vm/local/share/fonts/X11/misc
 PASS     T2_x11_client_connect              21.1.16
-PASS     T3_window_manager                  Openbox pid 753009
-PASS     T4_screenshot                      4792 bytes
+PASS     T3_window_manager                  Openbox pid 1073698
+PASS     T4_screenshot                      3057 bytes
 PASS     T5_gui_app_launched                st window 0x01000006
-PASS     T6_input_injection                 GUI_INPUT_28524
+PASS     T6_input_injection                 GUI_INPUT_9140
 PASS     T8_file_created_via_gui            /tmp/acceptance_gui.txt
 PASS     T7_agent_screenshot_loop           (1280, 800)
 PASS     T9_browser_works                   dillo
@@ -52,7 +52,7 @@ Fra:1 Mem:21.52M (Peak 21.52M) | Time:00:00.03 | Remaining:00:00.46 | Mem:11.32M
 Fra:1 Mem:26.21M (Peak 33.24M) | Time:00:01.73 | Mem:11.32M, Peak:11.32M | Scene, ViewLayer | Sample 16/16
 Fra:1 Mem:26.21M (Peak 33.24M) | Time:00:01.73 | Mem:11.32M, Peak:11.32M | Scene, ViewLayer | Finished
 Saved: '/home/user/testtemp/arena-vm/evidence/t11_blender.png'
-Time: 00:01.85 (Saving: 00:00.12)
+Time: 00:01.86 (Saving: 00:00.12)
 
 Info: Total files 0 | Changed 0 | Failed 0
 Info: Saved "blender_smoke.blend"

@@ -94,11 +94,35 @@ meson option typing (boolean vs feature); autopoint substitution guard.
 - ranger needs a real TERM (xterm-256color) plus TERMINFO pointing at the
   local ncurses database; both are exported by scripts/env.sh/start_desktop.
 
-## 4. Pending / next ideas
+## 4. Cold-recovery validation (2026-10-26, clean worktree)
+
+A full rebuild was run from a detached worktree containing only tracked
+files (zero markers/build dirs). `recover.sh` + `build_extras.sh all` +
+`install_blender.sh` rebuilt the whole stack from the 80 pinned sources and
+the acceptance suite reported **PASS=15 FAIL=0 BLOCKED=0** on the first
+fully clean run after two genuine bugs were caught and fixed during
+validation — this is why the cold run matters:
+
+1. **Stage ordering (commit f00a665):** build_openbox ran before
+   build_apps, so libffi's `autoreconf` had no autoconf/automake/libtool.
+   recover.sh now runs build_apps → build_suckless → build_openbox.
+2. **Bison patch never applied (commit 8d52e13):** the inline sed used
+   `|` as its delimiter while the C expression contains `||`, silently
+   failing in a fresh tree (the working tree had been hand-patched).
+   Replaced by scripts/patches/bison-fseterr-glibc.patch through the
+   idempotent apply_patch helper.
+
+Resumability was also proven: the failed first invocation left 37
+markers, and the fixed run skipped every completed stage. Pins written by
+the clean fetch were byte-identical (pin names/SHAs) to this tree.
+Cold-run evidence: evidence/cold-recovery-acceptance.txt and
+evidence/cold-recovery-blender.png (Cycles CPU render from the rebuild).
+
+## 5. Pending / next ideas
 
 1. Optional: Openbox menu/keyboard customization (rc.xml) and an
    autostart entry for a terminal + ranger.
 2. Optional: ranger image previews need a framebuffer/drawable protocol;
    text/metadata preview works out of the box.
-3. Run one full cold recovery in a clean checkout to re-validate the
-   end-to-end script ordering (markers currently prove stage resumability).
+3. Optional: Openbox per-user rc.xml tweaks beyond the tracked baseline
+   (keybinds/menu/autostart in config/openbox/ already cover common use).
