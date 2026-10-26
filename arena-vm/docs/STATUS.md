@@ -3,6 +3,9 @@
 > **New here? Read [SKILL.md](../SKILL.md) first** — the complete
 > from-scratch setup and desktop-control guide for an AI with no prior
 > context (fast-path rebuild commands, vmc.py cookbook, troubleshooting).
+> **No repo checkout available?** [FROM-ZERO-GUIDE.md](FROM-ZERO-GUIDE.md)
+> embeds the verbatim content of every tracked file plus the full runbook;
+> regenerate it with `scripts/gen_from_zero_guide.sh`.
 
 Living status document for the AI-controllable virtual graphical Linux
 computer. Source of truth for what is built, verified, and still pending.
