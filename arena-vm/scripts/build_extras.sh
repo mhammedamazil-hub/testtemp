@@ -20,10 +20,7 @@ s_bison() {
         $(find "$VM_SRC/bison-rel" -name 'Makefile.in')
   # modern glibc (>=2.32) hides _IO_ftrylockfile and sets __GNU_LIBRARY__!=1;
   # the bundled gnulib fseterr.c then hits its #error portability trap
-  if ! grep -q 'modern glibc' "$VM_SRC/bison-rel/lib/fseterr.c"; then
-    sed -i 's|#if defined _IO_ftrylockfile || __GNU_LIBRARY__ == 1 /\* GNU libc, BeOS, Haiku, Linux libc5 \*/|#if defined _IO_ftrylockfile || __GNU_LIBRARY__ == 1 || (defined __GLIBC__ \&\& defined __GLIBC_MINOR__) /* GNU libc, BeOS, Haiku, Linux libc5, modern glibc */|' \
-      "$VM_SRC/bison-rel/lib/fseterr.c"
-  fi
+  apply_patch "$VM_SRC/bison-rel" bison-fseterr-glibc
   rm -rf "$VM_BUILD/bison-rel"; mkdir -p "$VM_BUILD/bison-rel"
   ( cd "$VM_BUILD/bison-rel" && \
     "$VM_SRC/bison-rel/configure" --prefix="$VM_PREFIX" --libdir="$VM_PREFIX/lib" \
