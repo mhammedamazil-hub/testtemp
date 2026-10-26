@@ -61,6 +61,17 @@ meson option typing (boolean vs feature); autopoint substitution guard.
 - **bpy 4.2.0** PyPI wheel; smoke test renders Cycles-on-CPU (EEVEE needs
   EGL/GPU context, unavailable). LD_LIBRARY_PATH wired in scripts/env.sh.
 
+### Openbox desktop configuration (config/openbox/, installed by build_openbox.sh)
+- `rc.xml`: Clearlooks theme, 4 desktops, keybinds — Alt+Enter terminal,
+  Alt+r dmenu, Alt+f ranger, Alt+e vim, Alt+b dillo, Alt+F4 close,
+  Alt+Tab cycle, Alt+F11 maximize; Alt-drag move/resize.
+- `menu.xml`: right-click root menu with all five launchers, window
+  submenus, Reconfigure/Exit. Evidence: evidence/t_openbox_menu.png.
+- `autostart`: US keyboard + root background painted by
+  control/desktop_bg.py (python-xlib; xsetroot is not in the toolchain).
+- Agent-verified end to end: Alt+Enter keystroke injected via vmc.py
+  launches st; right-click menu captured in a real screenshot.
+
 ### Build engineering
 - scripts/recover.sh: one-command, marker-gated, resumable full rebuild
   (venv → fetch → stack → suckless → openbox chain → apps → optional

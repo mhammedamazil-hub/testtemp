@@ -1,0 +1,6 @@
+#!/bin/sh
+# Openbox session autostart (Arena-VM). Installed with absolute paths by
+# scripts/build_openbox.sh s_openbox_config. Best-effort only: a missing
+# helper must never block the window manager.
+"@VM_ROOT@/local/venv/bin/python" "@VM_ROOT@/control/desktop_bg.py" 2>/dev/null &
+"@VM_ROOT@/local/bin/setxkbmap" -layout us 2>/dev/null || true

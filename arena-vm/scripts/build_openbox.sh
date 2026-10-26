@@ -101,6 +101,22 @@ s_openbox() {
   openbox --version | head -1
 }
 
+# 9. tracked desktop config: keybinds, root menu, autostart
+s_openbox_config() {
+  local dst="$VM_PREFIX/etc/xdg/openbox"
+  mkdir -p "$dst"
+  install -m644 "$VM_ROOT/config/openbox/rc.xml" "$dst/rc.xml"
+  install -m644 "$VM_ROOT/config/openbox/menu.xml" "$dst/menu.xml"
+  sed "s|@VM_ROOT@|$VM_ROOT|g" "$VM_ROOT/config/openbox/autostart" \
+    > "$dst/autostart"
+  chmod +x "$dst/autostart"
+  log "openbox config installed -> $dst"
+  # live reload if a desktop happens to be running on :99
+  if DISPLAY="${DISPLAY:-:99}" "$VM_PREFIX/bin/openbox" --reconfigure 2>/dev/null; then
+    log "running openbox reconfigured"
+  fi
+}
+
 case "${1:-all}" in
   all) stage libffi  s_libffi
        stage pcre2   s_pcre2
@@ -109,7 +125,9 @@ case "${1:-all}" in
        stage pango   s_pango
        stage libxml2 s_libxml2
        stage gettext s_gettext
-       stage openbox s_openbox ;;
+       stage openbox s_openbox
+       stage openbox_config s_openbox_config ;;
+  openbox-config|openbox_config) stage openbox_config s_openbox_config ;;
   *) stage "$1" "s_$1" ;;
 esac
 log "build_openbox finished: $1"

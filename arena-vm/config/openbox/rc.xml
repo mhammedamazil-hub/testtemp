@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Arena-VM Openbox configuration. Paths resolve through the PATH exported
+     by scripts/env.sh (local/venv/bin and local/bin first). -->
+<openbox_config xmlns="http://openbox.org/3.4/rc" type="config">
+  <resistance>
+    <edge_strength>8</edge_strength>
+    <screen_edge_strength>20</screen_edge_strength>
+  </resistance>
+
+  <focus>
+    <focusNew>yes</focusNew>
+    <followMouse>no</followMouse>
+  </focus>
+
+  <theme>
+    <name>Clearlooks</name>
+    <titleLayout>NLIMC</titleLayout>
+    <keepBorder>yes</keepBorder>
+    <animateIconify>no</animateIconify>
+    <font place="ActiveWindow">
+      <name>sans</name><size>9</size><weight>bold</weight>
+    </font>
+    <font place="Menu">
+      <name>sans</name><size>9</size><weight>normal</weight>
+    </font>
+  </theme>
+
+  <desktops><number>4</number></desktops>
+
+  <resize>
+    <drawContents>yes</drawContents>
+    <popupShow>Nonpixel</popupShow>
+  </resize>
+
+  <keyboard>
+    <!-- launchers -->
+    <keybind key="A-Return"><action name="Execute"><command>st</command></action></keybind>
+    <keybind key="A-r"><action name="Execute"><command>dmenu_run</command></action></keybind>
+    <keybind key="A-f"><action name="Execute"><command>st -e ranger</command></action></keybind>
+    <keybind key="A-e"><action name="Execute"><command>st -e vim</command></action></keybind>
+    <keybind key="A-b"><action name="Execute"><command>dillo</command></action></keybind>
+    <!-- window management -->
+    <keybind key="A-F4"><action name="Close"/></keybind>
+    <keybind key="A-Tab"><action name="NextWindow"><interactive>no</interactive></action></keybind>
+    <keybind key="A-S-Tab"><action name="PreviousWindow"><interactive>no</interactive></action></keybind>
+    <keybind key="A-space"><action name="ShowMenu"><menu>client-menu</menu></action></keybind>
+    <keybind key="A-F11"><action name="ToggleMaximize"/></keybind>
+    <keybind key="A-m"><action name="Iconify"/></keybind>
+    <!-- desktops -->
+    <keybind key="C-A-Left"><action name="DesktopLeft"><wrap>no</wrap></action></keybind>
+    <keybind key="C-A-Right"><action name="DesktopRight"><wrap>no</wrap></action></keybind>
+    <keybind key="A-F1"><action name="Desktop"><desktop>1</desktop></action></keybind>
+    <keybind key="A-F2"><action name="Desktop"><desktop>2</desktop></action></keybind>
+    <keybind key="A-F3"><action name="Desktop"><desktop>3</desktop></action></keybind>
+  </keyboard>
+
+  <mouse>
+    <context name="Frame">
+      <mousebind button="A-Left" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="A-Left" action="Motion"><action name="Move"/></mousebind>
+      <mousebind button="A-Right" action="Press"><action name="Focus"/><action name="Raise"/></mousebind>
+      <mousebind button="A-Right" action="Motion"><action name="Resize"/></mousebind>
+      <mousebind button="A-Middle" action="Press"><action name="Lower"/></mousebind>
+      <mousebind button="Left" action="DoubleClick"><action name="ToggleMaximize"/></mousebind>
+    </context>
+    <context name="Root">
+      <mousebind button="Left" action="Press"><action name="ShowMenu"><menu>client-list-combined-menu</menu></action></mousebind>
+      <mousebind button="Right" action="Press"><action name="ShowMenu"><menu>root-menu</menu></action></mousebind>
+    </context>
+  </mouse>
+
+  <menu>
+    <hideDelay>200</hideDelay>
+    <middle>no</middle>
+    <submenuShowDelay>100</submenuShowDelay>
+    <submenuHideDelay>400</submenuHideDelay>
+    <applicationIcons>no</applicationIcons>
+  </menu>
+
+  <dock><hideDelay>300</hideDelay><position>
+    <top>no</top><bottom>yes</bottom><left>no</left><right>yes</right>
+  </position></dock>
+</openbox_config>

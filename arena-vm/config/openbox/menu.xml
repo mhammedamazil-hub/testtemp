@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Arena-VM root menu (right-click desktop). Commands resolve via PATH
+     exported by scripts/env.sh. -->
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="root-menu" label="Arena-VM">
+    <item label="Terminal (st)">
+      <action name="Execute"><command>st</command></action>
+    </item>
+    <item label="File manager (ranger)">
+      <action name="Execute"><command>st -e ranger</command></action>
+    </item>
+    <item label="Editor (vim)">
+      <action name="Execute"><command>st -e vim</command></action>
+    </item>
+    <item label="Browser (dillo)">
+      <action name="Execute"><command>dillo</command></action>
+    </item>
+    <item label="Run... (dmenu)">
+      <action name="Execute"><command>dmenu_run</command></action>
+    </item>
+    <separator/>
+    <menu id="client-list" label="Windows"/>
+    <menu id="client-list-combined" label="All windows"/>
+    <separator/>
+    <item label="Reconfigure Openbox">
+      <action name="Reconfigure"/>
+    </item>
+    <item label="Exit Openbox">
+      <action name="Exit"><prompt>yes</prompt></action>
+    </item>
+  </menu>
+</openbox_menu>
