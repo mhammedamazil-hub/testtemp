@@ -33,6 +33,22 @@ s_shims() {
   ln -sf makeinfo "$VM_PREFIX/bin/texi2any"
 }
 
+# Base images ship the ncurses runtime (libncursesw.so.6 + terminfo db)
+# but not the unversioned dev symlinks that -lncursesw/-ltinfo need. Reuse
+# the runtime rather than rebuilding ncurses: expose it through our prefix
+# (LDFLAGS already puts -L local/lib first). Idempotent and explicit.
+s_syslinks() {
+  local sysdir="/usr/lib/$(uname -m)-linux-gnu"
+  [ -d "$sysdir" ] || sysdir="/usr/lib64"
+  local nc; nc=$(ls "$sysdir"/libncursesw.so.6* 2>/dev/null | head -1)
+  local ti; ti=$(ls "$sysdir"/libtinfo.so.6* 2>/dev/null | head -1)
+  [ -n "$nc" ] || fail "system libncursesw runtime missing in $sysdir"
+  [ -n "$ti" ] || fail "system libtinfo runtime missing in $sysdir"
+  ln -sf "$nc" "$VM_PREFIX/lib/libncursesw.so"
+  ln -sf "$ti" "$VM_PREFIX/lib/libtinfo.so"
+  log "syslinks: $(basename "$nc") + $(basename "$ti") -> local/lib"
+}
+
 # ---------- S1-S4 base libraries ----------
 s_zlib() {
   ( cd "$VM_SRC/zlib" && ./configure --prefix="$VM_PREFIX" --shared && make -j"$(nproc)" && make install )
@@ -160,6 +176,7 @@ case "${1:-all}" in
   all)
     stage pkgconf    s_pkgconf
     stage shims      s_shims
+    stage syslinks   s_syslinks
     stage zlib       s_zlib
     stage libpng     s_libpng
     stage expat      s_expat

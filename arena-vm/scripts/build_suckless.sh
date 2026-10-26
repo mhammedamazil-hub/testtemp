@@ -6,8 +6,11 @@ MARK="$VM_BUILD/markers"; mkdir -p "$MARK"
 stage() { local n="$1"; shift; [ -f "$MARK/$n" ] && { log "SKIP $n"; return; }; "$@" && touch "$MARK/$n"; }
 
 s_ncurses() {
+  # --without-tests: the test/ binaries assume libtinfo is linked
+  # transitively; the s_syslinks tinfo symlink makes ld reject that DSO
+  # ordering, and the tests themselves are not part of the toolchain.
   conf_build "$VM_SRC/ncurses" --with-shared --without-debug \
-    --enable-widec --enable-ext-colors
+    --enable-widec --enable-ext-colors --without-tests
 }
 
 s_fonts() {

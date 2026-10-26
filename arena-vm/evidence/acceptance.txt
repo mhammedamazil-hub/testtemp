@@ -1,65 +1,15 @@
-PASS     T1_xvfb_running                    1073692 /home/user/testtemp/arena-vm/local/bin/Xvfb :99 -screen 0 1280x800x24 -ac -nolisten tcp -fp /home/user/testtemp/arena-vm/local/share/fonts/X11/misc
+PASS     T1_xvfb_running                    278404 /home/user/testtemp/arena-vm/local/bin/Xvfb :99 -screen 0 1280x800x24 -ac -nolisten tcp -fp /home/user/testtemp/arena-vm/local/share/fonts/X11/misc
 PASS     T2_x11_client_connect              21.1.16
-PASS     T3_window_manager                  Openbox pid 1073698
-PASS     T4_screenshot                      3057 bytes
-PASS     T5_gui_app_launched                st window 0x01000006
-PASS     T6_input_injection                 GUI_INPUT_9140
+PASS     T3_window_manager                  Openbox pid 278435
+PASS     T4_screenshot                      33725 bytes
+PASS     T5_gui_app_launched                st window 0x00600006
+PASS     T6_input_injection                 GUI_INPUT_22113
 PASS     T8_file_created_via_gui            /tmp/acceptance_gui.txt
 PASS     T7_agent_screenshot_loop           (1280, 800)
 PASS     T9_browser_works                   dillo
-PASS     T10_tablet_auth                    401 without credentials
-PASS     T11_blender_installed              4.2.0
-Fra:1 Mem:10.33M (Peak 10.33M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | AgentCube
-Fra:1 Mem:10.33M (Peak 10.33M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | AgentSphere
-Fra:1 Mem:10.40M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Initializing
-Fra:1 Mem:10.24M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Waiting for render to start
-Fra:1 Mem:10.24M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Loading render kernels (may take a few minutes the first time)
-Fra:1 Mem:10.24M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Scene
-Fra:1 Mem:10.24M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Shaders
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Procedurals
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Background
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Camera
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Meshes Flags
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Objects
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Objects | Copying Transformations to device
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Objects | Applying Static Transformations
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Particle Systems
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Particle Systems | Copying Particles to device
-Fra:1 Mem:10.32M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Meshes
-Fra:1 Mem:10.34M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Mesh | Computing attributes
-Fra:1 Mem:10.34M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Mesh | Copying Attributes to device
-Fra:1 Mem:10.34M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Scene BVH | Building
-Fra:1 Mem:10.34M (Peak 10.40M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Scene BVH | Building BVH
-Fra:1 Mem:10.34M (Peak 10.40M) | Time:00:00.00 | Mem:0.03M, Peak:0.03M | Scene, ViewLayer | Updating Scene BVH | Building BVH 0%
-Fra:1 Mem:10.34M (Peak 10.40M) | Time:00:00.00 | Mem:0.07M, Peak:0.10M | Scene, ViewLayer | Updating Scene BVH | Copying BVH to device
-Fra:1 Mem:10.34M (Peak 10.40M) | Time:00:00.00 | Mem:0.07M, Peak:0.10M | Scene, ViewLayer | Updating Mesh | Computing normals
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.07M, Peak:0.10M | Scene, ViewLayer | Updating Mesh | Copying Mesh to device
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.10M, Peak:0.10M | Scene, ViewLayer | Updating Objects Flags
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.10M, Peak:0.10M | Scene, ViewLayer | Updating Primitive Offsets
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.10M, Peak:0.10M | Scene, ViewLayer | Updating Images
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.10M, Peak:0.10M | Scene, ViewLayer | Updating Camera Volume
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.10M, Peak:0.10M | Scene, ViewLayer | Updating Lookup Tables
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.18M, Peak:0.18M | Scene, ViewLayer | Updating Lights
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.18M, Peak:0.18M | Scene, ViewLayer | Updating Lights | Computing tree
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.18M, Peak:0.18M | Scene, ViewLayer | Updating Integrator
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.18M, Peak:0.18M | Scene, ViewLayer | Updating Film
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.10M, Peak:0.18M | Scene, ViewLayer | Updating Lookup Tables
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.19M, Peak:0.19M | Scene, ViewLayer | Updating Baking
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.19M, Peak:0.19M | Scene, ViewLayer | Updating Device | Writing constant memory
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.19M, Peak:0.19M | Scene, ViewLayer | Loading denoising kernels (may take a few minutes the first time)
-Fra:1 Mem:10.37M (Peak 10.40M) | Time:00:00.00 | Mem:0.19M, Peak:0.19M | Scene, ViewLayer | Sample 0/16
-Fra:1 Mem:21.52M (Peak 21.52M) | Time:00:00.03 | Remaining:00:00.46 | Mem:11.32M, Peak:11.32M | Scene, ViewLayer | Sample 1/16
-Fra:1 Mem:26.21M (Peak 33.24M) | Time:00:01.73 | Mem:11.32M, Peak:11.32M | Scene, ViewLayer | Sample 16/16
-Fra:1 Mem:26.21M (Peak 33.24M) | Time:00:01.73 | Mem:11.32M, Peak:11.32M | Scene, ViewLayer | Finished
-Saved: '/home/user/testtemp/arena-vm/evidence/t11_blender.png'
-Time: 00:01.86 (Saving: 00:00.12)
-
-Info: Total files 0 | Changed 0 | Failed 0
-Info: Saved "blender_smoke.blend"
-BLENDER_SMOKE_OK render=/home/user/testtemp/arena-vm/evidence/t11_blender.png (115764 bytes) blend=/home/user/testtemp/arena-vm/blender_smoke.blend objects=['AgentCube', 'AgentSphere', 'Camera', 'Sun']
-Read blend: "/home/user/testtemp/arena-vm/blender_smoke.blend"
-PASS     T11_blender_render                 /home/user/testtemp/arena-vm/evidence/t11_blender.png
+NOT_TESTED T10_tablet_bridge                  start scripts/start_tablet.sh
+NOT_TESTED T11_blender                        run scripts/install_blender.sh
 PASS     T14_file_manager                   ranger 1.9.4
 PASS     T12_ue5_feasibility_doc            docs/ue5-feasibility.md
 PASS     T13_recovery_assets                80 pins
-PASS=15 FAIL=0 BLOCKED=0
+PASS=12 FAIL=0 BLOCKED=0

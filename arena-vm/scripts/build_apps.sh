@@ -87,10 +87,15 @@ s_x11vnc() {
 # ---------- vim terminal editor (in-source build; vim lacks VPATH support) ----------
 s_vim() {
   pin_timestamps "$VM_SRC/vim"
+  # Debian splits tgetent() into libtinfo; ld will not pull it transitively
+  # through a versioned libncursesw symlink, so select tinfo when the
+  # s_syslinks stage exposed it, otherwise fall back to monolithic ncursesw.
+  local tlib=ncursesw
+  [ -e "$VM_PREFIX/lib/libtinfo.so" ] && tlib=tinfo
   ( cd "$VM_SRC/vim" && \
     ./configure --prefix="$VM_PREFIX" --with-features=normal \
       --without-x --disable-gui --disable-netbeans --enable-multibyte \
-      --with-tlib=ncursesw && \
+      --with-tlib="$tlib" && \
     make -j"$(nproc)" && make install ) || return 1
 }
 
