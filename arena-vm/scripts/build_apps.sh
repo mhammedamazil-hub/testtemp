@@ -16,7 +16,7 @@ s_m4() {
 }
 s_autoconf() { conf_build "$VM_SRC/autoconf"; }
 s_automake() {
-  conf_build "$VM_SRC/automake-1.17"
+  conf_build "$VM_SRC/automake"
   # expose unversioned names expected by autogen.sh scripts
   ln -sf automake-1.17 "$VM_PREFIX/bin/automake"
   ln -sf aclocal-1.17  "$VM_PREFIX/bin/aclocal"
