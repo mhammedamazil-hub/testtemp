@@ -138,6 +138,19 @@ s_xutils() {
 }
 s_xautomation() { conf_build "$VM_SRC/xautomation"; }
 
+# ---------- parser generator (libxkbcommon requires bison >= 3.6) ----------
+s_m4bootstrap() {
+  # docs need help2man/makeinfo (absent): build lib + binary only
+  pin_timestamps "$VM_SRC/m4"
+  rm -rf "$VM_BUILD/b-m4"; mkdir -p "$VM_BUILD/b-m4"
+  ( cd "$VM_BUILD/b-m4" && "$VM_SRC/m4/configure" --prefix="$VM_PREFIX" \
+      --libdir="$VM_PREFIX/lib" && make -C lib && make -C src install )
+}
+s_bison() {
+  pin_timestamps "$VM_SRC/bison"
+  conf_build "$VM_SRC/bison"
+}
+
 # ---------- extra client libs required by Blender (bpy wheel) ----------
 s_xxf86vm()  { conf_build "$VM_SRC/libxxf86vm"; }
 s_xkbcommon(){ meson_build "$VM_SRC/libxkbcommon" -Denable-wayland=false -Denable-x11=true -Denable-docs=false; }
@@ -182,8 +195,8 @@ case "${1:-all}" in
     stage xutils     s_xutils
     stage xautomation s_xautomation
     stage xxf86vm    s_xxf86vm
-    stage xkbcommon  s_xkbcommon
-    stage glvnd      s_glvnd
+    # bison/libxkbcommon/glvnd only support the optional Blender wheel;
+    # they live in build_extras.sh so a toolchain gap never blocks the desktop.
     ;;
   *) stage "$1" "s_$1" ;;
 esac
