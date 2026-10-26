@@ -11,3 +11,7 @@ evidence/*.blend
 __pycache__/
 run/
 *.pid
+
+# Blender smoke-test output when run without explicit evidence paths
+*.blend
+*.blend1

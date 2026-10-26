@@ -22,6 +22,13 @@ export CFLAGS="-O2 -g0 -pipe -I$VM_PREFIX/include"
 export CXXFLAGS="-O2 -g0 -pipe -I$VM_PREFIX/include"
 export LDFLAGS="-L$VM_PREFIX/lib -Wl,-rpath,$VM_PREFIX/lib -Wl,-rpath-link,$VM_PREFIX/lib"
 export LIBRARY_PATH="$VM_PREFIX/lib"
+# Runtime loader path for prebuilt wheels (bpy) that find system-style libs
+# like libxkbcommon.so.0 at dlopen time rather than via build rpath.
+[ "${VM_LD_PATH_SET:-}" = 1 ] || export LD_LIBRARY_PATH="$VM_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+VM_LD_PATH_SET=1
+
+# Terminfo from the locally built ncurses (st/ranger/vim curses support)
+[ -d "$VM_PREFIX/share/terminfo" ] && export TERMINFO="$VM_PREFIX/share/terminfo"
 export C_INCLUDE_PATH="$VM_PREFIX/include"
 export CPLUS_INCLUDE_PATH="$VM_PREFIX/include"
 

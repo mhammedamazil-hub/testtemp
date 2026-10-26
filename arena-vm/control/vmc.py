@@ -203,6 +203,32 @@ class Desktop:
             walk(child)
         return out
 
+    # EWMH top-level managed clients (frame windows excluded), with the
+    # UTF-8 _NET_WM_NAME title that python-xlib's get_wm_name() can miss.
+    def clients(self):
+        atom_list = self.d.intern_atom("_NET_CLIENT_LIST")
+        atom_name = self.d.intern_atom("_NET_WM_NAME")
+        raw = self.root.get_full_property(atom_list, X.AnyPropertyType)
+        out = []
+        for wid in (raw.value if raw else []):
+            win = self.d.create_resource_object("window", wid)
+            try:
+                g = win.get_geometry()
+                prop = win.get_full_property(atom_name, 0)
+                name = prop.value.decode("utf-8", "replace") if prop else ""
+                out.append((win.id, name, g.x, g.y, g.width, g.height))
+            except Exception:
+                pass
+        return out
+
+    def close_all(self):
+        for wid, *_ in self.clients():
+            try:
+                self.close(hex(wid))
+            except Exception:
+                pass
+        self.d.sync()
+
     def focus(self, wid):
         win = self.d.create_resource_object("window", int(wid, 0))
         win.set_input_focus(X.RevertToPointerRoot, X.CurrentTime)
@@ -257,6 +283,15 @@ def main():
             print("(no viewable windows)")
         for wid, name, x, y, w, h in rows:
             print(f"0x{wid:08x}  {w}x{h}+{x}+{y}  {name}")
+    elif cmd == "clients":
+        rows = desk.clients()
+        if not rows:
+            print("(no managed clients)")
+        for wid, name, x, y, w, h in rows:
+            print(f"0x{wid:08x}  {w}x{h}+{x}+{y}  {name}")
+    elif cmd == "closeall":
+        desk.close_all()
+        print("closed all managed clients")
     elif cmd == "focus":
         desk.focus(args[0])
     elif cmd == "close":

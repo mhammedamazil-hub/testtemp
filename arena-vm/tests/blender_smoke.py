@@ -25,18 +25,41 @@ mat = bpy.data.materials.new("Red")
 mat.diffuse_color = (0.8, 0.1, 0.1, 1.0)
 sphere.data.materials.append(mat)
 
-# 3. camera + light
-bpy.ops.object.camera_add(location=(0, -6, 3))
-scene.camera = bpy.context.object
+# 3. camera + light. A freshly added camera looks down -Z, so aim it at the
+#    origin with a track constraint instead of relying on default rotation.
+bpy.ops.object.camera_add(location=(0, -12, 5.5))
+cam = bpy.context.object
+scene.camera = cam
+track = cam.constraints.new(type="TRACK_TO")
+track.target = sphere
+track.track_axis = "TRACK_NEGATIVE_Z"
+track.up_axis = "UP_Y"
 bpy.ops.object.light_add(type="SUN", location=(2, -3, 6))
+sun = bpy.context.object
+sun.data.energy = 3.0
+sun.rotation_euler = (0.6, 0.2, 0.4)
+# faint world ambient so shadow sides are not pitch black
+bpy.data.worlds.new("W")
+scene.world = bpy.data.worlds["W"]
+scene.world.use_nodes = True
+bg = scene.world.node_tree.nodes.get("Background")
+bg.inputs[0].default_value = (0.05, 0.05, 0.05, 1.0)
+bg.inputs[1].default_value = 0.3
 
-# 4. CPU render settings (no GPU exists in the sandbox)
-scene.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in [e.identifier for e in bpy.types.RenderSettings.bl_rna.properties['engine'].enum_items] else "BLENDER_EEVEE"
+# 4. CPU render settings. EEVEE needs an EGL/GL context (no GPU or vendor
+#    driver in the sandbox); Cycles on CPU is fully software and headless.
+scene.render.engine = "CYCLES"
+scene.cycles.device = "CPU"
+scene.cycles.samples = 16
 scene.render.resolution_x = 480
 scene.render.resolution_y = 320
 scene.render.filepath = out_png
 scene.render.image_settings.file_format = "PNG"
-pre = bpy.context.preferences.addons["cycles"].preferences if "cycles" in bpy.context.preferences.addons else None
+pre = bpy.context.preferences.addons["cycles"].preferences
+pre.compute_device_type = "NONE"
+pre.get_devices()
+for dev in pre.devices:
+    dev.use = dev.type == "CPU"
 
 bpy.ops.render.render(write_still=True)
 assert os.path.getsize(out_png) > 10_000, "rendered PNG suspiciously small"

@@ -21,17 +21,33 @@ if pgrep -f "bin/Xvfb $DISPLAY" >/dev/null; then rec PASS T1_xvfb_running "$(pgr
 # 2. X11 client connects
 if "$VM_PREFIX/bin/xdpyinfo" >/dev/null 2>&1; then rec PASS T2_x11_client_connect "$("$VM_PREFIX/bin/xdpyinfo" | awk '/X.Org version/{print $3}')"; else rec FAIL T2_x11_client_connect; fi
 
-# 3. window manager
-if pgrep -f "bin/dwm" >/dev/null; then rec PASS T3_window_manager "dwm $(pgrep -f bin/dwm | head -1)"; else rec FAIL T3_window_manager; fi
+# 3. window manager (openbox is the required WM; dwm retained as fallback)
+if pgrep -f "bin/openbox" >/dev/null; then
+  WM_NAME=$("$VM_PREFIX/bin/xprop" -root _NET_SUPPORTING_WM_CHECK 2>/dev/null \
+    | awk '{print $5}' \
+    | xargs -r -I{} "$VM_PREFIX/bin/xprop" -id {} _NET_WM_NAME 2>/dev/null \
+    | cut -d'"' -f2)
+  rec PASS T3_window_manager "${WM_NAME:-openbox} pid $(pgrep -f bin/openbox | head -1)"
+elif pgrep -f "bin/dwm" >/dev/null; then
+  rec PASS T3_window_manager "dwm(fallback) pid $(pgrep -f bin/dwm | head -1)"
+else rec FAIL T3_window_manager; fi
 
 # 4. screenshot of the live display
 if "$PY" "$VM_ROOT/control/shoot.py" "$EV/t4_shot.png" >/dev/null 2>&1 && [ -s "$EV/t4_shot.png" ]; then rec PASS T4_screenshot "$(stat -c%s "$EV/t4_shot.png") bytes"; else rec FAIL T4_screenshot; fi
 
 # 5. GUI app launch + 6. injected input changes state + 8. file created via GUI
+# deterministic desktop: close clients left by earlier runs first
+"$PY" "$VM_ROOT/control/vmc.py" closeall >/dev/null 2>&1 || true
+sleep 1
 rm -f /tmp/acceptance_gui.txt
 "$PY" "$VM_ROOT/control/vmc.py" launch "$VM_PREFIX/bin/st" -e bash -c "cat > /tmp/acceptance_gui.txt" >/dev/null
 sleep 2
-WID=$("$PY" "$VM_ROOT/control/vmc.py" windows | awk '/\+0\+19/{print $1; exit}')
+# EWMH client list. closeall above makes this st the sole managed client;
+# st retitles itself to the running command (bash/cat), so match the first
+# client whose title is st-like, else the only client on screen.
+WID=$("$PY" "$VM_ROOT/control/vmc.py" clients \
+  | awk '$3 ~ /^(st|bash|cat)/{print $1; exit} $1 !~ /^0x/{next} !w{w=$1} END{if(!$0){} }')
+[ -z "$WID" ] && WID=$("$PY" "$VM_ROOT/control/vmc.py" clients | awk 'NR==1{print $1}')
 if [ -n "$WID" ]; then rec PASS T5_gui_app_launched "st window $WID"; else rec FAIL T5_gui_app_launched; fi
 if [ -n "$WID" ]; then
   "$PY" "$VM_ROOT/control/vmc.py" focus "$WID" >/dev/null 2>&1
@@ -50,13 +66,12 @@ if "$PY" -c "from PIL import Image; im=Image.open('$EV/t4_shot.png'); im.load();
 
 # 9. browser
 if [ -x "$VM_PREFIX/bin/dillo" ]; then
-  "$PY" "$VM_ROOT/control/vmc.py" launch "$VM_PREFIX/bin/dillo" "file:///tmp/dillo_test.html" >/dev/null 2>&1 || true
   cat > /tmp/dillo_test.html <<'EOF'
 <html><head><title>Acceptance</title></head><body><h1>ok</h1></body></html>
 EOF
   "$PY" "$VM_ROOT/control/vmc.py" launch "$VM_PREFIX/bin/dillo" "file:///tmp/dillo_test.html" >/dev/null
   sleep 3
-  if "$PY" "$VM_ROOT/control/vmc.py" windows | grep -qi dillo; then rec PASS T9_browser_works dillo; else rec FAIL T9_browser_works; fi
+  if "$PY" "$VM_ROOT/control/vmc.py" clients | grep -qi dillo; then rec PASS T9_browser_works dillo; else rec FAIL T9_browser_works; fi
 else rec BLOCKED T9_browser_works "dillo not built"; fi
 
 # 10. tablet bridge
@@ -73,6 +88,17 @@ if "$PY" -c "import bpy" 2>/dev/null; then
       && rec PASS T11_blender_render "$EV/t11_blender.png" || rec FAIL T11_blender_render
   fi
 else rec NOT_TESTED T11_blender "run scripts/install_blender.sh"; fi
+
+# 11b. file manager: ranger launches inside st under the WM and lists files
+if [ -x "$VM_VENV/bin/ranger" ] && TERM=xterm-256color TERMINFO="$VM_PREFIX/share/terminfo" \
+   "$VM_VENV/bin/ranger" --version >/dev/null 2>&1; then
+  "$PY" "$VM_ROOT/control/vmc.py" launch "$VM_PREFIX/bin/st" -e "$VM_VENV/bin/ranger" "$VM_ROOT" >/dev/null
+  sleep 3
+  if "$PY" "$VM_ROOT/control/vmc.py" clients | grep -qi ranger; then
+    rec PASS T14_file_manager "ranger $(TERM=xterm-256color "$VM_VENV/bin/ranger" --version 2>/dev/null | head -1 | awk '{print $4}')"
+    "$PY" "$VM_ROOT/control/vmc.py" closeall >/dev/null 2>&1 || true
+  else rec FAIL T14_file_manager; fi
+else rec BLOCKED T14_file_manager "ranger not installed"; fi
 
 # 12. UE5 feasibility evidence collected?
 [ -f "$VM_ROOT/docs/ue5-feasibility.md" ] && rec PASS T12_ue5_feasibility_doc "docs/ue5-feasibility.md" || rec NOT_TESTED T12_ue5_feasibility

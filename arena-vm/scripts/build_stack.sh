@@ -138,7 +138,7 @@ s_xutils() {
 }
 s_xautomation() { conf_build "$VM_SRC/xautomation"; }
 
-# ---------- parser generator (libxkbcommon requires bison >= 3.6) ----------
+# ---------- parser generator prerequisites (bison itself: build_extras.sh) ----------
 s_m4bootstrap() {
   # docs need help2man/makeinfo (absent): build lib + binary only
   pin_timestamps "$VM_SRC/m4"
@@ -146,11 +146,6 @@ s_m4bootstrap() {
   ( cd "$VM_BUILD/b-m4" && "$VM_SRC/m4/configure" --prefix="$VM_PREFIX" \
       --libdir="$VM_PREFIX/lib" && make -C lib && make -C src install )
 }
-s_bison() {
-  pin_timestamps "$VM_SRC/bison"
-  conf_build "$VM_SRC/bison"
-}
-
 # ---------- extra client libs required by Blender (bpy wheel) ----------
 s_xxf86vm()  { conf_build "$VM_SRC/libxxf86vm"; }
 s_xkbcommon(){ meson_build "$VM_SRC/libxkbcommon" -Denable-wayland=false -Denable-x11=true -Denable-docs=false; }
