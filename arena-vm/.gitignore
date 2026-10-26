@@ -15,3 +15,7 @@ run/
 # Blender smoke-test output when run without explicit evidence paths
 *.blend
 *.blend1
+
+# recovery logs captured during rebuild validation
+/run-recovery.log
+*.recovery.log
