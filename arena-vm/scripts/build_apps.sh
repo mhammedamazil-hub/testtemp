@@ -84,11 +84,11 @@ s_x11vnc() {
     make -j"$(nproc)" && make install ) || return 1
 }
 
-# ---------- vim terminal editor ----------
+# ---------- vim terminal editor (in-source build; vim lacks VPATH support) ----------
 s_vim() {
-  rm -rf "$VM_BUILD/b-vim"; mkdir -p "$VM_BUILD/b-vim"
-  ( cd "$VM_BUILD/b-vim" && \
-    "$VM_SRC/vim/src/auto/configure" --prefix="$VM_PREFIX" --with-features=normal \
+  pin_timestamps "$VM_SRC/vim"
+  ( cd "$VM_SRC/vim" && \
+    ./configure --prefix="$VM_PREFIX" --with-features=normal \
       --without-x --disable-gui --disable-netbeans --enable-multibyte \
       --with-tlib=ncursesw && \
     make -j"$(nproc)" && make install ) || return 1
