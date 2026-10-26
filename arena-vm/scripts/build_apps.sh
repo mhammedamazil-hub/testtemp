@@ -52,15 +52,60 @@ s_dillo() {
     make -j"$(nproc)" && make install ) || return 1
 }
 
+# ---------- OpenSSL 3.0 (x11vnc crypto, bpy wheel runtime) ----------
+s_openssl() {
+  # OpenSSL builds inside its source tree; keep markers so re-runs are cheap
+  ( cd "$VM_SRC/openssl" && \
+    [ -x apps/openssl ] || ./Configure shared --prefix="$VM_PREFIX" --libdir=lib \
+      --openssldir="$VM_PREFIX/etc/ssl" no-tests no-legacy ) || return 1
+  ( cd "$VM_SRC/openssl" && make -j"$(nproc)" && make install_sw && make install_ssldirs ) || return 1
+  install -m755 "$VM_SRC/openssl/apps/openssl" "$VM_PREFIX/bin/openssl"
+}
+
+# ---------- libjpeg-turbo (libvncserver dependency) ----------
+s_libjpeg() {
+  cmake_build "$VM_SRC/libjpeg-turbo" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DENABLE_SHARED=TRUE -DENABLE_STATIC=FALSE -DWITH_SIMD=TRUE
+}
+
+# ---------- libvncserver + x11vnc (tablet remote access) ----------
+s_libvnc() {
+  cmake_build "$VM_SRC/libvncserver" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DWITH_OPENSSL=OFF -DWITH_GCRYPT=OFF -DWITH_GNUTLS=OFF -DWITH_SYSTEMD=OFF \
+    -DWITH_SASL=OFF -DWITH_THREADS=ON -DBUILD_SHARED_LIBS=ON
+}
+s_x11vnc() {
+  ( cd "$VM_SRC/x11vnc" && [ -x configure ] || autoreconf -fi ) || return 1
+  rm -rf "$VM_BUILD/b-x11vnc"; mkdir -p "$VM_BUILD/b-x11vnc"
+  ( cd "$VM_BUILD/b-x11vnc" && \
+    "$VM_SRC/x11vnc/configure" --prefix="$VM_PREFIX" --without-avahi --without-systemd && \
+    make -j"$(nproc)" && make install ) || return 1
+}
+
+# ---------- vim terminal editor ----------
+s_vim() {
+  rm -rf "$VM_BUILD/b-vim"; mkdir -p "$VM_BUILD/b-vim"
+  ( cd "$VM_BUILD/b-vim" && \
+    "$VM_SRC/vim/src/auto/configure" --prefix="$VM_PREFIX" --with-features=normal \
+      --without-x --disable-gui --disable-netbeans --enable-multibyte \
+      --with-tlib=ncursesw && \
+    make -j"$(nproc)" && make install ) || return 1
+}
+
 case "${1:-all}" in
   all)
     stage m4       s_m4
     stage autoconf s_autoconf
     stage automake s_automake
     stage libtool  s_libtool
+    stage openssl  s_openssl
     stage fltk13   s_fltk13
     stage mbedtls  s_mbedtls
     stage dillo    s_dillo
+    stage libjpeg  s_libjpeg
+    stage libvnc   s_libvnc
+    stage x11vnc   s_x11vnc
+    stage vim      s_vim
     ;;
   *) stage "$1" "s_$1" ;;
 esac

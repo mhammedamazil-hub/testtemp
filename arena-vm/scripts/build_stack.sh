@@ -33,6 +33,10 @@ s_zlib() {
 s_libpng() { cmake_build "$VM_SRC/libpng1.6" -DCMAKE_PREFIX_PATH="$VM_PREFIX" -DPNG_TESTS=OFF -DPNG_SHARED=ON -DPNG_STATIC=OFF; }
 s_expat() { cmake_build "$VM_SRC/expat/expat" -DEXPAT_BUILD_TESTS=OFF -DEXPAT_BUILD_DOCS=OFF -DEXPAT_SHARED_LIBS=ON; }
 s_freetype() { meson_build "$VM_SRC/freetype" -Dpng=disabled -Dharfbuzz=disabled -Dbzip2=disabled -Dbrotli=disabled -Dtests=disabled; }
+s_harfbuzz() { meson_build "$VM_SRC/harfbuzz" -Dglib=disabled -Dgobject=disabled -Dicu=disabled \
+  -Dcairo=disabled -Dchafa=disabled -Dtests=disabled -Ddocs=disabled -Dintrospection=disabled \
+  -Dgraphite=disabled -Dgraphite2=disabled -Dfontations=disabled -Dutilities=disabled \
+  -Dbenchmark=disabled -Dfreetype=enabled; }
 
 # ---------- S5-S10 X protocol core ----------
 s_xorgproto() { meson_build "$VM_SRC/xorgproto"; }
@@ -126,6 +130,16 @@ s_xutils() {
 }
 s_xautomation() { conf_build "$VM_SRC/xautomation"; }
 
+# ---------- extra client libs required by Blender (bpy wheel) ----------
+s_xxf86vm()  { conf_build "$VM_SRC/libxxf86vm"; }
+s_xkbcommon(){ meson_build "$VM_SRC/libxkbcommon" -Denable-wayland=false -Denable-x11=true -Denable-docs=false; }
+s_glvnd() {
+  # Headless GL dispatch stubs: libraries resolve at runtime via glvnd; no GPU
+  # driver is present, so GL context creation is impossible but linking works.
+  meson_build "$VM_SRC/libglvnd" -Dgles1=disabled -Dgles2=disabled -Dglx=disabled \
+    -Degl=false -Dglvnd=true -Dx11=enabled -Dtests=false
+}
+
 case "${1:-all}" in
   all)
     stage shims      s_shims
@@ -133,6 +147,7 @@ case "${1:-all}" in
     stage libpng     s_libpng
     stage expat      s_expat
     stage freetype   s_freetype
+    stage harfbuzz   s_harfbuzz
     stage xorgproto  s_xorgproto
     stage xtrans     s_xtrans
     stage libxau     s_libxau
@@ -157,6 +172,9 @@ case "${1:-all}" in
     stage xvfb       s_xvfb
     stage xutils     s_xutils
     stage xautomation s_xautomation
+    stage xxf86vm    s_xxf86vm
+    stage xkbcommon  s_xkbcommon
+    stage glvnd      s_glvnd
     ;;
   *) stage "$1" "s_$1" ;;
 esac

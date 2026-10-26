@@ -1,0 +1,12 @@
+# Python tooling installed into local/venv by recover.sh
+meson==1.12.1
+ninja==1.13.2
+cmake
+python-xlib
+pillow
+mss
+matplotlib
+websockify
+# Blender (bpy) is installed separately by scripts/install_blender.sh because
+# the wheel is ~520 MB. Uncomment to include it in a normal recovery run:
+# bpy==4.2.0

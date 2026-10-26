@@ -5,12 +5,27 @@ source "$(dirname "$0")/env.sh"
 MARK="$VM_BUILD/markers"; mkdir -p "$MARK"
 stage() { local n="$1"; shift; [ -f "$MARK/$n" ] && { log "SKIP $n"; return; }; "$@" && touch "$MARK/$n"; }
 
+s_ncurses() {
+  conf_build "$VM_SRC/ncurses" --with-shared --without-debug \
+    --enable-widec --enable-ext-colors
+}
+
 s_fonts() {
   local dst="$VM_PREFIX/share/fonts/truetype/dejavu"
   mkdir -p "$dst"
   cp "$VM_VENV"/lib/python*/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVu*.ttf "$dst/"
-  fc-cache -f "$VM_PREFIX/share/fonts" >/dev/null
-  fc-list | grep -c DejaVu
+  mkdir -p "$VM_PREFIX/etc/fonts" "$VM_PREFIX/cache/fontconfig"
+  # fontconfig must also scan our prefix (system /etc/fonts is not writable)
+  cat > "$VM_PREFIX/etc/fonts/local.conf" <<EOF
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>$VM_PREFIX/share/fonts</dir>
+  <cachedir>$VM_PREFIX/cache/fontconfig</cachedir>
+</fontconfig>
+EOF
+  FONTCONFIG_PATH="$VM_PREFIX/etc/fonts" fc-cache -f "$VM_PREFIX/share/fonts" >/dev/null
+  FONTCONFIG_PATH="$VM_PREFIX/etc/fonts" fc-list | grep -c DejaVu
 }
 
 s_dwm() {
@@ -40,7 +55,8 @@ s_dmenu() {
 }
 
 case "${1:-all}" in
-  all) stage fonts s_fonts; stage dwm s_dwm; stage st s_st; stage dmenu s_dmenu ;;
+  all) stage ncurses s_ncurses; stage fonts s_fonts
+       stage dwm s_dwm; stage st s_st; stage dmenu s_dmenu ;;
   *) stage "$1" "s_$1" ;;
 esac
 log "suckless build finished: $1"
