@@ -15,6 +15,12 @@ stage() { # stage name ; runs remaining args as a command
   if "$@"; then touch "$MARK/$name"; log "DONE  $name"; else fail "stage $name failed"; fi
 }
 
+# pkgconf provides the pkg-config binary every later configure/meson step needs
+s_pkgconf() {
+  meson_build "$VM_SRC/pkgconf"
+  ln -sf pkgconf "$VM_PREFIX/bin/pkg-config"
+}
+
 # gettext is unavailable; install no-op shims so NLS make rules still pass
 s_shims() {
   mkdir -p "$VM_PREFIX/bin"
@@ -144,6 +150,7 @@ s_glvnd() {
 
 case "${1:-all}" in
   all)
+    stage pkgconf    s_pkgconf
     stage shims      s_shims
     stage zlib       s_zlib
     stage libpng     s_libpng
