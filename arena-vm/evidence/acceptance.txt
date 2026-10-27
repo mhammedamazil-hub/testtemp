@@ -1,15 +1,15 @@
-PASS     T1_xvfb_running                    289668 /home/user/testtemp/arena-vm/local/bin/Xvfb :99 -screen 0 1280x800x24 -ac -nolisten tcp -fp /home/user/testtemp/arena-vm/local/share/fonts/X11/misc
+PASS     T1_xvfb_running                    267666 /home/user/testtemp/arena-vm/local/bin/Xvfb :99 -screen 0 1280x800x24 -ac -nolisten tcp -fp /home/user/testtemp/arena-vm/local/share/fonts/X11/misc
 PASS     T2_x11_client_connect              21.1.16
-PASS     T3_window_manager                  Openbox pid 289674
-PASS     T4_screenshot                      3057 bytes
-PASS     T5_gui_app_launched                st window 0x00600006
-PASS     T6_input_injection                 GUI_INPUT_1172
+PASS     T3_window_manager                  Openbox pid 267672
+PASS     T4_screenshot                      98375 bytes
+PASS     T5_gui_app_launched                st window 0x01000006
+PASS     T6_input_injection                 GUI_INPUT_8498
 PASS     T8_file_created_via_gui            /tmp/acceptance_gui.txt
 PASS     T7_agent_screenshot_loop           (1280, 800)
 PASS     T9_browser_works                   dillo
-NOT_TESTED T10_tablet_bridge                  start scripts/start_tablet.sh
+PASS     T10_tablet_auth                    401 without credentials
 NOT_TESTED T11_blender                        run scripts/install_blender.sh
 PASS     T14_file_manager                   ranger 1.9.4
 PASS     T12_ue5_feasibility_doc            docs/ue5-feasibility.md
 PASS     T13_recovery_assets                80 pins
-PASS=12 FAIL=0 BLOCKED=0
+PASS=13 FAIL=0 BLOCKED=0
