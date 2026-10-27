@@ -1,9 +1,9 @@
-PASS     T1_xvfb_running                    278404 /home/user/testtemp/arena-vm/local/bin/Xvfb :99 -screen 0 1280x800x24 -ac -nolisten tcp -fp /home/user/testtemp/arena-vm/local/share/fonts/X11/misc
+PASS     T1_xvfb_running                    289668 /home/user/testtemp/arena-vm/local/bin/Xvfb :99 -screen 0 1280x800x24 -ac -nolisten tcp -fp /home/user/testtemp/arena-vm/local/share/fonts/X11/misc
 PASS     T2_x11_client_connect              21.1.16
-PASS     T3_window_manager                  Openbox pid 278435
-PASS     T4_screenshot                      33725 bytes
+PASS     T3_window_manager                  Openbox pid 289674
+PASS     T4_screenshot                      3057 bytes
 PASS     T5_gui_app_launched                st window 0x00600006
-PASS     T6_input_injection                 GUI_INPUT_22113
+PASS     T6_input_injection                 GUI_INPUT_1172
 PASS     T8_file_created_via_gui            /tmp/acceptance_gui.txt
 PASS     T7_agent_screenshot_loop           (1280, 800)
 PASS     T9_browser_works                   dillo
