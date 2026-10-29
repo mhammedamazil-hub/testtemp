@@ -1,0 +1,21 @@
+[package]
+name = "sourceforge_core"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic chunking, BM25 ranking and citation validation for SourceForge"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

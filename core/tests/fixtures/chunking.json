@@ -1,0 +1,110 @@
+[
+  {
+    "name": "paragraphs",
+    "text": "Alpha beta gamma delta.\n\nEpsilon zeta eta theta.\n\nIota kappa lambda mu.",
+    "chunkSize": 60,
+    "chunkOverlap": 10,
+    "expected": [
+      {
+        "text": "Alpha beta gamma delta.\n\nEpsilon zeta eta theta.\n\nIota kappa lambda mu.",
+        "startLine": 1,
+        "endLine": 5,
+        "tokens": 18
+      }
+    ]
+  },
+  {
+    "name": "exact-fit",
+    "text": "one two three\nfour five six\nseven eight nine",
+    "chunkSize": 28,
+    "chunkOverlap": 0,
+    "expected": [
+      {
+        "text": "one two three\nfour five six\nseven eight nine",
+        "startLine": 1,
+        "endLine": 3,
+        "tokens": 11
+      }
+    ]
+  },
+  {
+    "name": "overlap",
+    "text": "line-one-aaaaaaaaaaaaaaaaaaaa\nline-two-bbbbbbbbbbbbbbbbbbbb\nline-three-cccccccccccccccccc\nline-four-ddddddddddddddddddd\nline-five-eeeeeeeeeeeeeeeeeeee\nline-six-fffffffffffffffffffff",
+    "chunkSize": 90,
+    "chunkOverlap": 35,
+    "expected": [
+      {
+        "text": "line-one-aaaaaaaaaaaaaaaaaaaa\nline-two-bbbbbbbbbbbbbbbbbbbb\nline-three-cccccccccccccccccc",
+        "startLine": 1,
+        "endLine": 3,
+        "tokens": 23
+      },
+      {
+        "text": "line-three-cccccccccccccccccc\nline-four-ddddddddddddddddddd\nline-five-eeeeeeeeeeeeeeeeeeee",
+        "startLine": 3,
+        "endLine": 5,
+        "tokens": 23
+      },
+      {
+        "text": "line-five-eeeeeeeeeeeeeeeeeeee\nline-six-fffffffffffffffffffff",
+        "startLine": 5,
+        "endLine": 6,
+        "tokens": 16
+      }
+    ]
+  },
+  {
+    "name": "no-trailing-duplicate",
+    "text": "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\ndddddddddd\neeeeeeeeee",
+    "chunkSize": 80,
+    "chunkOverlap": 12,
+    "expected": [
+      {
+        "text": "aaaaaaaaaa\nbbbbbbbbbb\ncccccccccc\ndddddddddd\neeeeeeeeee",
+        "startLine": 1,
+        "endLine": 5,
+        "tokens": 14
+      }
+    ]
+  },
+  {
+    "name": "long-line",
+    "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nshort line",
+    "chunkSize": 80,
+    "chunkOverlap": 0,
+    "expected": [
+      {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "startLine": 1,
+        "endLine": 1,
+        "tokens": 20
+      },
+      {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "startLine": 1,
+        "endLine": 1,
+        "tokens": 18
+      },
+      {
+        "text": "short line",
+        "startLine": 2,
+        "endLine": 2,
+        "tokens": 3
+      }
+    ]
+  },
+  {
+    "name": "blank-lines",
+    "text": "first\n\n\nsecond\n\nthird",
+    "chunkSize": 200,
+    "chunkOverlap": 0,
+    "expected": [
+      {
+        "text": "first\n\n\nsecond\n\nthird",
+        "startLine": 1,
+        "endLine": 6,
+        "tokens": 6
+      }
+    ]
+  }
+]

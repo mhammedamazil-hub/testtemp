@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  test-and-build:
+    name: Typecheck, unit tests, production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and integration tests
+        run: npm run test
+      - name: Build
+        run: npm run build
+      - name: Validate build output
+        run: node scripts/validate-build.mjs
+      - name: Package static site
+        run: bash scripts/package-web.sh
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: web-build
+          path: |
+            dist
+            release/sourceforge-web-*.zip
+          retention-days: 14
+          if-no-files-found: error
+
+  browser-tests:
+    name: Browser tests (Chromium, production build)
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright tests
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4.6.2
+        if: always()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14
+
+  rust-core:
+    name: Rust core (fmt, clippy, parity tests, WASM build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2.7.8
+        with:
+          workspaces: core
+      - name: Formatting
+        run: cargo fmt --manifest-path core/Cargo.toml -- --check
+      - name: Clippy
+        run: cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings
+      - name: Rust tests (shared parity fixtures)
+        run: cargo test --manifest-path core/Cargo.toml
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build WebAssembly package
+        run: bash scripts/build-wasm.sh
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: wasm-package
+          path: public/wasm
+          retention-days: 14
+
+  linux-package:
+    name: Linux .deb package
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Build and verify .deb
+        run: bash scripts/package-linux.sh
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: linux-deb
+          path: release/*.deb
+          if-no-files-found: error
+
+  windows-portable:
+    name: Windows portable ZIP
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Build portable ZIP
+        run: bash scripts/package-windows.sh
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: windows-portable
+          path: release/sourceforge-*-windows-portable.zip
+          if-no-files-found: error
+
+  android-apk:
+    name: Android APK (Capacitor)
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/setup-java@v4.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3.2.2
+      - uses: gradle/actions/setup-gradle@v4.0.0
+      - run: npm ci
+      - run: npm run build
+      - name: Sync web assets into the native project
+        run: npx cap sync android
+      - name: Assemble debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Verify APK exists
+        run: |
+          test -f android/app/build/outputs/apk/debug/app-debug.apk
+          ls -l android/app/build/outputs/apk/debug/
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  pages:
+    name: Publish PWA to GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [test-and-build, browser-tests]
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: wasm-package
+          path: public/wasm
+        continue-on-error: true
+      - name: Build with the Rust core when available
+        run: npm run build
+      - uses: actions/configure-pages@v5.0.0
+      - uses: actions/upload-pages-artifact@v3.0.1
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4.0.5

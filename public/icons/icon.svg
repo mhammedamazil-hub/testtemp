@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="SourceForge">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1626"/>
+      <stop offset="1" stop-color="#14223a"/>
+    </linearGradient>
+    <linearGradient id="bar1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4c8dff"/>
+      <stop offset="1" stop-color="#2f6fed"/>
+    </linearGradient>
+    <linearGradient id="bar3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8c76ff"/>
+      <stop offset="1" stop-color="#6c76ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="112" y="296" width="288" height="48" rx="24" fill="url(#bar1)"/>
+  <rect x="144" y="216" width="224" height="48" rx="24" fill="#6ca0ff"/>
+  <rect x="176" y="136" width="160" height="48" rx="24" fill="url(#bar3)"/>
+</svg>

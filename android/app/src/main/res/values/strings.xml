@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SourceForge</string>
+    <string name="title_activity_main">SourceForge</string>
+    <string name="package_name">dev.sourceforge.app</string>
+    <string name="custom_url_scheme">dev.sourceforge.app</string>
+</resources>

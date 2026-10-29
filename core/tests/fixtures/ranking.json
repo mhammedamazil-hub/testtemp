@@ -1,0 +1,109 @@
+[
+  {
+    "docs": [
+      {
+        "id": "a",
+        "text": "The market share of the product grew by 40 percent in 2023."
+      },
+      {
+        "id": "b",
+        "text": "Customer satisfaction surveys show high approval among enterprise buyers."
+      },
+      {
+        "id": "c",
+        "text": "The product market share was 80 percent according to a rival analyst."
+      },
+      {
+        "id": "d",
+        "text": "Unrelated text about gardening and soil pH levels."
+      }
+    ],
+    "query": "market share percent",
+    "expected": [
+      {
+        "id": "a",
+        "score": 1.953838
+      },
+      {
+        "id": "c",
+        "score": 1.953838
+      }
+    ]
+  },
+  {
+    "docs": [
+      {
+        "id": "a",
+        "text": "The market share of the product grew by 40 percent in 2023."
+      },
+      {
+        "id": "b",
+        "text": "Customer satisfaction surveys show high approval among enterprise buyers."
+      },
+      {
+        "id": "c",
+        "text": "The product market share was 80 percent according to a rival analyst."
+      },
+      {
+        "id": "d",
+        "text": "Unrelated text about gardening and soil pH levels."
+      }
+    ],
+    "query": "customer approval",
+    "expected": [
+      {
+        "id": "b",
+        "score": 2.573377
+      }
+    ]
+  },
+  {
+    "docs": [
+      {
+        "id": "a",
+        "text": "The market share of the product grew by 40 percent in 2023."
+      },
+      {
+        "id": "b",
+        "text": "Customer satisfaction surveys show high approval among enterprise buyers."
+      },
+      {
+        "id": "c",
+        "text": "The product market share was 80 percent according to a rival analyst."
+      },
+      {
+        "id": "d",
+        "text": "Unrelated text about gardening and soil pH levels."
+      }
+    ],
+    "query": "gardening soil",
+    "expected": [
+      {
+        "id": "d",
+        "score": 2.573377
+      }
+    ]
+  },
+  {
+    "docs": [
+      {
+        "id": "a",
+        "text": "The market share of the product grew by 40 percent in 2023."
+      },
+      {
+        "id": "b",
+        "text": "Customer satisfaction surveys show high approval among enterprise buyers."
+      },
+      {
+        "id": "c",
+        "text": "The product market share was 80 percent according to a rival analyst."
+      },
+      {
+        "id": "d",
+        "text": "Unrelated text about gardening and soil pH levels."
+      }
+    ],
+    "query": "nonexistent zebra",
+    "expected": []
+  }
+]
