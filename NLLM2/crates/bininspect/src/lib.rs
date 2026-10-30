@@ -11,4 +11,5 @@ pub mod dex;
 pub mod elf;
 pub mod hashes;
 pub mod report;
+pub mod xmltext;
 pub mod pe;

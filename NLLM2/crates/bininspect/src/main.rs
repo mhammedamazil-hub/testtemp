@@ -209,6 +209,58 @@ fn print_human(path: &str, data: &[u8], report: &Value, limit: usize) {
         }
     }
 
+    if let Some(m) = report.get("manifest") {
+        let kind = if report.str_of("format") == Some("android_binary_xml") { "compiled" } else { "textual" };
+        section(&format!("Android manifest ({})", kind));
+        println!("package   : {}", m.str_of("package").unwrap_or(""));
+        println!("version   : {} (code {})", m.str_of("version_name").unwrap_or(""), m.str_of("version_code").unwrap_or(""));
+        println!("sdk       : min {} / target {}", m.str_of("min_sdk").unwrap_or("?"), m.str_of("target_sdk").unwrap_or("?"));
+        println!("debuggable: {}", m.get("debuggable").and_then(|d| d.as_bool()).unwrap_or(false));
+        println!("launcher  : {}", m.str_of("launcher_activity").unwrap_or("(none)"));
+        if let Some(p) = m.get("permissions").and_then(|p| p.as_arr()).filter(|p| !p.is_empty()) {
+            println!("permissions:");
+            for x in p { println!("  {}", x.as_str().unwrap_or("")); }
+        }
+        for group in ["activities", "services", "receivers", "providers"] {
+            if let Some(list) = m.get(group).and_then(|x| x.as_arr()).filter(|l| !l.is_empty()) {
+                section(group);
+                for c in list {
+                    println!("  {:<52} {}", c.str_of("name").unwrap_or(""),
+                        if c.get("exported").and_then(|e| e.as_bool()).unwrap_or(false) { "EXPORTED" } else { "" });
+                }
+            }
+        }
+    }
+
+    if let Some(d) = report.get("dex") {
+        section("DEX (Dalvik bytecode, standalone)");
+        println!("version   : {}", d.str_of("version").unwrap_or(""));
+        println!("declared  : {} bytes (header field)", d.get("declared_size").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64);
+        println!("inventory : {} classes, {} methods, {} strings, {} types",
+            d.get("classes").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64,
+            d.get("methods").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64,
+            d.get("strings").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64,
+            d.get("types").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64);
+        if let Some(f) = d.get("code_findings").and_then(|x| x.as_arr()).filter(|f| !f.is_empty()) {
+            section("code findings");
+            for x in f.iter().take(20) {
+                println!("  [{}] {}", x.str_of("category").unwrap_or(""), x.str_of("detail").unwrap_or(""));
+            }
+        }
+        if let Some(c) = d.get("class_names").and_then(|x| x.as_arr()).filter(|c| !c.is_empty()) {
+            section(&format!("application classes ({})", c.len()));
+            for x in c.iter().take(20) {
+                println!("  {}", x.as_str().unwrap_or(""));
+            }
+        }
+    }
+
+    if let Some(l) = report.get("lfs") {
+        section("Git LFS pointer");
+        println!("oid   : {}", l.str_of("oid").unwrap_or(""));
+        println!("size  : {} bytes (the real binary is not here)", l.get("declared_size").and_then(|x| x.as_f64()).unwrap_or(0.0) as u64);
+    }
+
     if let Some(e) = report.get("elf") {
         section("ELF");
         println!("type    : {}", e.str_of("type").unwrap_or(""));

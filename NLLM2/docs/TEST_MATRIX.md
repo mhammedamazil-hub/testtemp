@@ -138,7 +138,7 @@ supported and audio as unsupported · responsive breakpoints present ·
 
 Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/make_ooxml.py && python3 tests/fixtures/make_apk.py && python3 tests/fixtures/make_pe.py`.
 
-## Binary analysis (20 unit tests + 5 HTTP tests + 6 UI assertions)
+## Binary analysis (31 unit tests + 5 HTTP tests + 6 UI assertions)
 
 Hash vectors (SHA-256/SHA-1 published values), entropy separation, AXML parsing of a real
 compiled manifest, DEX inventory + finding categories, PE sections/imports/entropy/anomalies,

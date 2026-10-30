@@ -8,7 +8,7 @@ is aspirational. Where a claim is untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **117 passing, 0 failing** (20 `bininspect` + 87 lib + 5 e2e + 5 server) | `cargo test --offline` |
+| Rust tests | **128 passing, 0 failing** (31 `bininspect` + 87 lib + 5 e2e + 5 server) | `cargo test --offline` |
 | UI drive-through | **36 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |

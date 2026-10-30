@@ -68,7 +68,8 @@ cargo run --offline -p bininspect -- <file> [--json] [--strings N]
 | `dex.rs` | DEX 035–039: MUTF-8 string table, type/method ids, `class_data` walk → classes, methods, and reference findings |
 | `pe.rs` | PE32/PE32+: headers, sections (+ per-section entropy), imports (names and ordinals), exports, `.NET` CLR/BSJB metadata, `#Strings`/`#US`, version info, overlay, packer indicators |
 | `elf.rs` | ELF identification for `.so` files shipped inside APKs: class, machine, type, entry, sections, stripped/not |
-| `report.rs` | Format detection and the unified JSON report used by the CLI and the HTTP API |
+| `xmltext.rs` | Textual manifests (build intermediates ship XML, not AXML) → the same element stream, so both paths share one set of semantics |
+| `report.rs` | Format detection (`pe`, `apk_or_zip`, `dex`, `android_binary_xml`, `android_text_manifest`, `elf`, `git_lfs_pointer`, `unknown`) and the unified JSON report |
 
 ### APK: what is reported
 
@@ -128,6 +129,33 @@ anomalies:
   ! W+X section `.evil` present
 ```
 
+## 3b. Evidence from real files, not just fixtures
+
+Hand-written parsers are worthless if they only accept the bytes their author invented. The
+following came from unrelated public repositories (fetched through the GitHub contents API,
+never committed here — only their digests are recorded):
+
+| Artifact | sha256 | What Forge reported |
+|---|---|---|
+| `WifiChat-debug.apk`, 110,407 B — a real APK built by a real Android project | `6f7562020007d795ec3881495462f2d26458f18ab65b2e88f48356ad2c3676b5` | `com.colorcloud.wifichat` 1.0 (code 1), minSdk 14, 8 permissions, 39 entries, 200,233 B uncompressed, 90 classes / 1,009 methods / 1,971 strings, launcher `WiFiDirectActivity` correctly EXPORTED |
+| bare `classes.dex`, 133,692 B from the same app | `3ffc3269e2c1efadd0debcf75d69ab8656cca59ee61143add7bc9e53332a7e3c` | DEX 035, declared size matches the file, 90 classes, findings `java/security`, `java/net/Socket`, `java/net/URL` |
+| merged manifest, Flutter app | `c6fab584b6146e1776f62946b1fa879c46035806278e9206798436ad05348426` | `dev.fluttercommunity.plus.device_info`, minSdk 19 |
+| merged manifest, Harmony app | `c2c8f2ad1b18c05953ed10b16e4b4fe3acc25552a73378eb93e60b1e8c548852` | `com.example.myapplicationlogin` 1.0.0 (code 1000000), min 26 / target 29, launcher `MainAbilityShellActivity` exported, 2 sibling activities not exported |
+| `sdbarker_tiny.exe` on GitHub | `4e866e78fe939df2c94bf1ea3c2187cb00bd9c38e42663199f1fdbe5feed8171` | recognised as a **Git LFS pointer** (129 B text stub, real file 6,656 B) instead of being reported as an EXE |
+
+Two behaviours were fixed *because* of these files rather than guessed at:
+
+1. **Component names are qualified.** Real manifests write `android:name=".MainActivity"`.
+   Forge now resolves `.Foo` and `Foo` against `package` (a dotted name is left alone), which is
+   exactly what the platform's `PackageParser` does.
+2. **`android:exported` defaults are applied.** Pre-Android-12 apps usually omit the
+   attribute. The rule implemented is: an explicit `android:exported` wins; otherwise a
+   component is exported iff it declares an `<intent-filter>`. That is why the real APK's
+   launcher activity is flagged and its non-launcher activities are not.
+
+Also handled now: a bare `classes.dex`, a standalone compiled manifest, a textual manifest, and
+Git LFS stubs — all of which were previously reported as `unknown`.
+
 ## 4. HTTP API
 
 `POST /api/binary/inspect` — wired in `crates/forge-server/src/binary.rs` (it lives in the
@@ -181,8 +209,8 @@ because it has not been implemented or tested yet.
 
 ```bash
 cd NLLM2
-cargo test --offline -p bininspect          # 20 tests
-cargo test --offline                        # 117 total (20 + 87 lib + 5 e2e + 5 server)
+cargo test --offline -p bininspect          # 31 tests
+cargo test --offline                        # 128 total (31 + 87 lib + 5 e2e + 5 server)
 node tests/ui-smoke.js                      # 36 assertions against a live server
 ```
 

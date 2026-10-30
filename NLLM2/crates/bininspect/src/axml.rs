@@ -233,13 +233,35 @@ pub struct ManifestSummary {
     pub exported_count: usize,
 }
 
+/// Resolve a component name the way the platform does: `.Foo` is relative to the
+/// package, a bare `Foo` is also relative, and a dotted name is already absolute.
+pub fn qualify(name: &str, package: &str) -> String {
+    if name.is_empty() || package.is_empty() {
+        return name.to_string();
+    }
+    if let Some(rest) = name.strip_prefix('.') {
+        format!("{}.{}", package, rest)
+    } else if !name.contains('.') {
+        format!("{}.{}", package, name)
+    } else {
+        name.to_string()
+    }
+}
+
 /// Turn the element stream into the facts an analyst actually wants.
 pub fn summarize(elements: &[Element]) -> ManifestSummary {
     let mut s = ManifestSummary::default();
-    let mut current_component: Option<(String, bool, String)> = None; // kind, exported, name
+    // kind, explicit exported flag (None = not stated), name, has_intent_filter
+    let mut current_component: Option<(String, Option<bool>, String, bool)> = None;
 
-    let flush = |s: &mut ManifestSummary, cur: &mut Option<(String, bool, String)>| {
-        if let Some((kind, exported, name)) = cur.take() {
+    let flush = |s: &mut ManifestSummary, cur: &mut Option<(String, Option<bool>, String, bool)>| {
+        if let Some((kind, explicit, name, has_filter)) = cur.take() {
+            // Android's rule: android:exported wins when present; otherwise a component
+            // with an intent-filter is exported and one without is not. Providers default
+            // to exported on API < 17, but every current platform treats an unstated
+            // provider without a filter as non-exported, which is what we report.
+            let exported = explicit.unwrap_or(has_filter);
+            let name = qualify(&name, &s.package);
             if exported {
                 s.exported_count += 1;
             }
@@ -258,16 +280,19 @@ pub fn summarize(elements: &[Element]) -> ManifestSummary {
             "activity" | "activity-alias" | "service" | "receiver" | "provider" => {
                 flush(&mut s, &mut current_component);
                 let name = el.value("name").unwrap_or("").to_string();
-                // Android's default for exported changed with API 31; record only
-                // what the manifest states.
-                let exported = el.value("exported") == Some("true");
+                let explicit = el.value("exported").map(|v| v == "true");
                 let kind = if el.name == "activity-alias" { "activity".to_string() } else { el.name.clone() };
-                current_component = Some((kind, exported, name));
+                current_component = Some((kind, explicit, name, false));
+            }
+            "intent-filter" => {
+                if let Some((_, _, _, has_filter)) = current_component.as_mut() {
+                    *has_filter = true;
+                }
             }
             "action" => {
                 if el.value("name") == Some("android.intent.action.MAIN") {
-                    if let Some((_, _, name)) = &current_component {
-                        s.launcher_activity = Some(name.clone());
+                    if let Some((_, _, name, _)) = &current_component {
+                        s.launcher_activity = Some(qualify(name, &s.package));
                     }
                 }
             }
@@ -342,5 +367,42 @@ mod tests {
     fn rejects_non_binary_xml() {
         assert!(parse(b"<?xml version=\"1.0\"?><manifest/>").is_err());
         assert!(parse(b"\x00\x00").is_err());
+    }
+
+    #[test]
+    fn qualifies_relative_component_names() {
+        assert_eq!(qualify(".MainActivity", "com.ex"), "com.ex.MainActivity");
+        assert_eq!(qualify("MainActivity", "com.ex"), "com.ex.MainActivity");
+        assert_eq!(qualify("com.other.Thing", "com.ex"), "com.other.Thing");
+        assert_eq!(qualify("", "com.ex"), "");
+    }
+
+    #[test]
+    fn exported_defaults_to_whether_an_intent_filter_exists() {
+        let els = vec![
+            Element { name: "manifest".into(), attributes: vec![attr_for("package", "com.ex")] },
+            Element { name: "activity".into(), attributes: vec![attr_for("name", ".Filtered")] },
+            Element { name: "intent-filter".into(), attributes: vec![] },
+            Element { name: "action".into(), attributes: vec![attr_for("name", "android.intent.action.VIEW")] },
+            Element { name: "activity".into(), attributes: vec![attr_for("name", ".Internal")] },
+            Element { name: "activity".into(), attributes: vec![attr_for("name", ".Pinned"), attr_for("exported", "false")] },
+            Element { name: "intent-filter".into(), attributes: vec![] },
+        ];
+        let s = summarize(&els);
+        let get = |n: &str| s.activities.iter().find(|(x, _)| x == n).map(|(_, e)| *e);
+        assert_eq!(get("com.ex.Filtered"), Some(true), "intent-filter implies exported");
+        assert_eq!(get("com.ex.Internal"), Some(false), "no filter, no export");
+        assert_eq!(get("com.ex.Pinned"), Some(false), "explicit false wins over the filter");
+        assert_eq!(s.exported_count, 1);
+    }
+
+    fn attr_for(name: &str, value: &str) -> Attr {
+        Attr {
+            ns: None,
+            name: name.to_string(),
+            raw: Some(value.to_string()),
+            value: value.to_string(),
+            type_id: 0x03,
+        }
     }
 }

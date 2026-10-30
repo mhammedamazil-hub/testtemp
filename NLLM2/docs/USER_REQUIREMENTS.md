@@ -72,7 +72,7 @@ BLOCKED = impossible in this environment, reason recorded · NOT STARTED = pendi
 | E3 | Provider abstraction with BYOK | PARTIAL | seam + key storage + validation DONE; remote calls impossible (D5) |
 | E4 | Export / backup | DONE | notebook export/import JSON (`forge.notebook/1`), `POST /api/backup` |
 | E5 | Security: SSRF / traversal / injection | DONE | see `SECURITY.md`, tested |
-| E6 | Real tests | DONE | 117 Rust + 36 UI assertions |
+| E6 | Real tests | DONE | 128 Rust + 36 UI assertions |
 | E7 | Documentation set | DONE | this file + 7 others in `docs/` |
 | E8 | Multi-user accounts | NOT STARTED | single-operator design, bind to localhost |
 
