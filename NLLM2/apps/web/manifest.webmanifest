@@ -1,0 +1,13 @@
+{
+  "name": "Forge — research notebook",
+  "short_name": "Forge",
+  "description": "Source-grounded research notebook with verifiable citations.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e1116",
+  "theme_color": "#0e1116",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
