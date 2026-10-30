@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 77 tests: 72 lib + 5 e2e
+cargo test --offline                        # 92 tests: 87 lib + 5 e2e
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 29 assertions
 ```
 
-## Unit tests (72) — exact names from `cargo test --lib -- --list`
+## Unit tests (87) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -83,6 +83,20 @@ stream produced by another tool.
 `rejects_cleartext_endpoints_and_short_keys`, `extractive_engine_is_always_selected`,
 `configured_remote_provider_states_its_limitation`, `secrets_are_private_and_removable`.
 
+### `notebooklm` (16)
+`batchexecute_envelope_is_the_documented_shape`, `request_has_rpc_scoped_url_and_headers`,
+`url_source_puts_the_url_at_slot_two`, `text_source_carries_title_content_and_type_code`,
+`youtube_source_uses_slot_seven`, `audio_artifact_uses_type_1_and_length_code`,
+`quiz_and_flashcards_differ_only_by_variant_slot`, `every_artifact_kind_has_a_distinct_code`,
+`chat_request_targets_the_streamed_endpoint_with_at_token`,
+`parses_length_framed_wrb_fr_responses`, `streaming_chat_takes_the_final_cumulative_chunk`,
+`artifact_kickoff_is_decoded`, `transport_is_unavailable_and_says_why`,
+`corroboration_counts_match_the_measured_evidence`,
+`status_reports_protocol_implemented_but_unreachable`.
+These assert the **exact** wire shapes recovered by reverse engineering
+(`docs/NOTEBOOKLM_PROTOCOL.md`); they do not — and cannot — prove the service accepts
+them, because it is unreachable.
+
 ### `web` (3)
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
@@ -97,7 +111,7 @@ stream produced by another tool.
 | `imports_office_formats_over_http` | DOCX/PPTX/XLSX upload → correct `kind` and locator kind; a DOCX answer carries a `paragraph` citation |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
-## UI assertions (27, jsdom + live server)
+## UI assertions (29, jsdom + live server)
 
 Library rendering · engine badge from `/api/capabilities` · notebook creation via the
 form · three-pane workspace · paste-import · source list with passage counts ·

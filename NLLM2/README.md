@@ -47,6 +47,7 @@ Data lives in `./data/` (`db.json`, `backups/`, `secrets.json`). Use
 | URL / YouTube / Instagram / GitHub ingestion | **not available** — no HTTPS client, no outbound route; API returns 501 with a reason |
 | Audio/video overviews, ASR, OCR | **not available** — no speech/vision engine offline |
 | Multi-user accounts | **not implemented** — single trust boundary, bind to localhost |
+| NotebookLM/Gemini Notebook bridge | **protocol implemented, target unreachable** — see `docs/NOTEBOOKLM_PROTOCOL.md`; inspect requests at `/api/notebooklm/preview` |
 
 `GET /api/capabilities` is the authoritative, machine-generated version of this
 table. The UI reads it and labels unsupported features instead of hiding them.
@@ -54,7 +55,7 @@ table. The UI reads it and labels unsupported features instead of hiding them.
 ## Verify
 
 ```bash
-cargo test --offline                     # 77 Rust tests
+cargo test --offline                     # 92 Rust tests
 FORGE_URL=http://127.0.0.1:8080 node tests/ui-smoke.js   # 27 UI assertions against a live server
 ```
 

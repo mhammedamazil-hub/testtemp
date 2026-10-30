@@ -146,6 +146,8 @@ async function main() {
   const capsText = $(".library")?.textContent || "";
   check("capabilities lists supported pdf", /pdf/i.test(capsText));
   check("capabilities lists audio as unsupported", /audio/i.test(capsText) && /unsupported/i.test(capsText));
+  check("capabilities discloses the NotebookLM bridge state", /target unreachable/i.test(capsText));
+  check("bridge panel exposes inspectable RPCs", /RPC methods recovered/.test(capsText));
 
   // --- mobile layout: the CSS must define breakpoints
   const css = fs.readFileSync(path.join(WEB, "styles.css"), "utf8");

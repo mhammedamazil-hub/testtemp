@@ -8,7 +8,7 @@ is aspirational. Where a claim is untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **77 passing, 0 failing** | `cargo test --offline` |
+| Rust tests | **92 passing, 0 failing** (87 lib + 5 e2e) | `cargo test --offline` |
 | UI drive-through | **27 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
@@ -17,6 +17,8 @@ is aspirational. Where a claim is untested it says so.
 | Artifacts | flashcards, quiz, report, mindmap, study guide, FAQ, summary, narration script | `artifacts` tests + UI smoke |
 | Persistence | JSON store, atomic replace, backups, corruption safety | `store` tests |
 | Security | SSRF guard, traversal guard, filename sanitising, CSP, owner-only secrets | `security`, `web`, `providers` tests |
+| NotebookLM protocol | 14 RPCs, source specs, artifact configs, streamed-chat parsing — built from pinned public RE evidence | `notebooklm` (15 tests), `docs/NOTEBOOKLM_PROTOCOL.md` |
+| REA tool | installs and runs on Node 22.22.3 (engine floor is a warning) | `docs/REA_EVIDENCE_INDEX.md` |
 
 ## Test counts by module (measured with `cargo test --lib -- --list`)
 
@@ -53,6 +55,7 @@ total          77
 | Image OCR | `tesseract` absent | images inside DOCX are counted in warnings, not read |
 | Semantic/vector retrieval | no embedding model offline | lexical BM25 only; documented, not disguised |
 | Multi-user auth | out of scope for a single-operator notebook | bind to `127.0.0.1` or a private network |
+| Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps
 

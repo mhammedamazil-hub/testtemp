@@ -10,6 +10,7 @@ use crate::grounded;
 use crate::http::{percent_decode, Request, Response};
 use crate::ingest;
 use crate::json::{self, Value};
+use crate::notebooklm;
 use crate::providers::{self, ProviderConfig};
 use crate::obj;
 use crate::security;
@@ -82,6 +83,8 @@ impl Api {
             ("DELETE", ["api", "providers", pid]) => Ok(self.delete_provider(pid)),
             ("POST", ["api", "backup"]) => self.create_backup(),
             ("GET", ["api", "backups"]) => Ok(self.list_backups()),
+            ("GET", ["api", "notebooklm", "status"]) => Ok(ok(notebooklm::status())),
+            ("POST", ["api", "notebooklm", "preview"]) => self.notebooklm_preview(req),
             _ => Err(err(404, "not_found", &format!("no route for {} {}", req.method, req.path))),
         };
 
@@ -130,6 +133,12 @@ impl Api {
                 "image_ocr" => obj!{ "status" => "unsupported", "reason" => "no OCR engine available" },
             },
             "providers" => self.provider_status(),
+            "notebooklm_bridge" => obj! {
+                "status" => "protocol_implemented_target_unreachable",
+                "rpc_implemented" => 14u64,
+                "reason" => "wire protocol rebuilt from public reverse engineering and unit-tested; no route to notebooklm.google.com and no TLS client in this build",
+                "endpoint" => "/api/notebooklm/status",
+            },
             "answering" => obj! {
                 "engine" => "extractive",
                 "grounded" => true,
@@ -1019,6 +1028,128 @@ impl Api {
                 "conversations" => counts.3 as u64,
                 "artifacts" => counts.4 as u64,
             },
+        }))
+    }
+
+    /// Build the real NotebookLM wire request for an action and return it.
+    ///
+    /// This is deliberately a *preview*: it proves the protocol construction is
+    /// implemented and inspectable, and refuses to claim any request was sent.
+    fn notebooklm_preview(&self, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let action = body.str_of("action").unwrap_or("").to_string();
+        let notebook_id = body.str_of("notebook_id").unwrap_or("nb-example").to_string();
+        let creds = notebooklm::Credentials {
+            cookies: "<your Cookie header>".into(),
+            at: "<your at token>".into(),
+        };
+
+        let (rpc, params) = match action.as_str() {
+            "add_url" => {
+                let url = body.str_of("url").unwrap_or("https://example.com/article");
+                match security::check_url(url) {
+                    security::UrlVerdict::Rejected(why) => {
+                        return Err(err(422, "url_rejected", &format!("URL refused: {}", why)))
+                    }
+                    security::UrlVerdict::Allowed(clean) => (
+                        notebooklm::RPC_ADD_SOURCE,
+                        notebooklm::add_url_source(&notebook_id, &clean),
+                    ),
+                }
+            }
+            "add_text" => (
+                notebooklm::RPC_ADD_SOURCE,
+                notebooklm::add_text_source(
+                    &notebook_id,
+                    body.str_of("title").unwrap_or("Pasted note"),
+                    body.str_of("text").unwrap_or(""),
+                ),
+            ),
+            "add_youtube" => (
+                notebooklm::RPC_ADD_SOURCE,
+                notebooklm::add_youtube_source(
+                    &notebook_id,
+                    body.str_of("url").unwrap_or("https://youtu.be/example"),
+                ),
+            ),
+            "register_file" => (
+                notebooklm::RPC_ADD_SOURCE_FILE,
+                notebooklm::register_file_source(
+                    &notebook_id,
+                    body.str_of("filename").unwrap_or("document.pdf"),
+                ),
+            ),
+            "artifact" => {
+                let kind = match body.str_of("kind").unwrap_or("audio") {
+                    "audio" => notebooklm::ArtifactKind::Audio,
+                    "report" => notebooklm::ArtifactKind::Report,
+                    "video" => notebooklm::ArtifactKind::Video,
+                    "quiz" => notebooklm::ArtifactKind::QuizFlashcards,
+                    "mindmap" => notebooklm::ArtifactKind::MindMap,
+                    "slides" => notebooklm::ArtifactKind::SlideDeck,
+                    "infographic" => notebooklm::ArtifactKind::Infographic,
+                    "table" => notebooklm::ArtifactKind::DataTable,
+                    other => {
+                        return Err(err(422, "bad_kind", &format!("unknown artifact kind '{}'", other)))
+                    }
+                };
+                let ids: Vec<String> = parse_str_list(body.get("source_ids"));
+                let ids = if ids.is_empty() { vec!["<source-id>".to_string()] } else { ids };
+                let mut ar = notebooklm::ArtifactRequest::new(kind, &notebook_id, &ids);
+                ar.instructions = body.str_of("instructions").unwrap_or("");
+                if body.str_of("variant") == Some("quiz") {
+                    ar.study_variant = notebooklm::StudyVariant::Quiz;
+                }
+                (notebooklm::RPC_CREATE_ARTIFACT, ar.params())
+            }
+            "ask" => {
+                let wire = notebooklm::chat_request(
+                    &notebook_id,
+                    body.str_of("question").unwrap_or("What do the sources say?"),
+                    &creds,
+                );
+                return Ok(ok(obj! {
+                    "action" => "ask",
+                    "sent" => false,
+                    "rpc" => "GenerateFreeFormStreamed",
+                    "method" => wire.method,
+                    "url" => wire.url,
+                    "headers" => Value::Arr(wire.headers.iter().map(|(k, v)| obj! {
+                        "name" => k.as_str(),
+                        "value" => v.as_str(),
+                    }).collect()),
+                    "body" => wire.body,
+                    "why_not_sent" => notebooklm::UNAVAILABLE,
+                }));
+            }
+            other => {
+                return Err(err(
+                    422,
+                    "bad_action",
+                    &format!(
+                        "unknown action '{}'; use add_url, add_text, add_youtube, register_file, artifact or ask",
+                        other
+                    ),
+                ))
+            }
+        };
+
+        let wire = notebooklm::batchexecute_request(rpc, &params, &creds);
+        Ok(ok(obj! {
+            "action" => action.as_str(),
+            "sent" => false,
+            "rpc" => rpc.name,
+            "rpc_id" => rpc.id,
+            "corroboration" => rpc.corroboration as u64,
+            "method" => wire.method,
+            "url" => wire.url,
+            "headers" => Value::Arr(wire.headers.iter().map(|(k, v)| obj! {
+                "name" => k.as_str(),
+                "value" => v.as_str(),
+            }).collect()),
+            "body" => wire.body,
+            "params" => params,
+            "why_not_sent" => notebooklm::UNAVAILABLE,
         }))
     }
 

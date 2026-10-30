@@ -15,7 +15,7 @@ BLOCKED = impossible in this environment, reason recorded · NOT STARTED = pendi
 | A2 | Built entirely inside a folder named `NLLM2` | DONE | `/home/user/testtemp/NLLM2` |
 | A3 | Rust for core/backend; no Python/Node substitution | DONE | `crates/forge-core`, `crates/forge-server` |
 | A4 | Not an agent workbench, not CLI-only | DONE | browser workspace; prior Python `forge/` untouched |
-| A5 | Investigate → document → requirements before coding | DONE | `REA_EVIDENCE_INDEX.md`, `FEATURE_PARITY.md`, `DECISIONS.md` written before further feature work |
+| A5 | Investigate → document → requirements before coding | DONE | `REA_EVIDENCE_INDEX.md`, `NOTEBOOKLM_PROTOCOL.md`, `FEATURE_PARITY.md`, `DECISIONS.md` |
 | A6 | Keep going past MVP; extensible | DONE | artifacts, providers, exporters, capability matrix |
 | A7 | Preserve existing work (`forge/`, `arena-vm/`) | DONE | untouched; separate tree |
 
@@ -75,6 +75,16 @@ BLOCKED = impossible in this environment, reason recorded · NOT STARTED = pendi
 | E6 | Real tests | DONE | 76 Rust + 27 UI assertions |
 | E7 | Documentation set | DONE | this file + 7 others in `docs/` |
 | E8 | Multi-user accounts | NOT STARTED | single-operator design, bind to localhost |
+
+## F. Investigation of the reference product
+
+| # | Requirement | Status | Where / why |
+|---|---|---|---|
+| F1 | Use REA to investigate Gemini Notebook | PARTIAL | REA **installs and runs** here (engine floor is a warning). It cannot reach a target: no browser/CDP and no route to Google. Corrected record in `docs/REA_EVIDENCE_INDEX.md` |
+| F2 | Upgrade Node to satisfy REA | BLOCKED | `nodejs.org` and `nodejs.org/dist` return HTTP 000; npm carries no Node runtime. Not required anyway — REA runs on 22.22.3 |
+| F3 | Reverse-engineer Gemini Notebook | DONE (second-hand) | protocol recovered from pinned public RE captures, corroborated across 3 implementations, reimplemented in Rust with 15 tests (`docs/NOTEBOOKLM_PROTOCOL.md`) |
+| F4 | Observe the live product directly | BLOCKED | Google hosts HTTP 000; no browser; no authenticated session |
+| F5 | Live bridge to NotebookLM | NOT POSSIBLE HERE | `NoTransport` returns the reason; `/api/notebooklm/preview` shows the exact request instead |
 
 ## Standing constraints honoured
 

@@ -31,10 +31,25 @@ DL="$(mktemp -d)"
 trap 'rm -rf "$DL"' EXIT
 mkdir -p "$PREFIX/bin" "$PREFIX/lib"
 
-fetch () { # $1 = package spec, $2 = output file
-  local url="$BASE/$1/-/$1.tgz"
-  echo "fetching $1"
-  curl -fsSL --max-time 600 -o "$DL/$2" "$url"
+# Resolve the real tarball URL from registry metadata instead of guessing it.
+# (Learned the hard way: the npm tarball name repeats the version, and cargo's
+#  npm version does NOT match the rust version -- cargo 1.88.0 ships as 0.89.0.)
+fetch () { # $1 = package name (without @rustbin/), $2 = output file
+  local pkg="$1" out="$2" meta tarball
+  meta="$(curl -fsSL --max-time 120 "https://registry.npmjs.org/@rustbin%2f${pkg}")" || {
+    echo "ERROR: cannot resolve @rustbin/${pkg}" >&2; exit 1; }
+  tarball="$(printf '%s' "$meta" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+versions = d.get("versions") or {}
+if not versions:
+    sys.exit("no versions for " + d.get("name", "?"))
+best = sorted(versions)[-1]
+print(versions[best]["dist"]["tarball"])
+')" || exit 1
+  echo "fetching @rustbin/${pkg}"
+  echo "          ${tarball}"
+  curl -fsSL --max-time 900 -o "$DL/$out" "$tarball"
 }
 
 fetch "rustc-$VER-$TARGET" "rustc.tgz"
