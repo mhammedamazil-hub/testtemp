@@ -47,6 +47,9 @@ Data lives in `./data/` (`db.json`, `backups/`, `secrets.json`). Use
 | URL / YouTube / Instagram / GitHub ingestion | **not available** — no HTTPS client, no outbound route; API returns 501 with a reason |
 | Audio/video overviews, ASR, OCR | **not available** — no speech/vision engine offline |
 | Multi-user accounts | **not implemented** — single trust boundary, bind to localhost |
+| APK inspection | **working** — binary manifest (package, permissions, exported components), DEX class/method/string inventory, crypto/network/root/cleartext-URL findings, native libs, signing files |
+| EXE/DLL inspection | **working** — PE headers, sections + entropy, imports/exports, .NET metadata, version info, packer/W+X indicators |
+| Java decompilation, x86/ARM disassembly | **not available** — needs a JVM+apktool/jadx or Ghidra; see `docs/BINARY_ANALYSIS.md` |
 | NotebookLM/Gemini Notebook bridge | **protocol implemented, target unreachable** — see `docs/NOTEBOOKLM_PROTOCOL.md`; inspect requests at `/api/notebooklm/preview` |
 
 `GET /api/capabilities` is the authoritative, machine-generated version of this
@@ -55,8 +58,8 @@ table. The UI reads it and labels unsupported features instead of hiding them.
 ## Verify
 
 ```bash
-cargo test --offline                     # 92 Rust tests
-FORGE_URL=http://127.0.0.1:8080 node tests/ui-smoke.js   # 27 UI assertions against a live server
+cargo test --offline                     # 117 Rust tests
+FORGE_URL=http://127.0.0.1:8080 node tests/ui-smoke.js   # 36 UI assertions against a live server
 ```
 
 See `docs/TEST_MATRIX.md` for what each test proves and `docs/STATUS.md` for the

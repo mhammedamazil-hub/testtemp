@@ -11,7 +11,7 @@ BLOCKED = impossible in this environment, reason recorded · NOT STARTED = pendi
 
 | # | Requirement | Status | Where / why |
 |---|---|---|---|
-| A1 | Complete, functional application (not a mockup, CLI or scaffold) | DONE | server + SPA, 27 UI assertions, real API |
+| A1 | Complete, functional application (not a mockup, CLI or scaffold) | DONE | server + SPA, 36 UI assertions, real API |
 | A2 | Built entirely inside a folder named `NLLM2` | DONE | `/home/user/testtemp/NLLM2` |
 | A3 | Rust for core/backend; no Python/Node substitution | DONE | `crates/forge-core`, `crates/forge-server` |
 | A4 | Not an agent workbench, not CLI-only | DONE | browser workspace; prior Python `forge/` untouched |
@@ -72,7 +72,7 @@ BLOCKED = impossible in this environment, reason recorded · NOT STARTED = pendi
 | E3 | Provider abstraction with BYOK | PARTIAL | seam + key storage + validation DONE; remote calls impossible (D5) |
 | E4 | Export / backup | DONE | notebook export/import JSON (`forge.notebook/1`), `POST /api/backup` |
 | E5 | Security: SSRF / traversal / injection | DONE | see `SECURITY.md`, tested |
-| E6 | Real tests | DONE | 76 Rust + 27 UI assertions |
+| E6 | Real tests | DONE | 117 Rust + 36 UI assertions |
 | E7 | Documentation set | DONE | this file + 7 others in `docs/` |
 | E8 | Multi-user accounts | NOT STARTED | single-operator design, bind to localhost |
 

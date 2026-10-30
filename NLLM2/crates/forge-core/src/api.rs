@@ -139,6 +139,15 @@ impl Api {
                 "reason" => "wire protocol rebuilt from public reverse engineering and unit-tested; no route to notebooklm.google.com and no TLS client in this build",
                 "endpoint" => "/api/notebooklm/status",
             },
+            "binary_analysis" => obj! {
+                "apk_manifest" => obj!{ "status" => "supported", "note" => "binary AndroidManifest.xml decoded: package, sdk, permissions, exported components" },
+                "apk_dex_inventory" => obj!{ "status" => "supported", "note" => "classes/methods/strings + crypto, network, dynamic-code, root-check and cleartext-URL references" },
+                "apk_java_decompilation" => obj!{ "status" => "unsupported", "reason" => "no JVM, apktool, jadx or dex2jar in this image; DEX is analysed structurally, not translated to Java" },
+                "pe_headers" => obj!{ "status" => "supported", "note" => "machine, subsystem, sections, per-section entropy, imports, exports, overlay" },
+                "pe_dotnet" => obj!{ "status" => "supported", "note" => "CLR header, BSJB metadata version, #Strings and #US user strings" },
+                "disassembly" => obj!{ "status" => "unsupported", "reason" => "instruction-level disassembly needs Ghidra/IDA/objdump-class engine; not installed here" },
+                "endpoint" => "/api/binary/inspect",
+            },
             "answering" => obj! {
                 "engine" => "extractive",
                 "grounded" => true,

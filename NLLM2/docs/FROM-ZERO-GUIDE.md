@@ -14,15 +14,17 @@ This document assumes:
 
 ## 0. What you are building
 
-A Rust workspace of two crates plus a static web app:
+A Rust workspace of three crates plus a static web app:
 
 ```
 forge/
 ├── Cargo.toml
 ├── crates/forge-core/{Cargo.toml, src/*.rs, src/ingest/*.rs, tests/e2e.rs}
-├── crates/forge-server/{Cargo.toml, src/main.rs}
+├── crates/forge-server/{Cargo.toml, src/main.rs, src/binary.rs}
+├── crates/bininspect/{Cargo.toml, src/*.rs}   # APK / PE / ELF analysis
 ├── apps/web/{index.html, app.js, styles.css, sw.js, manifest.webmanifest, icon.svg}
-├── tests/fixtures/{make_pdfs.py, make_ooxml.py, *.pdf, *.docx, *.pptx, *.xlsx}
+├── tests/fixtures/{make_pdfs.py, make_ooxml.py, make_apk.py, make_pe.py, *.pdf, *.docx, *.pptx, *.xlsx}
+│   └── apk/{AndroidManifest.xml, classes.dex, sample.apk}   # generated, not in the bundle
 ├── tests/ui-smoke.js
 ├── scripts/{install-rust.sh, dev.sh, from_zero_bundle.sh}
 └── docs/*.md
@@ -64,12 +66,12 @@ it. The map from section to file is exact; nothing is elided and no file is
 described instead of shown.
 
 ```bash
-mkdir -p crates/forge-core/src/ingest crates/forge-server/src apps/web \
-         tests/fixtures scripts docs
+mkdir -p crates/forge-core/src/ingest crates/forge-server/src crates/bininspect/src \
+         apps/web tests/fixtures/apk scripts docs
 ```
 
 Verify the copy: `wc -l` on each file should match the bundle, and
-`cargo metadata --offline` should print two packages without touching the network.
+`cargo metadata --offline` should print three packages without touching the network.
 
 ## 3. Regenerate the binary fixtures
 
@@ -78,7 +80,15 @@ PDFs and Office files are generated, not committed as blobs you must trust:
 ```bash
 python3 tests/fixtures/make_pdfs.py     # simple.pdf, flate.pdf
 python3 tests/fixtures/make_ooxml.py    # sample.docx, sample.pptx, sample.xlsx
+python3 tests/fixtures/make_apk.py      # apk/{AndroidManifest.xml, classes.dex, sample.apk}
+python3 tests/fixtures/make_pe.py       # sample.exe
 ```
+
+The APK and PE fixtures are **not** in the bundle (they are binary). `make_apk.py`
+hand-builds a binary `AndroidManifest.xml` (string pool + RES_XML chunks) and a DEX
+035 file (string/type/method ids, three `class_def`s); `make_pe.py` writes a PE32+
+with a real import directory and a deliberate W+X high-entropy section. Both are
+deterministic, so a rebuilt checkout tests identically.
 
 `make_pdfs.py` writes PDF 1.4 by hand (one file uncompressed, one with zlib
 `/FlateDecode` streams). `make_ooxml.py` writes ZIP containers with OOXML XML
@@ -92,7 +102,7 @@ every other test still runs.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH
 cargo build --offline        # must finish with zero deps downloaded
-cargo test  --offline        # expect: 87 lib + 5 e2e = 92 passing
+cargo test  --offline        # expect: 20 bininspect + 87 lib + 5 e2e + 5 server = 117 passing
 ```
 
 Nothing is fetched from crates.io at any point: the crates have no dependencies.
@@ -128,7 +138,7 @@ port 8099 and clicks through library → notebook → source → citation → st
 
 | Check | Expected |
 |---|---|
-| `cargo test --offline` | 92 passing, 0 failing |
+| `cargo test --offline` | 117 passing, 0 failing |
 | `curl -s localhost:8080/api/capabilities` | `pdf/docx/pptx/xlsx: supported`, `url: blocked`, `audio_overview: unsupported` |
 | Upload `tests/fixtures/flate.pdf` | `chunk_count ≥ 2`, `page_count 2`, locators with `page` |
 | Ask "what evidence span is retrieved?" | answer quoted from page 2, citation `locator_label: "page 2"` |

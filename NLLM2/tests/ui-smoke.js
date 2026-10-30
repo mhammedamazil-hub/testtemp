@@ -149,6 +149,38 @@ async function main() {
   check("capabilities discloses the NotebookLM bridge state", /target unreachable/i.test(capsText));
   check("bridge panel exposes inspectable RPCs", /RPC methods recovered/.test(capsText));
 
+  // --- binary inspection panel (real report rendered through the real renderer)
+  check("capabilities states the binary-analysis scope",
+    /binary_analysis/.test(capsText) && /apk java decompilation/i.test(capsText) && /disassembly/i.test(capsText));
+  const fileInput = window.document.querySelector('input[type="file"]');
+  check("binary panel exposes a file picker", !!fileInput && /\.apk/.test(fileInput.getAttribute("accept") || ""));
+
+  const apkPath = path.join(WEB, "../../tests/fixtures/apk/sample.apk");
+  const apkRes = await fetch(`${BASE}/api/binary/inspect?name=sample.apk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: fs.readFileSync(apkPath),
+  });
+  const apkReport = (await apkRes.json()).report;
+  const rendered = window.renderBinaryReport(apkReport);
+  const host = window.document.createElement("div");
+  host.appendChild(rendered);
+  const apkText = host.textContent;
+  check("binary report renders the package identity", /com\.example\.forgetest/.test(apkText));
+  check("binary report renders DEX code findings", /crypto/i.test(apkText) && /cleartext/i.test(apkText));
+  check("binary report renders risk indicators", /debuggable/i.test(apkText));
+
+  const exeRes = await fetch(`${BASE}/api/binary/inspect?name=sample.exe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: fs.readFileSync(path.join(WEB, "../../tests/fixtures/sample.exe")),
+  });
+  const exeHost = window.document.createElement("div");
+  exeHost.appendChild(window.renderBinaryReport((await exeRes.json()).report));
+  const exeText = exeHost.textContent;
+  check("binary report renders PE imports", /KERNEL32\.dll/.test(exeText));
+  check("binary report renders packer signals", /W\+X|high-entropy/i.test(exeText));
+
   // --- mobile layout: the CSS must define breakpoints
   const css = fs.readFileSync(path.join(WEB, "styles.css"), "utf8");
   check("responsive breakpoints present", /@media \(max-width: 620px\)/.test(css) && /@media \(max-width: 980px\)/.test(css));

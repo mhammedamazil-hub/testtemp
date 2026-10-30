@@ -1,0 +1,12 @@
+[package]
+name = "bininspect"
+version = "0.1.0"
+edition = "2021"
+description = "Offline structural analysis for APK / PE / ELF files (no dependencies beyond forge-core)"
+
+[[bin]]
+name = "bininspect"
+path = "src/main.rs"
+
+[dependencies]
+forge-core = { path = "../forge-core" }

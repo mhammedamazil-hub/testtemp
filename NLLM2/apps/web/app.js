@@ -199,6 +199,7 @@ async function renderCapabilities(app) {
     groups,
     await providerPanel(),
     await notebookLmPanel(),
+    await binaryPanel(),
     h("button", { class: "ghost", style: "margin-top:24px", onclick: () => (location.hash = "#/") }, "← Back to notebooks")));
 }
 
@@ -945,3 +946,144 @@ async function boot() {
 }
 
 boot();
+
+// ------------------------------------------------------- binary inspection
+// Renders a structural report for an uploaded APK / EXE / DLL / ELF.
+// Structural only: it never claims decompiled source (see docs/BINARY_ANALYSIS.md).
+async function binaryPanel() {
+  const wrap = h("section", { style: "margin-top:26px" });
+  wrap.append(h("h2", { style: "font-size:15px;margin:0 0 8px" }, "Binary inspection (APK / EXE)"));
+  wrap.append(h("p", { class: "hint" },
+    "Drop an APK, EXE, DLL or ELF. Forge decodes the container, the binary manifest, the DEX reference graph and the PE import/export tables — with no JVM, no Ghidra and no network. " +
+    "It reports structure and risk indicators; it does not produce decompiled source or instruction-level disassembly."));
+
+  const file = h("input", { type: "file", accept: ".apk,.exe,.dll,.so,.bin,.zip", "aria-label": "Binary file" });
+  const out = h("div", { class: "stack", style: "margin-top:10px" });
+  const btn = h("button", { class: "primary", onclick: async () => {
+    const f = file.files && file.files[0];
+    if (!f) { toast("Choose a file first", "err"); return; }
+    btn.disabled = true;
+    out.replaceChildren(h("p", { class: "empty" }, `analysing ${f.name} (${f.size} bytes)…`));
+    try {
+      const res = await api.call(`/binary/inspect?name=${encodeURIComponent(f.name)}`, { method: "POST", body: f, raw: true });
+      out.replaceChildren(renderBinaryReport(res.report));
+    } catch (e) {
+      out.replaceChildren(h("p", { class: "empty" }, e.message));
+    } finally { btn.disabled = false; }
+  } }, "Analyse");
+
+  wrap.append(h("div", { class: "stack", style: "margin:10px 0" }, file, btn), out);
+  return wrap;
+}
+
+function kvTable(rows) {
+  return h("table", { style: "width:100%;border-collapse:collapse" },
+    h("tbody", {}, rows.filter(Boolean).map(([k, v]) =>
+      h("tr", {}, h("td", { class: "hint", style: "width:38%;padding:2px 0" }, k), h("td", {}, String(v))))));
+}
+
+function renderBinaryReport(r) {
+  if (!r) return h("p", { class: "empty" }, "empty report");
+  const frag = document.createDocumentFragment();
+  frag.append(h("div", { class: "note-item" },
+    h("div", { class: "row-between" },
+      h("strong", {}, r.file || "(artifact)"),
+      h("span", { class: "badge " + (r.format === "unknown" ? "warn" : "ok") }, r.format || "unknown")),
+    kvTable([
+      ["size", `${r.bytes} bytes`],
+      ["sha256", r.sha256],
+      ["sha1", r.sha1],
+      ["entropy", typeof r.entropy === "number" ? `${r.entropy.toFixed(2)} bits/byte` : ""],
+    ])));
+
+  if (r.error) frag.append(h("div", { class: "note-item" }, h("strong", {}, "not analysed"), h("div", { class: "hint" }, r.error)));
+
+  if (r.apk) {
+    const a = r.apk;
+    const comps = ["activities", "services", "receivers", "providers"]
+      .flatMap((g) => (a[g] || []).map((c) => ({ ...c, kind: g.slice(0, -1) })))
+      .filter((c) => c.exported);
+    frag.append(h("div", { class: "note-item" },
+      h("div", { class: "row-between" },
+        h("strong", {}, a.package || "(no package)"),
+        h("span", { class: "badge " + (a.debuggable ? "warn" : "ok") }, a.debuggable ? "debuggable" : "release")),
+      kvTable([
+        ["version", `${a.version_name || "?"} (code ${a.version_code || "?"})`],
+        ["sdk", `min ${a.min_sdk || "?"} / target ${a.target_sdk || "?"}`],
+        ["backup / cleartext", `${a.allow_backup ? "backup allowed" : "backup blocked"} · ${a.cleartext_traffic ? "cleartext allowed" : "cleartext blocked"}`],
+        ["code", `${(a.dex_files || []).join(", ")} — ${a.classes} classes, ${a.methods} methods, ${a.strings} strings`],
+        ["container", `${a.entries} entries, ${a.uncompressed_bytes} bytes uncompressed`],
+        ["native", (a.native_libs || []).length ? `${(a.native_libs || []).length} libs (${(a.abis || []).join(", ")})` : "pure Java/Kotlin"],
+        ["signature", (a.signatures || []).length ? (a.signatures || []).map((s) => s.file).join(", ") : "no v1 signature block"],
+      ]),
+      (a.permissions || []).length
+        ? h("div", { class: "hint", style: "margin-top:6px" }, `permissions: ${a.permissions.join(", ")}`)
+        : null,
+      comps.length
+        ? h("div", { class: "hint", style: "margin-top:6px" }, `exported: ${comps.map((c) => `${c.name} (${c.kind})`).join(", ")}`)
+        : null));
+
+    if ((a.code_findings || []).length) {
+      frag.append(h("div", { class: "note-item" },
+        h("strong", {}, "Code findings (DEX reference graph)"),
+        ...a.code_findings.slice(0, 20).map((f) =>
+          h("div", { class: "hint" }, `[${f.category}] ${f.detail}`))));
+    }
+    if ((a.embedded_urls || []).length) {
+      frag.append(h("div", { class: "note-item" },
+        h("strong", {}, "Hardcoded cleartext URLs"),
+        ...a.embedded_urls.slice(0, 20).map((u) => h("div", { class: "hint" }, u))));
+    }
+    if ((a.class_names || []).length) {
+      frag.append(h("div", { class: "note-item" },
+        h("strong", {}, `Application classes (${a.class_names.length})`),
+        h("div", { class: "hint" }, a.class_names.slice(0, 40).join(", "))));
+    }
+  }
+
+  if (r.pe) {
+    const p = r.pe;
+    frag.append(h("div", { class: "note-item" },
+      h("div", { class: "row-between" },
+        h("strong", {}, `${p.bits}-bit ${p.machine}`),
+        h("span", { class: "badge " + (p.dotnet ? "warn" : "ok") }, p.dotnet ? `managed ${p.dotnet_version}` : "native")),
+      kvTable([
+        ["subsystem", p.subsystem],
+        ["entry point", `${p.entry_point_rva} (image base ${p.image_base})`],
+        ["sections", (p.sections || []).map((s) => `${s.name} ${s.entropy.toFixed(2)}`).join(" · ")],
+        ["imports", (p.imports || []).map((i) => `${i.dll} (${i.functions.length})`).join(", ") || "none"],
+        ["exports", (p.exports || []).join(", ") || "none"],
+        ["overlay", `${p.overlay_bytes} bytes`],
+      ])));
+    if ((p.version_info || []).length) {
+      frag.append(h("div", { class: "note-item" },
+        h("strong", {}, "Version info"),
+        kvTable(p.version_info.map((v) => [v.key, v.value]))));
+    }
+    if ((p.indicators || []).length) {
+      frag.append(h("div", { class: "note-item" },
+        h("strong", {}, "Anomalies / packer signals"),
+        ...p.indicators.map((i) => h("div", { class: "hint" }, `! ${i}`))));
+    }
+    const strings = [...(p.wide_strings || []), ...(p.ascii_strings || [])].slice(0, 20);
+    if (strings.length) {
+      frag.append(h("div", { class: "note-item" },
+        h("strong", {}, "Strings"),
+        ...strings.map((s) => h("div", { class: "hint" }, s.length > 160 ? s.slice(0, 160) + "…" : s))));
+    }
+  }
+
+  if (r.elf) {
+    const e = r.elf;
+    frag.append(h("div", { class: "note-item" },
+      h("strong", {}, `ELF ${e.type}`),
+      kvTable([
+        ["machine", `${e.bits}-bit ${e.machine}`],
+        ["entry", e.entry],
+        ["symbols", e.stripped ? "stripped" : "symbol table present"],
+        ["sections", (e.sections || []).join(", ")],
+      ])));
+  }
+
+  return frag;
+}

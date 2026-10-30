@@ -1,6 +1,6 @@
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-30. Everything below was executed in this workspace; nothing
+Last updated: 2026-10-30 (binary analysis added). Everything below was executed in this workspace; nothing
 is aspirational. Where a claim is untested it says so.
 
 ## Verified now
@@ -8,8 +8,8 @@ is aspirational. Where a claim is untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **92 passing, 0 failing** (87 lib + 5 e2e) | `cargo test --offline` |
-| UI drive-through | **27 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **117 passing, 0 failing** (20 `bininspect` + 87 lib + 5 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **36 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide/row locators | `ingest::ooxml` + e2e |
@@ -17,6 +17,8 @@ is aspirational. Where a claim is untested it says so.
 | Artifacts | flashcards, quiz, report, mindmap, study guide, FAQ, summary, narration script | `artifacts` tests + UI smoke |
 | Persistence | JSON store, atomic replace, backups, corruption safety | `store` tests |
 | Security | SSRF guard, traversal guard, filename sanitising, CSP, owner-only secrets | `security`, `web`, `providers` tests |
+| APK analysis | binary manifest decoded (package, permissions, exported components), DEX inventory + code findings, native libs, signing | `bininspect` 20 tests, `docs/BINARY_ANALYSIS.md` |
+| EXE analysis | PE headers/sections + per-section entropy, imports/exports, .NET metadata, version info, packer indicators | `bininspect` 20 tests, `POST /api/binary/inspect` |
 | NotebookLM protocol | 14 RPCs, source specs, artifact configs, streamed-chat parsing — built from pinned public RE evidence | `notebooklm` (15 tests), `docs/NOTEBOOKLM_PROTOCOL.md` |
 | REA tool | installs and runs on Node 22.22.3 (engine floor is a warning) | `docs/REA_EVIDENCE_INDEX.md` |
 

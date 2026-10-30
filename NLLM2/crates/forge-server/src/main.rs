@@ -1,5 +1,7 @@
 //! Forge server: wires the API to a TCP listener and serves the web app.
 
+mod binary;
+
 use forge_core::api::Api;
 use forge_core::http::{serve, Response};
 use forge_core::web::serve_static;
@@ -42,6 +44,9 @@ fn main() {
     let web_for_handler = web.clone();
 
     let handler = move |req: &forge_core::http::Request| -> Response {
+        if req.path == "/api/binary/inspect" {
+            return binary::handle(req);
+        }
         if req.path.starts_with("/api") {
             return api.handle(req);
         }

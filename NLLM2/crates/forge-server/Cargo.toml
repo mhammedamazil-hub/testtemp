@@ -6,4 +6,5 @@ license.workspace = true
 description = "Forge HTTP server and static web host"
 
 [dependencies]
+bininspect = { path = "../bininspect" }
 forge-core = { path = "../forge-core" }

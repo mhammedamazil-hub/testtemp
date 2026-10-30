@@ -131,8 +131,19 @@ supported and audio as unsupported · responsive breakpoints present ·
 | `tests/fixtures/sample.docx` | `make_ooxml.py` | 4 paragraphs incl. a multi-run paragraph |
 | `tests/fixtures/sample.pptx` | `make_ooxml.py` | 3 slides (1, 2, 10 to prove numeric ordering) |
 | `tests/fixtures/sample.xlsx` | `make_ooxml.py` | header + 2 data rows via shared strings |
+| `tests/fixtures/apk/AndroidManifest.xml` | `make_apk.py` | compiled AXML: package, sdk, 2 permissions, exported activity, service, debuggable |
+| `tests/fixtures/apk/classes.dex` | `make_apk.py` | DEX 035: 18 strings, 3 class defs, 8 methods, crypto/network/root/URL references |
+| `tests/fixtures/apk/sample.apk` | `make_apk.py` | ZIP of the two above + META-INF, assets, fake arm64 lib |
+| `tests/fixtures/sample.exe` | `make_pe.py` | PE32+ x86-64, real import table (KERNEL32), W+X high-entropy `.evil` section |
 
-Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/make_ooxml.py`.
+Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/make_ooxml.py && python3 tests/fixtures/make_apk.py && python3 tests/fixtures/make_pe.py`.
+
+## Binary analysis (20 unit tests + 5 HTTP tests + 6 UI assertions)
+
+Hash vectors (SHA-256/SHA-1 published values), entropy separation, AXML parsing of a real
+compiled manifest, DEX inventory + finding categories, PE sections/imports/entropy/anomalies,
+ELF identification, APK report assembly, format detection, base64 round-trip, and the HTTP
+endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
 
 ## Not covered (honest gaps)
 

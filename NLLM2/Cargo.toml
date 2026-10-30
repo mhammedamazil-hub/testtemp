@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/forge-core", "crates/forge-server"]
+members = [
+    "crates/bininspect","crates/forge-core", "crates/forge-server"]
 
 [workspace.package]
 version = "0.1.0"
