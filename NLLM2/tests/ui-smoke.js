@@ -5,7 +5,7 @@ const path = require("path");
 const { JSDOM, VirtualConsole } = require("jsdom");
 
 const WEB = "/home/user/testtemp/NLLM2/apps/web";
-const BASE = "http://127.0.0.1:8099";
+const BASE = process.env.FORGE_URL || "http://127.0.0.1:8099";
 
 function check(name, cond, detail = "") {
   const ok = !!cond;

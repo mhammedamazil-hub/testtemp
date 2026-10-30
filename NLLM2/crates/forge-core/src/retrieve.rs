@@ -143,40 +143,59 @@ pub fn search(chunks: &[Chunk], query: &str, limit: usize) -> Vec<Hit> {
 }
 
 /// Best-matching sentences from a passage, used to build precise quotes.
-pub fn best_sentences(text: &str, query: &str, max: usize) -> Vec<String> {
-    let q: HashSet<String> = terms(query).into_iter().collect();
+/// Split text into candidate sentences, scoring each by stem-aware overlap with
+/// the query. Returns `(overlap_ratio, sentence)` sorted best-first; sentences are
+/// never invented, only sliced out of `text`.
+pub fn scored_sentences(text: &str, query: &str, max: usize) -> Vec<(f64, String)> {
+    let q: HashSet<String> = terms(query).into_iter().map(|t| stem(&t)).collect();
     let mut sentences: Vec<String> = Vec::new();
     let mut cur = String::new();
+    let mut push = |raw: &str, out: &mut Vec<String>| {
+        let t = raw.trim();
+        // Single-word "sentences" (headings, page titles) are not evidence.
+        if t.len() > 20 && t.split_whitespace().count() > 3 {
+            out.push(t.to_string());
+        }
+    };
     for ch in text.chars() {
-        cur.push(ch);
-        if matches!(ch, '.' | '!' | '?' | ';') {
-            let t = cur.trim().to_string();
-            if t.len() > 20 {
-                sentences.push(t);
-            }
+        if matches!(ch, '.' | '!' | '?' | ';' | '\n') {
+            push(&cur, &mut sentences);
             cur.clear();
+        } else {
+            cur.push(ch);
         }
     }
-    if cur.trim().len() > 20 {
-        sentences.push(cur.trim().to_string());
-    }
+    push(&cur, &mut sentences);
     if sentences.is_empty() {
         let t = text.trim();
         if !t.is_empty() {
-            sentences.push(t.chars().take(400).collect());
+            return vec![(0.0, t.chars().take(400).collect())];
         }
-        return sentences;
+        return Vec::new();
     }
     let mut scored: Vec<(f64, String)> = sentences
         .into_iter()
         .map(|s| {
-            let st: HashSet<String> = terms(&s).into_iter().collect();
-            let overlap = q.intersection(&st).count() as f64 / (q.len().max(1) as f64);
+            let st: HashSet<String> = terms(&s).into_iter().map(|t| stem(&t)).collect();
+            let overlap = if q.is_empty() {
+                0.0
+            } else {
+                q.intersection(&st).count() as f64 / q.len() as f64
+            };
             (overlap, s)
         })
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored.into_iter().take(max).map(|(_, s)| s).collect()
+    scored.truncate(max);
+    scored
+}
+
+/// Best-scoring sentences, ignoring the score.
+pub fn best_sentences(text: &str, query: &str, max: usize) -> Vec<String> {
+    scored_sentences(text, query, max)
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect()
 }
 
 #[cfg(test)]

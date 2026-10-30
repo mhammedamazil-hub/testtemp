@@ -8,7 +8,7 @@ is aspirational. Where a claim is untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **76 passing, 0 failing** | `cargo test --offline` |
+| Rust tests | **77 passing, 0 failing** | `cargo test --offline` |
 | UI drive-through | **27 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
@@ -27,7 +27,7 @@ retrieve        6
 json            6
 ingest::text    6
 http            6
-grounded        6
+grounded        8
 domain          5
 store           4
 providers       4
@@ -37,10 +37,10 @@ ingest          3   (PDF + dispatch)
 ingest::zip     2
 inflate         2
 --------------------
-lib total      71
+lib total      72
 e2e (HTTP)      5
 ====================
-total          76
+total          77
 ```
 
 ## Not available, with reasons

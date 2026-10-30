@@ -110,8 +110,8 @@ table. The UI reads it and labels unsupported features instead of hiding them.
 ## Verify
 
 ```bash
-cargo test --offline                     # 76 Rust tests
-node tests/ui-smoke.js                   # 27 UI assertions against a live server
+cargo test --offline                     # 77 Rust tests
+FORGE_URL=http://127.0.0.1:8080 node tests/ui-smoke.js   # 27 UI assertions against a live server
 ```
 
 See `docs/TEST_MATRIX.md` for what each test proves and `docs/STATUS.md` for the
@@ -3713,6 +3713,10 @@ pub struct Answer {
 /// Minimum BM25 score for a passage to count as evidence at all.
 pub const EVIDENCE_FLOOR: f64 = 0.35;
 
+/// Minimum share of the question's content words that the chosen sentence must
+/// contain. Queries with only one or two content words require half of them.
+pub const SENTENCE_OVERLAP_FLOOR: f64 = 0.30;
+
 pub fn answer(question: &str, chunks: &[Chunk], sources: &[Source], max_citations: usize) -> Answer {
     let hits = retrieve::search(chunks, question, 12);
     let strong: Vec<_> = hits.into_iter().filter(|h| h.score >= EVIDENCE_FLOOR).collect();
@@ -3727,33 +3731,60 @@ pub fn answer(question: &str, chunks: &[Chunk], sources: &[Source], max_citation
         };
     }
 
+    // Collect the best sentence per chunk, then keep only sentences that actually
+    // share enough of the question's content words. A chunk can score on a single
+    // word while its best sentence is unrelated; citing that would be noise.
+    let query_terms = retrieve::terms(question).len();
+    let min_overlap = if query_terms >= 3 { SENTENCE_OVERLAP_FLOOR } else { 0.5 };
+    let mut candidates: Vec<(f64, f64, usize, String)> = Vec::new();
+    for hit in strong.iter() {
+        let chunk = &chunks[hit.chunk_index];
+        if let Some((overlap, sentence)) = retrieve::scored_sentences(&chunk.text, question, 3)
+            .into_iter()
+            .find(|(o, _)| *o >= min_overlap)
+        {
+            // Guard: a quote must be literally present in its chunk.
+            if !chunk.text.contains(sentence.trim()) {
+                continue;
+            }
+            candidates.push((overlap, hit.score, hit.chunk_index, sentence));
+        }
+    }
+    candidates.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
     let mut citations: Vec<Citation> = Vec::new();
     let mut sentences: Vec<String> = Vec::new();
-    for (i, hit) in strong.iter().take(max_citations).enumerate() {
-        let chunk = &chunks[hit.chunk_index];
-        let quote = retrieve::best_sentences(&chunk.text, question, 1)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| chunk.text.chars().take(300).collect());
+    let mut seen_quotes: Vec<String> = Vec::new();
+    for (overlap, score, chunk_index, quote) in candidates {
+        if citations.len() >= max_citations {
+            break;
+        }
+        let chunk = &chunks[chunk_index];
+        let trimmed = quote.trim().to_string();
+        if seen_quotes.iter().any(|q| q == &trimmed) {
+            continue;
+        }
+        seen_quotes.push(trimmed.clone());
         let source_title = sources
             .iter()
             .find(|s| s.id == chunk.source_id)
             .map(|s| s.title.clone())
             .unwrap_or_else(|| "unknown source".into());
-        // Guard: never emit a quote that is not literally present in the chunk.
-        if !chunk.text.contains(quote.trim()) {
-            continue;
-        }
+        let marker = format!("[{}]", citations.len() + 1);
         let citation = Citation {
-            citation_id: format!("c{}", i + 1),
+            citation_id: format!("c{}", citations.len() + 1),
             source_id: chunk.source_id.clone(),
             chunk_id: chunk.id.clone(),
-            quote: quote.trim().to_string(),
+            quote: trimmed.clone(),
             locator: chunk.locator.clone(),
-            score: hit.score,
+            score,
             source_title,
         };
-        let marker = format!("[{}]", i + 1);
+        let _ = overlap;
         sentences.push(format!("{}{}", citation.quote, marker));
         citations.push(citation);
     }
@@ -3951,6 +3982,41 @@ mod tests {
         assert!(a.text.contains("2 sources"));
         let pages: Vec<u32> = a.citations.iter().filter_map(|c| c.locator.page).collect();
         assert!(pages.contains(&2) && pages.contains(&7));
+    }
+
+    #[test]
+    fn boilerplate_in_a_scoring_chunk_is_not_cited() {
+        // The chunk matches on its first line, but the sentence chosen must still
+        // relate to the question; unrelated lines in the same chunk must not appear.
+        let chunks = vec![chunk(
+            "k1",
+            "s1",
+            "Evidence floor tuning matters.\nDocument title page.\nUnrelated legal boilerplate follows here for filler.",
+            1,
+        )];
+        let sources = vec![src("s1", "Doc")];
+        let a = answer("how is the evidence floor tuned", &chunks, &sources, 3);
+        assert!(!a.abstained);
+        assert_eq!(a.citations.len(), 1);
+        assert!(a.citations[0].quote.to_lowercase().contains("evidence floor"));
+        assert!(!a.text.to_lowercase().contains("legal boilerplate"));
+    }
+
+    #[test]
+    fn citation_numbers_are_contiguous() {
+        let chunks = vec![
+            chunk("k1", "s1", "Cite validation rejects fabricated quotes immediately.", 1),
+            chunk("k2", "s2", "Fabricated quotes fail validation every single time.", 2),
+        ];
+        let sources = vec![src("s1", "A"), src("s2", "B")];
+        let a = answer("fabricated quotes validation", &chunks, &sources, 4);
+        let nums: Vec<usize> = a
+            .citations
+            .iter()
+            .map(|c| c.citation_id.trim_start_matches('c').parse().unwrap())
+            .collect();
+        assert_eq!(nums, (1..=nums.len()).collect::<Vec<_>>());
+        assert!(a.text.contains("[2]") || nums.len() == 1);
     }
 
     #[test]
@@ -7262,40 +7328,59 @@ pub fn search(chunks: &[Chunk], query: &str, limit: usize) -> Vec<Hit> {
 }
 
 /// Best-matching sentences from a passage, used to build precise quotes.
-pub fn best_sentences(text: &str, query: &str, max: usize) -> Vec<String> {
-    let q: HashSet<String> = terms(query).into_iter().collect();
+/// Split text into candidate sentences, scoring each by stem-aware overlap with
+/// the query. Returns `(overlap_ratio, sentence)` sorted best-first; sentences are
+/// never invented, only sliced out of `text`.
+pub fn scored_sentences(text: &str, query: &str, max: usize) -> Vec<(f64, String)> {
+    let q: HashSet<String> = terms(query).into_iter().map(|t| stem(&t)).collect();
     let mut sentences: Vec<String> = Vec::new();
     let mut cur = String::new();
+    let mut push = |raw: &str, out: &mut Vec<String>| {
+        let t = raw.trim();
+        // Single-word "sentences" (headings, page titles) are not evidence.
+        if t.len() > 20 && t.split_whitespace().count() > 3 {
+            out.push(t.to_string());
+        }
+    };
     for ch in text.chars() {
-        cur.push(ch);
-        if matches!(ch, '.' | '!' | '?' | ';') {
-            let t = cur.trim().to_string();
-            if t.len() > 20 {
-                sentences.push(t);
-            }
+        if matches!(ch, '.' | '!' | '?' | ';' | '\n') {
+            push(&cur, &mut sentences);
             cur.clear();
+        } else {
+            cur.push(ch);
         }
     }
-    if cur.trim().len() > 20 {
-        sentences.push(cur.trim().to_string());
-    }
+    push(&cur, &mut sentences);
     if sentences.is_empty() {
         let t = text.trim();
         if !t.is_empty() {
-            sentences.push(t.chars().take(400).collect());
+            return vec![(0.0, t.chars().take(400).collect())];
         }
-        return sentences;
+        return Vec::new();
     }
     let mut scored: Vec<(f64, String)> = sentences
         .into_iter()
         .map(|s| {
-            let st: HashSet<String> = terms(&s).into_iter().collect();
-            let overlap = q.intersection(&st).count() as f64 / (q.len().max(1) as f64);
+            let st: HashSet<String> = terms(&s).into_iter().map(|t| stem(&t)).collect();
+            let overlap = if q.is_empty() {
+                0.0
+            } else {
+                q.intersection(&st).count() as f64 / q.len() as f64
+            };
             (overlap, s)
         })
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored.into_iter().take(max).map(|(_, s)| s).collect()
+    scored.truncate(max);
+    scored
+}
+
+/// Best-scoring sentences, ignoring the score.
+pub fn best_sentences(text: &str, query: &str, max: usize) -> Vec<String> {
+    scored_sentences(text, query, max)
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect()
 }
 
 #[cfg(test)]
@@ -8847,7 +8932,7 @@ every other test still runs.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH
 cargo build --offline        # must finish with zero deps downloaded
-cargo test  --offline        # expect: 70 lib + 5 e2e = 75 passing
+cargo test  --offline        # expect: 72 lib + 5 e2e = 77 passing
 ```
 
 Nothing is fetched from crates.io at any point: the crates have no dependencies.
@@ -8872,7 +8957,7 @@ curl -s -X POST localhost:8080/api/notebooks -d '{"title":"Test"}'
 
 ```bash
 npm install jsdom --prefix /tmp/uitest
-NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 27 assertions
+FORGE_URL=http://127.0.0.1:8080 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js
 ```
 
 This loads the real `index.html` + `app.js` in jsdom against a live server on
@@ -8883,7 +8968,7 @@ port 8099 and clicks through library → notebook → source → citation → st
 
 | Check | Expected |
 |---|---|
-| `cargo test --offline` | 75 passing, 0 failing |
+| `cargo test --offline` | 77 passing, 0 failing |
 | `curl -s localhost:8080/api/capabilities` | `pdf/docx/pptx/xlsx: supported`, `url: blocked`, `audio_overview: unsupported` |
 | Upload `tests/fixtures/flate.pdf` | `chunk_count ≥ 2`, `page_count 2`, locators with `page` |
 | Ask "what evidence span is retrieved?" | answer quoted from page 2, citation `locator_label: "page 2"` |
@@ -9025,7 +9110,7 @@ is aspirational. Where a claim is untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **76 passing, 0 failing** | `cargo test --offline` |
+| Rust tests | **77 passing, 0 failing** | `cargo test --offline` |
 | UI drive-through | **27 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
@@ -9044,7 +9129,7 @@ retrieve        6
 json            6
 ingest::text    6
 http            6
-grounded        6
+grounded        8
 domain          5
 store           4
 providers       4
@@ -9054,10 +9139,10 @@ ingest          3   (PDF + dispatch)
 ingest::zip     2
 inflate         2
 --------------------
-lib total      71
+lib total      72
 e2e (HTTP)      5
 ====================
-total          76
+total          77
 ```
 
 ## Not available, with reasons
@@ -9090,7 +9175,7 @@ total          76
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 75 tests: 70 lib + 5 e2e
+cargo test --offline                        # 77 tests: 72 lib + 5 e2e
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -9098,10 +9183,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js    # 27 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js
 ```
 
-## Unit tests (70) — exact names from `cargo test --lib -- --list`
+## Unit tests (72) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -9147,10 +9232,11 @@ stream produced by another tool.
 `exact_identifiers_are_found`, `stopword_only_query_returns_nothing`,
 `no_match_returns_empty`, `sentence_selection_prefers_overlap`.
 
-### `grounded` (6)
+### `grounded` (8)
 `answers_with_a_valid_citation`, `abstains_when_evidence_is_absent`,
 `abstains_on_empty_notebook`, `degenerate_question_is_detected`,
-`synthesises_across_two_sources`, `validator_catches_fabricated_quotes_and_ids`.
+`synthesises_across_two_sources`, `boilerplate_in_a_scoring_chunk_is_not_cited`,
+`citation_numbers_are_contiguous`, `validator_catches_fabricated_quotes_and_ids`.
 
 ### `artifacts` (7)
 `flashcards_are_grounded_and_cited`, `quiz_options_contain_the_answer`,
@@ -11063,7 +11149,7 @@ const path = require("path");
 const { JSDOM, VirtualConsole } = require("jsdom");
 
 const WEB = "/home/user/testtemp/NLLM2/apps/web";
-const BASE = "http://127.0.0.1:8099";
+const BASE = process.env.FORGE_URL || "http://127.0.0.1:8099";
 
 function check(name, cond, detail = "") {
   const ok = !!cond;

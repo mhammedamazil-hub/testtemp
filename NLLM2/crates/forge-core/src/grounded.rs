@@ -25,6 +25,10 @@ pub struct Answer {
 /// Minimum BM25 score for a passage to count as evidence at all.
 pub const EVIDENCE_FLOOR: f64 = 0.35;
 
+/// Minimum share of the question's content words that the chosen sentence must
+/// contain. Queries with only one or two content words require half of them.
+pub const SENTENCE_OVERLAP_FLOOR: f64 = 0.30;
+
 pub fn answer(question: &str, chunks: &[Chunk], sources: &[Source], max_citations: usize) -> Answer {
     let hits = retrieve::search(chunks, question, 12);
     let strong: Vec<_> = hits.into_iter().filter(|h| h.score >= EVIDENCE_FLOOR).collect();
@@ -39,33 +43,60 @@ pub fn answer(question: &str, chunks: &[Chunk], sources: &[Source], max_citation
         };
     }
 
+    // Collect the best sentence per chunk, then keep only sentences that actually
+    // share enough of the question's content words. A chunk can score on a single
+    // word while its best sentence is unrelated; citing that would be noise.
+    let query_terms = retrieve::terms(question).len();
+    let min_overlap = if query_terms >= 3 { SENTENCE_OVERLAP_FLOOR } else { 0.5 };
+    let mut candidates: Vec<(f64, f64, usize, String)> = Vec::new();
+    for hit in strong.iter() {
+        let chunk = &chunks[hit.chunk_index];
+        if let Some((overlap, sentence)) = retrieve::scored_sentences(&chunk.text, question, 3)
+            .into_iter()
+            .find(|(o, _)| *o >= min_overlap)
+        {
+            // Guard: a quote must be literally present in its chunk.
+            if !chunk.text.contains(sentence.trim()) {
+                continue;
+            }
+            candidates.push((overlap, hit.score, hit.chunk_index, sentence));
+        }
+    }
+    candidates.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
     let mut citations: Vec<Citation> = Vec::new();
     let mut sentences: Vec<String> = Vec::new();
-    for (i, hit) in strong.iter().take(max_citations).enumerate() {
-        let chunk = &chunks[hit.chunk_index];
-        let quote = retrieve::best_sentences(&chunk.text, question, 1)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| chunk.text.chars().take(300).collect());
+    let mut seen_quotes: Vec<String> = Vec::new();
+    for (overlap, score, chunk_index, quote) in candidates {
+        if citations.len() >= max_citations {
+            break;
+        }
+        let chunk = &chunks[chunk_index];
+        let trimmed = quote.trim().to_string();
+        if seen_quotes.iter().any(|q| q == &trimmed) {
+            continue;
+        }
+        seen_quotes.push(trimmed.clone());
         let source_title = sources
             .iter()
             .find(|s| s.id == chunk.source_id)
             .map(|s| s.title.clone())
             .unwrap_or_else(|| "unknown source".into());
-        // Guard: never emit a quote that is not literally present in the chunk.
-        if !chunk.text.contains(quote.trim()) {
-            continue;
-        }
+        let marker = format!("[{}]", citations.len() + 1);
         let citation = Citation {
-            citation_id: format!("c{}", i + 1),
+            citation_id: format!("c{}", citations.len() + 1),
             source_id: chunk.source_id.clone(),
             chunk_id: chunk.id.clone(),
-            quote: quote.trim().to_string(),
+            quote: trimmed.clone(),
             locator: chunk.locator.clone(),
-            score: hit.score,
+            score,
             source_title,
         };
-        let marker = format!("[{}]", i + 1);
+        let _ = overlap;
         sentences.push(format!("{}{}", citation.quote, marker));
         citations.push(citation);
     }
@@ -263,6 +294,41 @@ mod tests {
         assert!(a.text.contains("2 sources"));
         let pages: Vec<u32> = a.citations.iter().filter_map(|c| c.locator.page).collect();
         assert!(pages.contains(&2) && pages.contains(&7));
+    }
+
+    #[test]
+    fn boilerplate_in_a_scoring_chunk_is_not_cited() {
+        // The chunk matches on its first line, but the sentence chosen must still
+        // relate to the question; unrelated lines in the same chunk must not appear.
+        let chunks = vec![chunk(
+            "k1",
+            "s1",
+            "Evidence floor tuning matters.\nDocument title page.\nUnrelated legal boilerplate follows here for filler.",
+            1,
+        )];
+        let sources = vec![src("s1", "Doc")];
+        let a = answer("how is the evidence floor tuned", &chunks, &sources, 3);
+        assert!(!a.abstained);
+        assert_eq!(a.citations.len(), 1);
+        assert!(a.citations[0].quote.to_lowercase().contains("evidence floor"));
+        assert!(!a.text.to_lowercase().contains("legal boilerplate"));
+    }
+
+    #[test]
+    fn citation_numbers_are_contiguous() {
+        let chunks = vec![
+            chunk("k1", "s1", "Cite validation rejects fabricated quotes immediately.", 1),
+            chunk("k2", "s2", "Fabricated quotes fail validation every single time.", 2),
+        ];
+        let sources = vec![src("s1", "A"), src("s2", "B")];
+        let a = answer("fabricated quotes validation", &chunks, &sources, 4);
+        let nums: Vec<usize> = a
+            .citations
+            .iter()
+            .map(|c| c.citation_id.trim_start_matches('c').parse().unwrap())
+            .collect();
+        assert_eq!(nums, (1..=nums.len()).collect::<Vec<_>>());
+        assert!(a.text.contains("[2]") || nums.len() == 1);
     }
 
     #[test]

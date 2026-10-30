@@ -92,7 +92,7 @@ every other test still runs.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH
 cargo build --offline        # must finish with zero deps downloaded
-cargo test  --offline        # expect: 70 lib + 5 e2e = 75 passing
+cargo test  --offline        # expect: 72 lib + 5 e2e = 77 passing
 ```
 
 Nothing is fetched from crates.io at any point: the crates have no dependencies.
@@ -117,7 +117,7 @@ curl -s -X POST localhost:8080/api/notebooks -d '{"title":"Test"}'
 
 ```bash
 npm install jsdom --prefix /tmp/uitest
-NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 27 assertions
+FORGE_URL=http://127.0.0.1:8080 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js
 ```
 
 This loads the real `index.html` + `app.js` in jsdom against a live server on
@@ -128,7 +128,7 @@ port 8099 and clicks through library → notebook → source → citation → st
 
 | Check | Expected |
 |---|---|
-| `cargo test --offline` | 75 passing, 0 failing |
+| `cargo test --offline` | 77 passing, 0 failing |
 | `curl -s localhost:8080/api/capabilities` | `pdf/docx/pptx/xlsx: supported`, `url: blocked`, `audio_overview: unsupported` |
 | Upload `tests/fixtures/flate.pdf` | `chunk_count ≥ 2`, `page_count 2`, locators with `page` |
 | Ask "what evidence span is retrieved?" | answer quoted from page 2, citation `locator_label: "page 2"` |

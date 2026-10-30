@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 75 tests: 70 lib + 5 e2e
+cargo test --offline                        # 77 tests: 72 lib + 5 e2e
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js    # 27 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js
 ```
 
-## Unit tests (70) — exact names from `cargo test --lib -- --list`
+## Unit tests (72) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -62,10 +62,11 @@ stream produced by another tool.
 `exact_identifiers_are_found`, `stopword_only_query_returns_nothing`,
 `no_match_returns_empty`, `sentence_selection_prefers_overlap`.
 
-### `grounded` (6)
+### `grounded` (8)
 `answers_with_a_valid_citation`, `abstains_when_evidence_is_absent`,
 `abstains_on_empty_notebook`, `degenerate_question_is_detected`,
-`synthesises_across_two_sources`, `validator_catches_fabricated_quotes_and_ids`.
+`synthesises_across_two_sources`, `boilerplate_in_a_scoring_chunk_is_not_cited`,
+`citation_numbers_are_contiguous`, `validator_catches_fabricated_quotes_and_ids`.
 
 ### `artifacts` (7)
 `flashcards_are_grounded_and_cited`, `quiz_options_contain_the_answer`,

@@ -54,8 +54,8 @@ table. The UI reads it and labels unsupported features instead of hiding them.
 ## Verify
 
 ```bash
-cargo test --offline                     # 76 Rust tests
-node tests/ui-smoke.js                   # 27 UI assertions against a live server
+cargo test --offline                     # 77 Rust tests
+FORGE_URL=http://127.0.0.1:8080 node tests/ui-smoke.js   # 27 UI assertions against a live server
 ```
 
 See `docs/TEST_MATRIX.md` for what each test proves and `docs/STATUS.md` for the
