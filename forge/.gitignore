@@ -1,0 +1,3 @@
+.forge/
+__pycache__/
+*.pyc
