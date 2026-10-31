@@ -18,6 +18,7 @@ pub mod providers;
 pub mod retrieve;
 pub mod security;
 pub mod store;
+pub mod tables;
 pub mod web;
 
 pub use domain::*;

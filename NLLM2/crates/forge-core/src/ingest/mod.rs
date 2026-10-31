@@ -21,6 +21,8 @@ pub struct Parsed {
     pub blocks: Vec<Block>,
     pub warnings: Vec<String>,
     pub page_count: u32,
+    /// Structured grids (spreadsheets/CSV). Empty for prose formats.
+    pub tables: Vec<crate::tables::Table>,
 }
 
 /// Chunking targets. Small enough for precise citations, large enough to be
@@ -78,35 +80,68 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
                 .into_iter()
                 .map(|(loc, text)| Block { text, locator: loc })
                 .collect();
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings: doc.warnings, page_count: doc.pages.len() as u32 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings: doc.warnings, page_count: doc.pages.len() as u32, tables: Vec::new() })
         }
         "docx" => {
             let (blocks, warnings) = ooxml::docx(bytes)?;
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
         "pptx" => {
             let (blocks, warnings) = ooxml::pptx(bytes)?;
             let slides = blocks.len() as u32;
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: slides })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: slides, tables: Vec::new() })
         }
         "xlsx" => {
-            let (blocks, warnings) = ooxml::xlsx(bytes)?;
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            // The grid is the source of truth: it gives every sheet, real row numbers and
+            // exact cell references, which flattened text cannot. The row-oriented path in
+            // `ooxml::xlsx` remains the fallback when the workbook has no usable grid.
+            match crate::tables::parse_xlsx(bytes, "", "") {
+                Ok(tables) if !tables.is_empty() => {
+                    let blocks = crate::tables::table_blocks(&tables);
+                    let warnings: Vec<String> = tables
+                        .iter()
+                        .flat_map(|t| t.warnings.iter().cloned())
+                        .collect();
+                    Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables })
+                }
+                other => {
+                    let (blocks, mut warnings) = ooxml::xlsx(bytes)?;
+                    if let Err(e) = other {
+                        warnings.push(format!("worksheet structure could not be read: {}", e));
+                    }
+                    Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
+                }
+            }
         }
         "csv" | "tsv" => {
             let raw = decode_text(bytes);
-            let (blocks, warnings) = text::csv_blocks(&raw, kind == "tsv");
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            let forced = if kind == "tsv" { Some('\t') } else { None };
+            match crate::tables::parse_delimited(bytes, filename, forced, "", "") {
+                // Row passages come from the parsed grid, so a quoted separator or a
+                // decimal comma cannot shift values into the wrong field.
+                Ok(t) if !t.rows.is_empty() => {
+                    let warnings = t.warnings.clone();
+                    let blocks = crate::tables::table_blocks(&[t.clone()]);
+                    Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: vec![t] })
+                }
+                other => {
+                    let (blocks, mut warnings) = text::csv_blocks(&raw, kind == "tsv");
+                    if let Err(e) = other {
+                        warnings.push(format!("table structure could not be read: {}", e));
+                    }
+                    Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
+                }
+            }
         }
         "html" | "htm" => {
             let raw = decode_text(bytes);
             let (blocks, warnings) = text::html_blocks(&raw);
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
         "markdown" | "md" => {
             let raw = decode_text(bytes);
             let blocks = text::markdown_blocks(&raw);
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings: Vec::new(), page_count: 0 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings: Vec::new(), page_count: 0, tables: Vec::new() })
         }
         _ => {
             let raw = decode_text(bytes);
@@ -116,7 +151,7 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
             } else {
                 Vec::new()
             };
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
     }
 }

@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 92 tests: 87 lib + 5 e2e
+cargo test --offline                        # 172 tests: 130 lib + 11 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 29 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 53 assertions
 ```
 
-## Unit tests (87) — exact names from `cargo test --lib -- --list`
+## Unit tests (130) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -25,11 +25,14 @@ export.
 
 ### `domain` (5)
 `iso_timestamps_are_correct`, `ids_are_unique_and_prefixed`, `locator_roundtrip`,
-`json_roundtrip_message`, `kind_detection_from_filename`.
+`json_roundtrip_message`, `kind_detection_from_filename`,
+`cell_locators_carry_sheet_reference_and_column` (a sheet-qualified `Sales!C2:C6` locator keeps
+column 3, survives JSON, and a timestamp locator renders `01:15`).
 
-### `store` (4)
+### `store` (5)
 `persists_across_reopen`, `atomic_write_leaves_no_tmp_file`, `backup_writes_a_copy`,
-`corrupt_db_does_not_panic`.
+`corrupt_db_does_not_panic`, `tables_survive_a_restart_with_cells_intact` (grids, precision,
+formula text and the computed total are identical after a reopen).
 
 ### `http` (6)
 `parses_query_and_percent_encoding`, `encodes_response_with_content_length`,
@@ -152,6 +155,78 @@ Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/m
 | UI | 3 assertions | the Add-from-URL control exists and its input is labelled; capabilities reports the fetch transport; a note offers conversion to a source |
 | e2e | `note_can_become_a_cited_source` (Journey D) | note → source with `converted_from` provenance; second conversion refused `409 already_a_source`; a question about a number present only in the note is answered **and cited to the note-source**; deselecting it removes the influence; deleting the note leaves the source intact |
 
+## Spreadsheet tables and computed answers (22 unit tests + 1 store round-trip + 1 e2e + 12 UI assertions)
+
+Test module `tables`; fixture `tests/fixtures/sales.xlsx` (two sheets, one hidden, real cell
+references, a cached `SUM(C2:C3)` subtotal, an empty cell, an `N/A` placeholder, an inline
+string) and `tests/fixtures/sales.csv` (semicolon-delimited, quoted comma, decimal comma).
+
+**Parsing**
+* `csv_handles_quotes_commas_newlines_and_crlf` — RFC 4180: `"Acme, Inc"`, `""` escapes, a
+  newline inside quotes, CRLF line endings.
+* `csv_sniffs_semicolon_and_tab` — delimiter chosen by counting candidates **outside**
+  quotes; `"a;b";c` sniffs `;`, not `,`.
+* `csv_keeps_row_numbers_and_cell_references` — the header is row 1, so the first data row is
+  row 2 / cell `B2`.
+* `ragged_and_blank_headers_are_reported_not_guessed` — empty header → `Column B`,
+  duplicate header → `name (2)`, extra fields → an added column, each with a warning.
+* `numbers_parse_with_units_currency_and_accounting_negatives` — `1,234.5`, `$1,200`, `45%`,
+  `(1,200)`, `12 kg`, `-3.5` parse; `N/A`, `-`, `12abc34`, `two` do not.
+* `ambiguous_number_grouping_is_rejected_not_guessed` — `1,234.50` and `1.234,50` → `1234.5`;
+  `1200,50` → `1200.5`; `1,200` → `1200`; `1,23,456` and `1.2.3` → **rejected**.
+* `missing_values_stay_missing` — a blank cell and `N/A` are `Empty`, never `0`.
+* `xlsx_parses_every_sheet_with_real_cell_references` — both sheets, `C2 = 1200.5`, cached
+  `C4 = 2050.5` with `formula = SUM(C2:C3)`, empty `D4`, `N/A` → empty, inline string → number,
+  `Meta` flagged hidden, rich-text shared string joined (`Rev`+`enue notes`).
+* `csv_fixture_sniffs_delimiter_and_handles_quoted_commas` — the same file end-to-end.
+* `column_letters_and_references_round_trip` — `A`/`Z`/`AA`/`ZZ`, `A1`, `AA12`, and a
+  malformed reference rejected.
+
+**Computing**
+* `sums_only_numeric_cells_and_says_what_it_skipped` — 1200 + 850 = 2050, "2 row(s) were
+  excluded", excluded row numbers named, citation kind `cell`, sheet `Sheet1`.
+* `xlsx_aggregation_excludes_the_cached_subtotal_row` — 1200.5 + 850 + 300 = **2350.5**; the
+  `=SUM(C2:C3)` cell is excluded and named; citation `Sales!C2:C6`; validator reports nothing.
+* `xlsx_grouping_uses_the_named_column` — "total revenue by channel" → `Web 1500.5`,
+  `Store 850`; the subtotal row is not folded back into its group.
+* `refuses_to_mix_units` — `12 km` + `3 miles` abstains instead of adding.
+* `a_column_with_no_numbers_abstains_instead_of_returning_zero`.
+* `average_min_max_and_count_are_right` — average 20, max 30 names row 4, count 3.
+* `groups_by_a_second_column` — `total revenue by region` → north 150, south 25.
+* `unrelated_questions_fall_through_to_text_answering` — "who wrote this document" is not
+  aggregated over an arbitrary column.
+* `oversized_sheets_are_truncated_and_aggregations_refuse` — 20,005 rows → 20,000 kept, a
+  warning, and a refusal instead of a wrong total.
+* `validation_catches_a_wrong_table_reference` — the table validator rejects a citation whose
+  table id does not exist.
+* `blocks_keep_row_context_and_cell_locators` — retrieval passages carry `Sheet1 row 2` and
+  the A1 range `A2-B2`.
+* `hidden_sheets_are_never_used_for_answers` — hidden-sheet rows produce no passages.
+
+**Persistence**
+* `store::tests::tables_survive_a_restart_with_cells_intact` — reopen the store: headers,
+  precision (`1200.5`), the formula, the empty cell, the hidden flag, and the same computed
+  total after the restart.
+
+**Over HTTP**
+* `spreadsheet_questions_are_computed_over_real_cells` — upload `sales.xlsx` → `table_count: 2`,
+  hidden flag visible → chat `"what is the total revenue"` → `computed: true`,
+  `engine: table`, answer `2350.5`, `C4` named, one citation `cell` / `Sales` / `Sales!C2:C6`,
+  no citation problems → `GET /api/sources/:id/tables` returns row 2 as original row number
+  with `C2` = 1200.5 → `?rows=2` caps rows but keeps `row_count: 5` and `truncated: true` →
+  a prose question about the same source is **not** computed → deleting the source removes
+  its tables (`404`).
+* `exported_notebooks_keep_their_tables` — export carries both sheets; import rebuilds them
+  under remapped source ids and the copy still answers `2350.5` citing `Sales`.
+
+**UI**
+`upload control accepts spreadsheets`, `spreadsheet imported through the UI`, `source item
+reports its sheets and rows`, `spreadsheet total is computed, not quoted`, `computed answer
+says so`, `computed answer names the excluded subtotal row`, `computed answer carries a cell
+citation`, `viewer renders the real grid`, `grid keeps original row numbers`, `grid shows the
+cached formula value`, `grid cells expose their A1 reference`, `hidden sheets are labelled
+when shown`.
+
 ## Binary analysis (31 unit tests + 5 HTTP tests + 6 UI assertions)
 
 Hash vectors (SHA-256/SHA-1 published values), entropy separation, AXML parsing of a real
@@ -165,3 +240,7 @@ endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
 * No concurrency/load test; store writes are serialised by a mutex.
 * No fuzzing of the PDF/ZIP parsers.
 * No multi-megabyte corpus test.
+* Spreadsheet fixtures are synthetic: no real-world `.xlsx` produced by Excel, Numbers or
+  LibreOffice was tested (no authorized sample), so merged cells, date serials, sheet-scoped
+  named ranges and shared-formula groups remain unverified.
+* No `.xls`/ODS fixtures at all — those formats have no parser here.

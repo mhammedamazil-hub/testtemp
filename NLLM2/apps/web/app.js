@@ -464,6 +464,8 @@ function renderSources(pane) {
         } }, "×")),
       h("div", { class: "sub" },
         `${s.kind} · ${s.chunk_count} passages${s.page_count ? ` · ${s.page_count} pages` : ""}${s.status !== "ready" ? ` · ${s.status}` : ""}`,
+        s.table_count ? h("span", { title: (s.table_sheets || []).map((t) => `${t.sheet}: ${t.row_count} rows`).join("\n") },
+          ` · ${s.table_count} sheet${s.table_count === 1 ? "" : "s"} · ${s.table_row_count} rows`) : null,
         s.origin === "url" ? h("span", { title: s.canonical_url }, " · from URL") : null,
         (s.fetched_at || "").startsWith("20") ? h("span", { title: s.fetched_at }, " · synced") : null),
       (s.labels || []).length
@@ -535,7 +537,7 @@ function renderChat(pane, onlyComposer = false) {
       const msg = {
         role: "assistant", text: r.answer, citations: r.citations,
         abstained: r.abstained, coverage: r.coverage, engine: r.engine,
-        problems: r.citation_problems,
+        computed: r.computed === true, problems: r.citation_problems,
       };
       state.messages.push({ role: "user", text: q }, msg);
       pending.replaceWith(messageEl(msg));
@@ -587,7 +589,9 @@ function messageEl(m) {
       h("span", { class: "hint" }, c.locator_label || "")));
   });
   const meta = h("div", { class: "row-between", style: "margin-top:8px" },
-    h("span", { class: "hint" }, m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : ""),
+    h("span", { class: "hint" },
+      m.computed ? "computed from table cells · " : "",
+      m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : ""),
     (m.problems || []).length ? h("span", { class: "badge warn" }, "citation check: " + m.problems.join("; ")) : null);
   return h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), body, cites, meta);
 }
@@ -897,22 +901,53 @@ function renderMindmap(mm) {
 
 // ---------------------------------------------------------------- source viewer
 async function openViewer(sourceId, highlightChunkId) {
-  const [src, data] = await Promise.all([
+  const [src, data, tableData] = await Promise.all([
     api.get(`/sources/${sourceId}`),
     api.get(`/sources/${sourceId}/chunks`),
+    api.get(`/sources/${sourceId}/tables`).catch(() => ({ tables: [] })),
   ]);
   let chunks = data.chunks || [];
   let page = null;
+  const tables = tableData.tables || [];
 
   const content = h("div", { class: "content" });
   const pager = h("div", { class: "pager" });
 
+  // A cited cell opens on the real grid, so "Sales!C2:C6" is verifiable, not decorative.
+  function gridBlock(t) {
+    const head = h("tr", {}, h("th", { class: "rownum" }, ""),
+      ...t.columns.map((c) => h("th", {}, c)));
+    const rows = (t.rows || []).map((r) => {
+      const byCol = {};
+      for (const c of r.cells || []) byCol[c.column] = c;
+      return h("tr", {},
+        h("th", { class: "rownum", title: `row ${r.row}` }, String(r.row)),
+        ...t.columns.map((col) => {
+          const cell = byCol[col];
+          const shown = cell ? (cell.text === "" ? "" : cell.text) : "";
+          return h("td", {
+            class: cell && cell.number !== null && cell.number !== undefined ? "num" : "",
+            title: cell ? `${cell.ref}${cell.text === "" ? " (empty)" : ""}` : "cell not present",
+          }, shown);
+        }));
+    });
+    return h("div", { class: "sheet" },
+      h("div", { class: "loc" },
+        `${t.sheet} · ${t.row_count} row${t.row_count === 1 ? "" : "s"}${t.hidden ? " · hidden sheet" : ""}`),
+      h("div", { class: "gridwrap" }, h("table", { class: "grid" },
+        h("thead", {}, head), h("tbody", {}, ...rows))),
+      t.truncated ? h("p", { class: "hint" }, `Showing the first ${t.rows.length} of ${t.row_count} rows.`) : null,
+      (t.warnings || []).length ? h("p", { class: "hint" }, t.warnings.join(" · ")) : null);
+  }
+
   function paint() {
     const shown = page === null ? chunks : chunks.filter((c) => c.locator && c.locator.page === page);
-    content.replaceChildren(...(shown.length ? shown.map((c) =>
+    const chunksEl = shown.length ? shown.map((c) =>
       h("div", { class: "chunk" + (c.id === highlightChunkId ? " hit" : ""), id: "chunk-" + c.id },
         h("div", { class: "loc" }, c.locator_label),
-        h("div", { style: "white-space:pre-wrap" }, c.text))) : [h("p", { class: "empty" }, "No text on this page.")]));
+        h("div", { style: "white-space:pre-wrap" }, c.text))) : [h("p", { class: "empty" }, "No text on this page.")];
+    // tables come first: they are the ground truth the passages were flattened from
+    content.replaceChildren(...tables.map(gridBlock), ...chunksEl);
     const hit = content.querySelector(".hit");
     if (hit) hit.scrollIntoView({ block: "center" });
   }
@@ -922,7 +957,9 @@ async function openViewer(sourceId, highlightChunkId) {
       h("header", {},
         h("div", { style: "flex:1;min-width:0" },
           h("div", { style: "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, src.title),
-          h("div", { class: "hint" }, `${src.kind} · ${src.chunk_count} passages · ${src.status}`)),
+          h("div", { class: "hint" },
+            `${src.kind} · ${src.chunk_count} passages · ${src.status}` +
+            (tables.length ? ` · ${tables.length} sheet${tables.length === 1 ? "" : "s"}` : ""))),
         pager,
         h("button", { class: "ghost", onclick: close, "aria-label": "Close" }, "✕")),
       content));

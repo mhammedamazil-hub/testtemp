@@ -5,6 +5,9 @@ use std::net::{IpAddr, ToSocketAddrs};
 pub const MAX_SOURCE_BYTES: usize = 25 * 1024 * 1024;
 pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_URL_LEN: usize = 2048;
+/// Rows kept per worksheet. Beyond this the grid is truncated and aggregations refuse
+/// to run, because a total over a partial sheet would be a wrong number stated confidently.
+pub const MAX_TABLE_ROWS: usize = 20_000;
 
 #[derive(Debug, PartialEq)]
 pub enum UrlVerdict {

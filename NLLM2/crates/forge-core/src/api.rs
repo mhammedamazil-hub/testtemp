@@ -110,6 +110,7 @@ impl Api {
             ("GET", ["api", "artifacts", aid]) => Ok(self.get_artifact(aid)),
             ("GET", ["api", "sources", sid]) => Ok(self.get_source(sid)),
             ("GET", ["api", "sources", sid, "chunks"]) => Ok(self.source_chunks(sid, req)),
+            ("GET", ["api", "sources", sid, "tables"]) => Ok(self.source_tables(sid, req)),
             ("DELETE", ["api", "sources", sid]) => Ok(self.delete_source(sid)),
             ("PATCH", ["api", "sources", sid]) => self.update_source(sid, req),
             ("POST", ["api", "sources", sid, "refresh"]) => self.refresh_source(sid),
@@ -134,8 +135,8 @@ impl Api {
 
     // ------------------------------------------------------------ health
     fn health(&self) -> Response {
-        let (nb, src, chunks, conv, notes, arts) = self.store.read(|db| {
-            (db.notebooks.len(), db.sources.len(), db.chunks.len(), db.conversations.len(), db.notes.len(), db.artifacts.len())
+        let (nb, src, chunks, conv, notes, arts, tables) = self.store.read(|db| {
+            (db.notebooks.len(), db.sources.len(), db.chunks.len(), db.conversations.len(), db.notes.len(), db.artifacts.len(), db.tables.len())
         });
         ok(obj! {
             "status" => "ok",
@@ -148,6 +149,7 @@ impl Api {
                 "conversations" => conv as u64,
                 "notes" => notes as u64,
                 "artifacts" => arts as u64,
+                "tables" => tables as u64,
             },
         })
     }
@@ -156,11 +158,17 @@ impl Api {
     fn capabilities(&self) -> Value {
         obj! {
             "version" => VERSION,
+            "tables" => obj! {
+                "status" => "supported",
+                "operations" => "sum, average, min, max, count; optional grouping by a column",
+                "locator" => "cell (A1 range, e.g. Sales!C2:C6)",
+                "note" => "computed over numeric cells only: empty cells and placeholders are excluded (never counted as zero), a column that mixes units is refused, and a cached column total is excluded to avoid double counting",
+            },
             "sources" => obj! {
                 "text" => obj!{ "status" => "supported", "locator" => "paragraph" },
                 "markdown" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "html" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
-                "csv" => obj!{ "status" => "supported", "locator" => "row" },
+                "csv" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "RFC 4180 quoting, delimiter sniffed; the grid is kept for aggregation" },
                 "pdf" => obj!{ "status" => "supported", "locator" => "page", "note" => "text-layer PDFs; no OCR" },
                 "url" => obj!{
                     "status" => if fetch::transport_available() { "supported" } else { "unsupported" },
@@ -171,7 +179,7 @@ impl Api {
                 "audio_transcript" => obj!{ "status" => "unsupported", "reason" => "no ASR engine installed (see docs/RESEARCH_BLOCKERS.md)" },
                 "docx" => obj!{ "status" => "supported", "locator" => "paragraph", "note" => "WordprocessingML text; images ignored" },
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
-                "xlsx" => obj!{ "status" => "supported", "locator" => "row", "note" => "first worksheet, shared strings resolved" },
+                "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
                 "audio" => obj!{ "status" => "unsupported", "reason" => "no ASR engine available offline" },
                 "video" => obj!{ "status" => "unsupported", "reason" => "no ASR/FFmpeg pipeline in this build" },
                 "image_ocr" => obj!{ "status" => "unsupported", "reason" => "no OCR engine available" },
@@ -288,7 +296,7 @@ impl Api {
                 "archived" => n.archived,
                 "created_at" => n.created_at.as_str(),
                 "updated_at" => n.updated_at.as_str(),
-                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == id).map(source_json).collect()),
+                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == id).map(|s| source_json(s, &db.tables)).collect()),
                 "notes" => Value::Arr(db.notes.iter().filter(|x| x.notebook_id == id).map(note_json).collect()),
                 "artifacts" => Value::Arr(db.artifacts.iter().filter(|x| x.notebook_id == id).map(artifact_json).collect()),
             }),
@@ -344,6 +352,7 @@ impl Api {
                 db.conversations.retain(|c| c.notebook_id != id);
                 db.notes.retain(|n| n.notebook_id != id);
                 db.artifacts.retain(|a| a.notebook_id != id);
+                db.tables.retain(|t| t.notebook_id != id);
                 existed
             })
             .unwrap_or(false);
@@ -358,7 +367,7 @@ impl Api {
     fn list_sources(&self, nb: &str) -> Value {
         self.store.read(|db| {
             obj! {
-                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == nb).map(source_json).collect())
+                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == nb).map(|s| source_json(s, &db.tables)).collect())
             }
         })
     }
@@ -366,7 +375,7 @@ impl Api {
     fn get_source(&self, sid: &str) -> Response {
         self.store.read(|db| match db.sources.iter().find(|s| s.id == sid) {
             None => err(404, "not_found", "source not found"),
-            Some(s) => ok(source_json(s)),
+            Some(s) => ok(source_json(s, &db.tables)),
         })
     }
 
@@ -399,7 +408,7 @@ impl Api {
                 l.truncate(20);
                 src.labels = l;
             }
-            Some(source_json(src))
+            Some(source_json(src, &db.tables))
         })
         .map_err(|e| err(500, "storage", &e.to_string()))?;
         match found {
@@ -440,7 +449,7 @@ impl Api {
                 let s = db.sources.iter_mut().find(|s| s.id == sid)?;
                 s.fetched_at = now_iso();
                 s.meta.insert("http_status".into(), fetched.status.to_string());
-                Some(source_json(s))
+                Some(source_json(s, &db.tables))
             })
             .ok()
             .flatten();
@@ -530,6 +539,32 @@ impl Api {
         ok(payload)
     }
 
+    /// Structured tables of one source, with real cell references.
+    ///
+    /// `?rows=N` caps how many rows are returned per sheet (default 200); `row_count`
+    /// always reports the true size so a truncated view cannot be mistaken for the data.
+    fn source_tables(&self, sid: &str, req: &Request) -> Response {
+        let limit = req
+            .query_get("rows")
+            .and_then(|r| r.parse::<usize>().ok())
+            .map(|n| n.clamp(1, 2000))
+            .unwrap_or(200);
+        self.store.read(|db| {
+            let known = db.sources.iter().any(|s| s.id == sid);
+            if !known {
+                return err(404, "not_found", "source not found");
+            }
+            let mut tables: Vec<&crate::tables::Table> =
+                db.tables.iter().filter(|t| t.source_id == sid).collect();
+            tables.sort_by(|a, b| a.sheet.cmp(&b.sheet));
+            ok(obj! {
+                "source_id" => sid,
+                "count" => tables.len() as u64,
+                "tables" => Value::Arr(tables.iter().map(|t| t.json(limit)).collect()),
+            })
+        })
+    }
+
     fn delete_source(&self, sid: &str) -> Response {
         let removed = self
             .store
@@ -538,6 +573,7 @@ impl Api {
                 db.sources.retain(|s| s.id != sid);
                 let existed = db.sources.len() != before;
                 db.chunks.retain(|c| c.source_id != sid);
+                db.tables.retain(|t| t.source_id != sid);
                 existed
             })
             .unwrap_or(false);
@@ -796,6 +832,32 @@ impl Api {
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
 
+        // Structured grids are stored verbatim alongside the chunk text: an answer that
+        // totals a column must be able to re-read the same cells after a restart.
+        let mut tables = parsed.tables;
+        for t in tables.iter_mut() {
+            t.source_id = source_id.clone();
+            t.notebook_id = nb.to_string();
+            t.id = format!("tbl_{}", crate::domain::short_hash(&format!("{}|{}", t.source_id, t.sheet)));
+        }
+        let table_summary: Vec<Value> = tables
+            .iter()
+            .map(|t| obj! {
+                "id" => t.id.as_str(),
+                "sheet" => t.sheet.as_str(),
+                "hidden" => t.hidden,
+                "columns" => Value::Arr(t.headers.iter().map(|h| Value::from(h.as_str())).collect()),
+                "row_count" => t.rows.len() as u64,
+            })
+            .collect();
+        let table_count = tables.len() as u64;
+        let table_row_count: u64 = tables.iter().map(|t| t.rows.len() as u64).sum();
+        if !tables.is_empty() {
+            self.store
+                .write(|db| db.tables.extend(tables))
+                .map_err(|e| err(500, "storage", &e.to_string()))?;
+        }
+
         let fetched_url = fetched.as_ref().map(|f| f.canonical_url.clone()).unwrap_or_default();
         let fetched_status = fetched.as_ref().map(|f| f.status as u64).unwrap_or(0);
         let mut meta_json = BTreeMap::new();
@@ -814,6 +876,9 @@ impl Api {
             "page_count" => self.store.read(|db| db.sources.iter().find(|s| s.id == source_id).map(|s| s.page_count).unwrap_or(0)) as u64,
             "warnings" => Value::Arr(parsed_warnings(&self.store, &sid_for_warn)),
             "preview" => Value::Arr(for_response),
+            "table_count" => table_count,
+            "table_row_count" => table_row_count,
+            "tables" => Value::Arr(table_summary),
         }))
     }
 
@@ -855,7 +920,7 @@ impl Api {
                 .unwrap_or_default()
         });
 
-        let (chunks, sources) = self.store.read(|db| {
+        let (chunks, sources, tables) = self.store.read(|db| {
             let sources: Vec<Source> = db
                 .sources
                 .iter()
@@ -870,7 +935,14 @@ impl Api {
                 .filter(|c| selected.is_empty() || selected.contains(&c.source_id))
                 .cloned()
                 .collect();
-            (chunks, sources)
+            let tables: Vec<crate::tables::Table> = db
+                .tables
+                .iter()
+                .filter(|t| t.notebook_id == nb && !t.hidden)
+                .filter(|t| selected.is_empty() || selected.contains(&t.source_id))
+                .cloned()
+                .collect();
+            (chunks, sources, tables)
         });
 
         if chunks.is_empty() {
@@ -887,10 +959,24 @@ impl Api {
             .and_then(|c| providers::read_secret(&self.store.dir, &c.id));
         let (engine, engine_note) =
             providers::select(configured.as_ref(), key.as_deref());
-        let answer = engine
-            .answer(&question, &chunks, &sources, 4)
-            .unwrap_or_else(|_| grounded::answer(&question, &chunks, &sources, 4));
-        let problems = grounded::validate_citations(&answer.citations, &chunks);
+
+        // A structured question ("total revenue by region") is answered by computing over
+        // real cells. This runs before text retrieval because the text path can only ever
+        // quote a row, not add one up.
+        let computed = crate::tables::try_answer(&question, &tables, &sources);
+        let (answer, problems) = match computed {
+            Some(a) => {
+                let problems = crate::tables::validate(&a, &tables);
+                (a, problems)
+            }
+            None => {
+                let a = engine
+                    .answer(&question, &chunks, &sources, 4)
+                    .unwrap_or_else(|_| grounded::answer(&question, &chunks, &sources, 4));
+                let problems = grounded::validate_citations(&a.citations, &chunks);
+                (a, problems)
+            }
+        };
 
         let now = now_iso();
         let user_msg = Message {
@@ -962,6 +1048,8 @@ impl Api {
             "citation_problems" => Value::Arr(problems.iter().map(|p| Value::from(p.as_str())).collect()),
             "sources_considered" => sources.len() as u64,
             "chunks_considered" => chunks.len() as u64,
+            "tables_considered" => tables.len() as u64,
+            "computed" => answer.engine == "table",
             "note" => assistant_msg.note.clone(),
             "notebook_instructions" => instructions,
         }))
@@ -1217,11 +1305,14 @@ impl Api {
                 "format" => "forge.notebook/1",
                 "exported_at" => now_iso(),
                 "notebook" => nb_json(notebook),
-                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == nb).map(source_json).collect()),
+                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == nb).map(|s| source_json(s, &db.tables)).collect()),
                 "chunks" => Value::Arr(db.chunks.iter().filter(|c| c.notebook_id == nb).map(chunk_json).collect()),
                 "conversations" => Value::Arr(db.conversations.iter().filter(|c| c.notebook_id == nb).map(conv_json).collect()),
                 "notes" => Value::Arr(db.notes.iter().filter(|n| n.notebook_id == nb).map(note_json).collect()),
                 "artifacts" => Value::Arr(db.artifacts.iter().filter(|a| a.notebook_id == nb).map(artifact_json).collect()),
+                // Grids travel with the notebook: without them a re-imported spreadsheet
+                // source would keep its rows as text but lose every cell reference.
+                "tables" => Value::Arr(db.tables.iter().filter(|t| t.notebook_id == nb).map(crate::store::table_json).collect()),
             }
         });
         Response::json(200, &payload).with_header(
@@ -1357,12 +1448,28 @@ impl Api {
             }
         }
 
+        let mut tables: Vec<crate::tables::Table> = Vec::new();
+        if let Some(arr) = body.get("tables").and_then(|v| v.as_arr()) {
+            for t in arr {
+                let Some(mut table) = crate::store::table_from(t) else { continue };
+                let Some(new_sid) = id_map.get(&table.source_id).cloned() else { continue };
+                table.source_id = new_sid;
+                table.notebook_id = new_nb_id.clone();
+                table.id = format!(
+                    "tbl_{}",
+                    crate::domain::short_hash(&format!("{}|{}", table.source_id, table.sheet))
+                );
+                tables.push(table);
+            }
+        }
+
         let counts = (
             sources.len(),
             chunks.len(),
             notes.len(),
             conversations.len(),
             artifacts.len(),
+            tables.len(),
         );
         let nb_out = new_nb_id.clone();
         self.store
@@ -1373,6 +1480,7 @@ impl Api {
                 db.notes.extend(notes);
                 db.conversations.extend(conversations);
                 db.artifacts.extend(artifacts);
+                db.tables.extend(tables);
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
         Ok(created(obj! {
@@ -1383,6 +1491,7 @@ impl Api {
                 "notes" => counts.2 as u64,
                 "conversations" => counts.3 as u64,
                 "artifacts" => counts.4 as u64,
+                "tables" => counts.5 as u64,
             },
         }))
     }
@@ -1706,7 +1815,9 @@ fn nb_json(n: &Notebook) -> Value {
     }
 }
 
-fn source_json(s: &Source) -> Value {
+fn source_json(s: &Source, tables: &[crate::tables::Table]) -> Value {
+    let mine: Vec<&crate::tables::Table> = tables.iter().filter(|t| t.source_id == s.id).collect();
+    let table_rows: u64 = mine.iter().map(|t| t.rows.len() as u64).sum();
     obj! {
         "id" => s.id.as_str(),
         "notebook_id" => s.notebook_id.as_str(),
@@ -1731,6 +1842,14 @@ fn source_json(s: &Source) -> Value {
             }
             Value::Obj(m)
         },
+        "table_count" => mine.len() as u64,
+        "table_row_count" => table_rows,
+        "table_sheets" => Value::Arr(mine.iter().map(|t| obj! {
+            "id" => t.id.as_str(),
+            "sheet" => t.sheet.as_str(),
+            "row_count" => t.rows.len() as u64,
+            "hidden" => t.hidden,
+        }).collect()),
     }
 }
 

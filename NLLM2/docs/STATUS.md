@@ -1,7 +1,8 @@
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-31 (URL ingestion, refresh, source metadata). Everything below was executed in this workspace; nothing
-is aspirational. Where a claim is untested it says so.
+Last updated: 2026-10-31 (spreadsheet tables: real cells, exact references, computed answers).
+Everything below was executed in this workspace; nothing is aspirational. Where a claim is
+untested it says so.
 
 ## Where the work stands (2026-10-31)
 
@@ -18,11 +19,15 @@ is aspirational. Where a claim is untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **146 passing, 0 failing** (26 `bininspect` + 106 lib + 9 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **41 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **172 passing, 0 failing** (26 `bininspect` + 130 lib + 11 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **53 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
+| Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
+| Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 new assertions) |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
-| DOCX/PPTX/XLSX | real OOXML → paragraph/slide/row locators | `ingest::ooxml` + e2e |
+| DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
+| CSV/TSV | RFC 4180 (quotes, embedded newlines, delimiter sniffing, decimal comma) → row + cell locators | `tables::csv_rows` + `parse_delimited` |
 | Grounded answering | extractive, citation-verified, abstains | `grounded`, `api` e2e |
 | Artifacts | flashcards, quiz, report, mindmap, study guide, FAQ, summary, narration script | `artifacts` tests + UI smoke |
 | Persistence | JSON store, atomic replace, backups, corruption safety | `store` tests |
@@ -36,29 +41,35 @@ is aspirational. Where a claim is untested it says so.
 | NotebookLM protocol | 14 RPCs, source specs, artifact configs, streamed-chat parsing — built from pinned public RE evidence | `notebooklm` (15 tests), `docs/NOTEBOOKLM_PROTOCOL.md` |
 | REA tool | installs and runs on Node 22.22.3 (engine floor is a warning) | `docs/REA_EVIDENCE_INDEX.md` |
 
-## Test counts by module (measured with `cargo test --lib -- --list`)
+## Test counts by module (measured with `cargo test -- --list`)
 
 ```
-security        7
-artifacts       7
-retrieve        6
-json            6
-ingest::text    6
-http            6
-grounded        8
-domain          5
-store           4
-providers       4
-ingest::ooxml   4
-web             3
-ingest          3   (PDF + dispatch)
-ingest::zip     2
-inflate         2
+tables          22
+notebooklm      15
+fetch           11
+retrieve         9
+grounded         8
+artifacts        7
+security         6
+json             6
+ingest::text     6
+http             6
+store            5
+hashes           5
+domain           5
+providers        4
+ingest::ooxml    4
+web              3
+ingest           3   (PDF + dispatch)
+ingest::zip      2
+inflate          2
 --------------------
-lib total      72
-e2e (HTTP)      5
+lib total      130
+bininspect      26   (separate crate)
+e2e (HTTP)      11
+server           5
 ====================
-total          77
+total          172
 ```
 
 ## Not available, with reasons
@@ -71,6 +82,10 @@ total          77
 | Image OCR | `tesseract` absent | images inside DOCX are counted in warnings, not read |
 | Semantic/vector retrieval | no embedding model offline | lexical BM25 only; documented, not disguised |
 | Multi-user auth | out of scope for a single-operator notebook | bind to `127.0.0.1` or a private network |
+| Spreadsheet formula evaluation | no formula engine; only the cached value Excel/LibreOffice stored is read | the cached value is used **and the formula is printed** (`=SUM(C2:C3)`) so a derived cell is never mistaken for data |
+| Sheets beyond 20,000 rows | self-imposed cap (`security::MAX_TABLE_ROWS`) | the grid is marked `truncated`, the reason is reported, and aggregations **refuse** rather than total a partial sheet |
+| `.xls` (BIFF), ODS, Google Sheets | no parser written; binary formats out of scope for now | upload is rejected by kind detection with a clear error, never half-indexed |
+| Data Tables artifact (schema-inferred extraction, charts) | not implemented | reported as `planned`; existing spreadsheets are queried directly instead |
 | Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps

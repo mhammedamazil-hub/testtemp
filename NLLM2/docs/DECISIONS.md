@@ -190,3 +190,42 @@ afterwards does not delete the evidence, which is stated in the test.
 
 **Revisit when** direct note selection is added: it should reuse `to-source` internally
 (lazily converting), so there is still exactly one retrieval path.
+
+## D15 — Tables are a first-class representation, and aggregations refuse rather than guess
+
+**Date.** 2026-10-31. **Background.** §7.10 and §10.1 of the spec require cell-level locators
+for spreadsheets; the chat contract (§7.6) requires "table answers". The previous XLSX parser
+flattened row 1 of sheet 1 into text, which makes a sum impossible and a cell citation a lie.
+
+**Chosen.** A spreadsheet/CSV is parsed into a `Table` (sheet name, headers, rows with
+**original** row numbers, cells with header, raw text, parsed number, unit, A1 reference and
+formula text), stored next to the chunks in `db.json`, and exposed at
+`GET /api/sources/:id/tables`. Row passages for retrieval are generated **from the grid**, so
+a citation can name `Sales row 2` / `Sales!A2-D2`. `POST .../chat` runs `tables::try_answer`
+before text retrieval: if the question names an aggregation and a column, the answer is
+computed; otherwise it falls through unchanged to the evidence path.
+
+Four refusals are deliberate, and each is covered by a test:
+
+1. **Missing values are never zero.** Blank cells, `-`, `N/A`, `null`, `NaN` are `Empty` and
+   reported as excluded rows; the answer says how many and which.
+2. **Mixed units are never summed.** `12 km` + `3 miles` → abstain with the reason.
+3. **A cached column total is never counted.** `=SUM(C2:C3)` in the same column is excluded
+   from the aggregation *and named in the answer*, because counting it would double the figure.
+4. **A truncated sheet refuses.** Above `security::MAX_TABLE_ROWS` the grid is marked
+   `truncated` and aggregations abstain: a total over half a sheet is a wrong number stated
+   confidently.
+
+Separators are disambiguated, not assumed: `1,234.50`, `1.234,50`, `1200,50`, `1,200` parse as
+expected; `1,23,456` and `1.2.3` are **rejected** rather than guessed at.
+
+**Rejected.** (a) A text-only XLSX path with "sum" implemented over regex-matched numbers — it
+cannot tell a header from a value or a subtotal from data. (b) Loading the sheet into the
+chunk index and hoping retrieval surfaces the right row — retrieval returns passages, not
+totals, and the spec asks for both. (c) Evaluating formulas — there is no formula engine here,
+and silently returning a computed value the file did not contain would fabricate data; we use
+the cached value the spreadsheet stored and print the formula beside it.
+
+**Consequences.** `db.json` grows with the grid (capped at 20,000 rows/sheet). Hidden sheets are
+stored (so a user can inspect them) but excluded from retrieval, aggregation and citations.
+`.xls`/ODS remain unsupported and are rejected at kind detection.

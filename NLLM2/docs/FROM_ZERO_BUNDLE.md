@@ -604,6 +604,8 @@ function renderSources(pane) {
         } }, "×")),
       h("div", { class: "sub" },
         `${s.kind} · ${s.chunk_count} passages${s.page_count ? ` · ${s.page_count} pages` : ""}${s.status !== "ready" ? ` · ${s.status}` : ""}`,
+        s.table_count ? h("span", { title: (s.table_sheets || []).map((t) => `${t.sheet}: ${t.row_count} rows`).join("\n") },
+          ` · ${s.table_count} sheet${s.table_count === 1 ? "" : "s"} · ${s.table_row_count} rows`) : null,
         s.origin === "url" ? h("span", { title: s.canonical_url }, " · from URL") : null,
         (s.fetched_at || "").startsWith("20") ? h("span", { title: s.fetched_at }, " · synced") : null),
       (s.labels || []).length
@@ -675,7 +677,7 @@ function renderChat(pane, onlyComposer = false) {
       const msg = {
         role: "assistant", text: r.answer, citations: r.citations,
         abstained: r.abstained, coverage: r.coverage, engine: r.engine,
-        problems: r.citation_problems,
+        computed: r.computed === true, problems: r.citation_problems,
       };
       state.messages.push({ role: "user", text: q }, msg);
       pending.replaceWith(messageEl(msg));
@@ -727,7 +729,9 @@ function messageEl(m) {
       h("span", { class: "hint" }, c.locator_label || "")));
   });
   const meta = h("div", { class: "row-between", style: "margin-top:8px" },
-    h("span", { class: "hint" }, m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : ""),
+    h("span", { class: "hint" },
+      m.computed ? "computed from table cells · " : "",
+      m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : ""),
     (m.problems || []).length ? h("span", { class: "badge warn" }, "citation check: " + m.problems.join("; ")) : null);
   return h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), body, cites, meta);
 }
@@ -1037,22 +1041,53 @@ function renderMindmap(mm) {
 
 // ---------------------------------------------------------------- source viewer
 async function openViewer(sourceId, highlightChunkId) {
-  const [src, data] = await Promise.all([
+  const [src, data, tableData] = await Promise.all([
     api.get(`/sources/${sourceId}`),
     api.get(`/sources/${sourceId}/chunks`),
+    api.get(`/sources/${sourceId}/tables`).catch(() => ({ tables: [] })),
   ]);
   let chunks = data.chunks || [];
   let page = null;
+  const tables = tableData.tables || [];
 
   const content = h("div", { class: "content" });
   const pager = h("div", { class: "pager" });
 
+  // A cited cell opens on the real grid, so "Sales!C2:C6" is verifiable, not decorative.
+  function gridBlock(t) {
+    const head = h("tr", {}, h("th", { class: "rownum" }, ""),
+      ...t.columns.map((c) => h("th", {}, c)));
+    const rows = (t.rows || []).map((r) => {
+      const byCol = {};
+      for (const c of r.cells || []) byCol[c.column] = c;
+      return h("tr", {},
+        h("th", { class: "rownum", title: `row ${r.row}` }, String(r.row)),
+        ...t.columns.map((col) => {
+          const cell = byCol[col];
+          const shown = cell ? (cell.text === "" ? "" : cell.text) : "";
+          return h("td", {
+            class: cell && cell.number !== null && cell.number !== undefined ? "num" : "",
+            title: cell ? `${cell.ref}${cell.text === "" ? " (empty)" : ""}` : "cell not present",
+          }, shown);
+        }));
+    });
+    return h("div", { class: "sheet" },
+      h("div", { class: "loc" },
+        `${t.sheet} · ${t.row_count} row${t.row_count === 1 ? "" : "s"}${t.hidden ? " · hidden sheet" : ""}`),
+      h("div", { class: "gridwrap" }, h("table", { class: "grid" },
+        h("thead", {}, head), h("tbody", {}, ...rows))),
+      t.truncated ? h("p", { class: "hint" }, `Showing the first ${t.rows.length} of ${t.row_count} rows.`) : null,
+      (t.warnings || []).length ? h("p", { class: "hint" }, t.warnings.join(" · ")) : null);
+  }
+
   function paint() {
     const shown = page === null ? chunks : chunks.filter((c) => c.locator && c.locator.page === page);
-    content.replaceChildren(...(shown.length ? shown.map((c) =>
+    const chunksEl = shown.length ? shown.map((c) =>
       h("div", { class: "chunk" + (c.id === highlightChunkId ? " hit" : ""), id: "chunk-" + c.id },
         h("div", { class: "loc" }, c.locator_label),
-        h("div", { style: "white-space:pre-wrap" }, c.text))) : [h("p", { class: "empty" }, "No text on this page.")]));
+        h("div", { style: "white-space:pre-wrap" }, c.text))) : [h("p", { class: "empty" }, "No text on this page.")];
+    // tables come first: they are the ground truth the passages were flattened from
+    content.replaceChildren(...tables.map(gridBlock), ...chunksEl);
     const hit = content.querySelector(".hit");
     if (hit) hit.scrollIntoView({ block: "center" });
   }
@@ -1062,7 +1097,9 @@ async function openViewer(sourceId, highlightChunkId) {
       h("header", {},
         h("div", { style: "flex:1;min-width:0" },
           h("div", { style: "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, src.title),
-          h("div", { class: "hint" }, `${src.kind} · ${src.chunk_count} passages · ${src.status}`)),
+          h("div", { class: "hint" },
+            `${src.kind} · ${src.chunk_count} passages · ${src.status}` +
+            (tables.length ? ` · ${tables.length} sheet${tables.length === 1 ? "" : "s"}` : ""))),
         pager,
         h("button", { class: "ghost", onclick: close, "aria-label": "Close" }, "✕")),
       content));
@@ -1589,6 +1626,16 @@ main { overflow: auto; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* Structured tables: the grid is the evidence, so it renders as a real table. */
+.sheet { margin-bottom: 18px; }
+.sheet .gridwrap { overflow: auto; max-height: 52vh; border: 1px solid var(--line); border-radius: 8px; }
+table.grid { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+table.grid th, table.grid td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+table.grid thead th { position: sticky; top: 0; background: var(--bg-elev2); font-weight: 600; z-index: 1; }
+table.grid th.rownum { color: var(--faint); font-family: var(--mono); font-size: 11px; text-align: right; background: var(--bg-elev); }
+table.grid td.num { text-align: right; font-family: var(--mono); }
+table.grid tbody tr:hover { background: var(--bg-elev2); }
 ```
 
 ## `apps/web/sw.js`
@@ -4295,6 +4342,7 @@ impl Api {
             ("GET", ["api", "artifacts", aid]) => Ok(self.get_artifact(aid)),
             ("GET", ["api", "sources", sid]) => Ok(self.get_source(sid)),
             ("GET", ["api", "sources", sid, "chunks"]) => Ok(self.source_chunks(sid, req)),
+            ("GET", ["api", "sources", sid, "tables"]) => Ok(self.source_tables(sid, req)),
             ("DELETE", ["api", "sources", sid]) => Ok(self.delete_source(sid)),
             ("PATCH", ["api", "sources", sid]) => self.update_source(sid, req),
             ("POST", ["api", "sources", sid, "refresh"]) => self.refresh_source(sid),
@@ -4319,8 +4367,8 @@ impl Api {
 
     // ------------------------------------------------------------ health
     fn health(&self) -> Response {
-        let (nb, src, chunks, conv, notes, arts) = self.store.read(|db| {
-            (db.notebooks.len(), db.sources.len(), db.chunks.len(), db.conversations.len(), db.notes.len(), db.artifacts.len())
+        let (nb, src, chunks, conv, notes, arts, tables) = self.store.read(|db| {
+            (db.notebooks.len(), db.sources.len(), db.chunks.len(), db.conversations.len(), db.notes.len(), db.artifacts.len(), db.tables.len())
         });
         ok(obj! {
             "status" => "ok",
@@ -4333,6 +4381,7 @@ impl Api {
                 "conversations" => conv as u64,
                 "notes" => notes as u64,
                 "artifacts" => arts as u64,
+                "tables" => tables as u64,
             },
         })
     }
@@ -4341,11 +4390,17 @@ impl Api {
     fn capabilities(&self) -> Value {
         obj! {
             "version" => VERSION,
+            "tables" => obj! {
+                "status" => "supported",
+                "operations" => "sum, average, min, max, count; optional grouping by a column",
+                "locator" => "cell (A1 range, e.g. Sales!C2:C6)",
+                "note" => "computed over numeric cells only: empty cells and placeholders are excluded (never counted as zero), a column that mixes units is refused, and a cached column total is excluded to avoid double counting",
+            },
             "sources" => obj! {
                 "text" => obj!{ "status" => "supported", "locator" => "paragraph" },
                 "markdown" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "html" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
-                "csv" => obj!{ "status" => "supported", "locator" => "row" },
+                "csv" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "RFC 4180 quoting, delimiter sniffed; the grid is kept for aggregation" },
                 "pdf" => obj!{ "status" => "supported", "locator" => "page", "note" => "text-layer PDFs; no OCR" },
                 "url" => obj!{
                     "status" => if fetch::transport_available() { "supported" } else { "unsupported" },
@@ -4356,7 +4411,7 @@ impl Api {
                 "audio_transcript" => obj!{ "status" => "unsupported", "reason" => "no ASR engine installed (see docs/RESEARCH_BLOCKERS.md)" },
                 "docx" => obj!{ "status" => "supported", "locator" => "paragraph", "note" => "WordprocessingML text; images ignored" },
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
-                "xlsx" => obj!{ "status" => "supported", "locator" => "row", "note" => "first worksheet, shared strings resolved" },
+                "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
                 "audio" => obj!{ "status" => "unsupported", "reason" => "no ASR engine available offline" },
                 "video" => obj!{ "status" => "unsupported", "reason" => "no ASR/FFmpeg pipeline in this build" },
                 "image_ocr" => obj!{ "status" => "unsupported", "reason" => "no OCR engine available" },
@@ -4473,7 +4528,7 @@ impl Api {
                 "archived" => n.archived,
                 "created_at" => n.created_at.as_str(),
                 "updated_at" => n.updated_at.as_str(),
-                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == id).map(source_json).collect()),
+                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == id).map(|s| source_json(s, &db.tables)).collect()),
                 "notes" => Value::Arr(db.notes.iter().filter(|x| x.notebook_id == id).map(note_json).collect()),
                 "artifacts" => Value::Arr(db.artifacts.iter().filter(|x| x.notebook_id == id).map(artifact_json).collect()),
             }),
@@ -4529,6 +4584,7 @@ impl Api {
                 db.conversations.retain(|c| c.notebook_id != id);
                 db.notes.retain(|n| n.notebook_id != id);
                 db.artifacts.retain(|a| a.notebook_id != id);
+                db.tables.retain(|t| t.notebook_id != id);
                 existed
             })
             .unwrap_or(false);
@@ -4543,7 +4599,7 @@ impl Api {
     fn list_sources(&self, nb: &str) -> Value {
         self.store.read(|db| {
             obj! {
-                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == nb).map(source_json).collect())
+                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == nb).map(|s| source_json(s, &db.tables)).collect())
             }
         })
     }
@@ -4551,7 +4607,7 @@ impl Api {
     fn get_source(&self, sid: &str) -> Response {
         self.store.read(|db| match db.sources.iter().find(|s| s.id == sid) {
             None => err(404, "not_found", "source not found"),
-            Some(s) => ok(source_json(s)),
+            Some(s) => ok(source_json(s, &db.tables)),
         })
     }
 
@@ -4584,7 +4640,7 @@ impl Api {
                 l.truncate(20);
                 src.labels = l;
             }
-            Some(source_json(src))
+            Some(source_json(src, &db.tables))
         })
         .map_err(|e| err(500, "storage", &e.to_string()))?;
         match found {
@@ -4625,7 +4681,7 @@ impl Api {
                 let s = db.sources.iter_mut().find(|s| s.id == sid)?;
                 s.fetched_at = now_iso();
                 s.meta.insert("http_status".into(), fetched.status.to_string());
-                Some(source_json(s))
+                Some(source_json(s, &db.tables))
             })
             .ok()
             .flatten();
@@ -4715,6 +4771,32 @@ impl Api {
         ok(payload)
     }
 
+    /// Structured tables of one source, with real cell references.
+    ///
+    /// `?rows=N` caps how many rows are returned per sheet (default 200); `row_count`
+    /// always reports the true size so a truncated view cannot be mistaken for the data.
+    fn source_tables(&self, sid: &str, req: &Request) -> Response {
+        let limit = req
+            .query_get("rows")
+            .and_then(|r| r.parse::<usize>().ok())
+            .map(|n| n.clamp(1, 2000))
+            .unwrap_or(200);
+        self.store.read(|db| {
+            let known = db.sources.iter().any(|s| s.id == sid);
+            if !known {
+                return err(404, "not_found", "source not found");
+            }
+            let mut tables: Vec<&crate::tables::Table> =
+                db.tables.iter().filter(|t| t.source_id == sid).collect();
+            tables.sort_by(|a, b| a.sheet.cmp(&b.sheet));
+            ok(obj! {
+                "source_id" => sid,
+                "count" => tables.len() as u64,
+                "tables" => Value::Arr(tables.iter().map(|t| t.json(limit)).collect()),
+            })
+        })
+    }
+
     fn delete_source(&self, sid: &str) -> Response {
         let removed = self
             .store
@@ -4723,6 +4805,7 @@ impl Api {
                 db.sources.retain(|s| s.id != sid);
                 let existed = db.sources.len() != before;
                 db.chunks.retain(|c| c.source_id != sid);
+                db.tables.retain(|t| t.source_id != sid);
                 existed
             })
             .unwrap_or(false);
@@ -4981,6 +5064,32 @@ impl Api {
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
 
+        // Structured grids are stored verbatim alongside the chunk text: an answer that
+        // totals a column must be able to re-read the same cells after a restart.
+        let mut tables = parsed.tables;
+        for t in tables.iter_mut() {
+            t.source_id = source_id.clone();
+            t.notebook_id = nb.to_string();
+            t.id = format!("tbl_{}", crate::domain::short_hash(&format!("{}|{}", t.source_id, t.sheet)));
+        }
+        let table_summary: Vec<Value> = tables
+            .iter()
+            .map(|t| obj! {
+                "id" => t.id.as_str(),
+                "sheet" => t.sheet.as_str(),
+                "hidden" => t.hidden,
+                "columns" => Value::Arr(t.headers.iter().map(|h| Value::from(h.as_str())).collect()),
+                "row_count" => t.rows.len() as u64,
+            })
+            .collect();
+        let table_count = tables.len() as u64;
+        let table_row_count: u64 = tables.iter().map(|t| t.rows.len() as u64).sum();
+        if !tables.is_empty() {
+            self.store
+                .write(|db| db.tables.extend(tables))
+                .map_err(|e| err(500, "storage", &e.to_string()))?;
+        }
+
         let fetched_url = fetched.as_ref().map(|f| f.canonical_url.clone()).unwrap_or_default();
         let fetched_status = fetched.as_ref().map(|f| f.status as u64).unwrap_or(0);
         let mut meta_json = BTreeMap::new();
@@ -4999,6 +5108,9 @@ impl Api {
             "page_count" => self.store.read(|db| db.sources.iter().find(|s| s.id == source_id).map(|s| s.page_count).unwrap_or(0)) as u64,
             "warnings" => Value::Arr(parsed_warnings(&self.store, &sid_for_warn)),
             "preview" => Value::Arr(for_response),
+            "table_count" => table_count,
+            "table_row_count" => table_row_count,
+            "tables" => Value::Arr(table_summary),
         }))
     }
 
@@ -5040,7 +5152,7 @@ impl Api {
                 .unwrap_or_default()
         });
 
-        let (chunks, sources) = self.store.read(|db| {
+        let (chunks, sources, tables) = self.store.read(|db| {
             let sources: Vec<Source> = db
                 .sources
                 .iter()
@@ -5055,7 +5167,14 @@ impl Api {
                 .filter(|c| selected.is_empty() || selected.contains(&c.source_id))
                 .cloned()
                 .collect();
-            (chunks, sources)
+            let tables: Vec<crate::tables::Table> = db
+                .tables
+                .iter()
+                .filter(|t| t.notebook_id == nb && !t.hidden)
+                .filter(|t| selected.is_empty() || selected.contains(&t.source_id))
+                .cloned()
+                .collect();
+            (chunks, sources, tables)
         });
 
         if chunks.is_empty() {
@@ -5072,10 +5191,24 @@ impl Api {
             .and_then(|c| providers::read_secret(&self.store.dir, &c.id));
         let (engine, engine_note) =
             providers::select(configured.as_ref(), key.as_deref());
-        let answer = engine
-            .answer(&question, &chunks, &sources, 4)
-            .unwrap_or_else(|_| grounded::answer(&question, &chunks, &sources, 4));
-        let problems = grounded::validate_citations(&answer.citations, &chunks);
+
+        // A structured question ("total revenue by region") is answered by computing over
+        // real cells. This runs before text retrieval because the text path can only ever
+        // quote a row, not add one up.
+        let computed = crate::tables::try_answer(&question, &tables, &sources);
+        let (answer, problems) = match computed {
+            Some(a) => {
+                let problems = crate::tables::validate(&a, &tables);
+                (a, problems)
+            }
+            None => {
+                let a = engine
+                    .answer(&question, &chunks, &sources, 4)
+                    .unwrap_or_else(|_| grounded::answer(&question, &chunks, &sources, 4));
+                let problems = grounded::validate_citations(&a.citations, &chunks);
+                (a, problems)
+            }
+        };
 
         let now = now_iso();
         let user_msg = Message {
@@ -5147,6 +5280,8 @@ impl Api {
             "citation_problems" => Value::Arr(problems.iter().map(|p| Value::from(p.as_str())).collect()),
             "sources_considered" => sources.len() as u64,
             "chunks_considered" => chunks.len() as u64,
+            "tables_considered" => tables.len() as u64,
+            "computed" => answer.engine == "table",
             "note" => assistant_msg.note.clone(),
             "notebook_instructions" => instructions,
         }))
@@ -5402,11 +5537,14 @@ impl Api {
                 "format" => "forge.notebook/1",
                 "exported_at" => now_iso(),
                 "notebook" => nb_json(notebook),
-                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == nb).map(source_json).collect()),
+                "sources" => Value::Arr(db.sources.iter().filter(|s| s.notebook_id == nb).map(|s| source_json(s, &db.tables)).collect()),
                 "chunks" => Value::Arr(db.chunks.iter().filter(|c| c.notebook_id == nb).map(chunk_json).collect()),
                 "conversations" => Value::Arr(db.conversations.iter().filter(|c| c.notebook_id == nb).map(conv_json).collect()),
                 "notes" => Value::Arr(db.notes.iter().filter(|n| n.notebook_id == nb).map(note_json).collect()),
                 "artifacts" => Value::Arr(db.artifacts.iter().filter(|a| a.notebook_id == nb).map(artifact_json).collect()),
+                // Grids travel with the notebook: without them a re-imported spreadsheet
+                // source would keep its rows as text but lose every cell reference.
+                "tables" => Value::Arr(db.tables.iter().filter(|t| t.notebook_id == nb).map(crate::store::table_json).collect()),
             }
         });
         Response::json(200, &payload).with_header(
@@ -5542,12 +5680,28 @@ impl Api {
             }
         }
 
+        let mut tables: Vec<crate::tables::Table> = Vec::new();
+        if let Some(arr) = body.get("tables").and_then(|v| v.as_arr()) {
+            for t in arr {
+                let Some(mut table) = crate::store::table_from(t) else { continue };
+                let Some(new_sid) = id_map.get(&table.source_id).cloned() else { continue };
+                table.source_id = new_sid;
+                table.notebook_id = new_nb_id.clone();
+                table.id = format!(
+                    "tbl_{}",
+                    crate::domain::short_hash(&format!("{}|{}", table.source_id, table.sheet))
+                );
+                tables.push(table);
+            }
+        }
+
         let counts = (
             sources.len(),
             chunks.len(),
             notes.len(),
             conversations.len(),
             artifacts.len(),
+            tables.len(),
         );
         let nb_out = new_nb_id.clone();
         self.store
@@ -5558,6 +5712,7 @@ impl Api {
                 db.notes.extend(notes);
                 db.conversations.extend(conversations);
                 db.artifacts.extend(artifacts);
+                db.tables.extend(tables);
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
         Ok(created(obj! {
@@ -5568,6 +5723,7 @@ impl Api {
                 "notes" => counts.2 as u64,
                 "conversations" => counts.3 as u64,
                 "artifacts" => counts.4 as u64,
+                "tables" => counts.5 as u64,
             },
         }))
     }
@@ -5891,7 +6047,9 @@ fn nb_json(n: &Notebook) -> Value {
     }
 }
 
-fn source_json(s: &Source) -> Value {
+fn source_json(s: &Source, tables: &[crate::tables::Table]) -> Value {
+    let mine: Vec<&crate::tables::Table> = tables.iter().filter(|t| t.source_id == s.id).collect();
+    let table_rows: u64 = mine.iter().map(|t| t.rows.len() as u64).sum();
     obj! {
         "id" => s.id.as_str(),
         "notebook_id" => s.notebook_id.as_str(),
@@ -5916,6 +6074,14 @@ fn source_json(s: &Source) -> Value {
             }
             Value::Obj(m)
         },
+        "table_count" => mine.len() as u64,
+        "table_row_count" => table_rows,
+        "table_sheets" => Value::Arr(mine.iter().map(|t| obj! {
+            "id" => t.id.as_str(),
+            "sheet" => t.sheet.as_str(),
+            "row_count" => t.rows.len() as u64,
+            "hidden" => t.hidden,
+        }).collect()),
     }
 }
 
@@ -6550,6 +6716,12 @@ mod tests {
 use crate::json::Value;
 use std::collections::BTreeMap;
 
+/// Stable, content-derived 16-hex-digit id fragment. Used for table ids so that
+/// re-ingesting identical bytes yields identical ids.
+pub fn short_hash(input: &str) -> String {
+    crate::hashes::sha256(input.as_bytes())[..16].to_string()
+}
+
 pub fn new_id(prefix: &str) -> String {
     // Time-ordered, collision-resistant enough for a local single-user app.
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -6674,37 +6846,123 @@ impl SourceKind {
 /// can navigate to the exact page/row/paragraph instead of a loose text match.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Locator {
-    pub kind: String, // "page" | "paragraph" | "row" | "section" | "line"
+    /// "page" | "paragraph" | "row" | "section" | "line" | "cell" | "slide" | "timestamp"
+    pub kind: String,
     pub page: Option<u32>,
     pub paragraph: Option<u32>,
     pub row: Option<u32>,
     pub section: Option<String>,
+    /// Worksheet name for spreadsheet cells (also used for slide names).
+    pub sheet: Option<String>,
+    /// A1 reference or A1 range, e.g. `B7` or `B2:B19`.
+    pub cell: Option<String>,
+    /// 1-based column index; set only when the evidence is a whole column.
+    pub col: Option<u32>,
+    /// Offset into the media timeline, in milliseconds (`kind = "timestamp"`).
+    pub at_ms: Option<u32>,
     pub start: u32,
     pub end: u32,
 }
 
 impl Locator {
     pub fn page(p: u32, start: u32, end: u32) -> Locator {
-        Locator { kind: "page".into(), page: Some(p), paragraph: None, row: None, section: None, start, end }
+        Locator { kind: "page".into(), page: Some(p), paragraph: None, row: None, section: None, sheet: None, cell: None, col: None, at_ms: None, start, end }
     }
     pub fn paragraph(idx: u32, start: u32, end: u32) -> Locator {
-        Locator { kind: "paragraph".into(), page: None, paragraph: Some(idx), row: None, section: None, start, end }
+        Locator { kind: "paragraph".into(), page: None, paragraph: Some(idx), row: None, section: None, sheet: None, cell: None, col: None, at_ms: None, start, end }
     }
     pub fn row(idx: u32, start: u32, end: u32) -> Locator {
-        Locator { kind: "row".into(), page: None, paragraph: None, row: Some(idx), section: None, start, end }
+        Locator { kind: "row".into(), page: None, paragraph: None, row: Some(idx), section: None, sheet: None, cell: None, col: None, at_ms: None, start, end }
     }
+    /// A spreadsheet row: keeps `kind = "row"` (existing contracts) while adding the
+    /// sheet and the exact A1 range, so the row can be found in the grid.
+    pub fn sheet_row(sheet: &str, row: u32, reference: &str) -> Locator {
+        Locator {
+            kind: "row".into(),
+            page: None,
+            paragraph: None,
+            row: Some(row),
+            section: None,
+            sheet: Some(sheet.to_string()),
+            cell: Some(reference.to_string()),
+            col: None,
+            at_ms: None,
+            start: 0,
+            end: 0,
+        }
+    }
+
     pub fn section(name: impl Into<String>, start: u32, end: u32) -> Locator {
-        Locator { kind: "section".into(), page: None, paragraph: None, row: None, section: Some(name.into()), start, end }
+        Locator { kind: "section".into(), page: None, paragraph: None, row: None, section: Some(name.into()), sheet: None, cell: None, col: None, at_ms: None, start, end }
     }
     pub fn line(idx: u32, start: u32, end: u32) -> Locator {
-        Locator { kind: "line".into(), page: None, paragraph: None, row: None, section: Some(idx.to_string()), start, end }
+        Locator { kind: "line".into(), page: None, paragraph: None, row: None, section: Some(idx.to_string()), sheet: None, cell: None, col: None, at_ms: None, start, end }
+    }
+
+    /// A spreadsheet cell or cell range: `Locator::cell("Q1", "B2:B19", 2)`.
+    /// The row is the first row of the range, so a single-cell citation and a
+    /// column citation share one representation.
+    pub fn cell(sheet: &str, reference: &str, row: u32) -> Locator {
+        // the reference may arrive sheet-qualified ("Sales!C2:C6"); the column letters
+        // start after the last '!'
+        let bare = reference.rsplit('!').next().unwrap_or(reference);
+        let col = bare
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .fold(0u32, |acc, c| acc * 26 + (c.to_ascii_uppercase() as u32 - 64));
+        Locator {
+            kind: "cell".into(),
+            page: None,
+            paragraph: None,
+            row: Some(row),
+            section: None,
+            sheet: Some(sheet.to_string()),
+            cell: Some(reference.to_string()),
+            col: if col > 0 { Some(col) } else { None },
+            at_ms: None,
+            start: 0,
+            end: 0,
+        }
+    }
+
+    /// A point on a media timeline (milliseconds).
+    pub fn timestamp(ms: u32) -> Locator {
+        Locator {
+            kind: "timestamp".into(),
+            page: None,
+            paragraph: None,
+            row: None,
+            section: None,
+            sheet: None,
+            cell: None,
+            col: None,
+            at_ms: Some(ms),
+            start: 0,
+            end: 0,
+        }
     }
 
     pub fn human(&self) -> String {
         match self.kind.as_str() {
             "page" => format!("page {}", self.page.unwrap_or(0)),
-            "row" => format!("row {}", self.row.unwrap_or(0)),
+            "row" => match &self.sheet {
+                Some(sheet) => format!("{} row {}", sheet, self.row.unwrap_or(0)),
+                None => format!("row {}", self.row.unwrap_or(0)),
+            },
             "section" => format!("section {}", self.section.clone().unwrap_or_default()),
+            "cell" => {
+                let cell = self.cell.clone().unwrap_or_default();
+                if cell.contains('!') {
+                    cell // already sheet-qualified, e.g. "Sales!C2:C6"
+                } else {
+                    format!("{}!{}", self.sheet.clone().unwrap_or_default(), cell)
+                }
+            }
+            "timestamp" => {
+                let ms = self.at_ms.unwrap_or(0);
+                let total = ms / 1000;
+                format!("{:02}:{:02}", total / 60, total % 60)
+            }
             _ => format!("paragraph {}", self.paragraph.unwrap_or(0)),
         }
     }
@@ -6724,6 +6982,18 @@ impl Locator {
         if let Some(s) = &self.section {
             m.insert("section".into(), Value::from(s.as_str()));
         }
+        if let Some(s) = &self.sheet {
+            m.insert("sheet".into(), Value::from(s.as_str()));
+        }
+        if let Some(c) = &self.cell {
+            m.insert("cell".into(), Value::from(c.as_str()));
+        }
+        if let Some(c) = self.col {
+            m.insert("col".into(), Value::from(c as u64));
+        }
+        if let Some(ms) = self.at_ms {
+            m.insert("at_ms".into(), Value::from(ms as u64));
+        }
         m.insert("start".into(), Value::from(self.start as u64));
         m.insert("end".into(), Value::from(self.end as u64));
         Value::Obj(m)
@@ -6736,6 +7006,10 @@ impl Locator {
             paragraph: v.get("paragraph").and_then(|x| x.as_f64()).map(|x| x as u32),
             row: v.get("row").and_then(|x| x.as_f64()).map(|x| x as u32),
             section: v.str_of("section").map(|s| s.to_string()),
+            sheet: v.str_of("sheet").map(|s| s.to_string()),
+            cell: v.str_of("cell").map(|s| s.to_string()),
+            col: v.get("col").and_then(|x| x.as_f64()).map(|x| x as u32),
+            at_ms: v.get("at_ms").and_then(|x| x.as_f64()).map(|x| x as u32),
             start: v.get("start").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
             end: v.get("end").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
         }
@@ -6985,6 +7259,30 @@ mod tests {
         assert_eq!(back.page, Some(7));
         assert_eq!(back.kind, "page");
         assert_eq!(l.human(), "page 7");
+    }
+
+    #[test]
+    fn cell_locators_carry_sheet_reference_and_column() {
+        let l = Locator::cell("Sales", "Sales!C2:C6", 2);
+        assert_eq!(l.kind, "cell");
+        assert_eq!(l.sheet.as_deref(), Some("Sales"));
+        assert_eq!(l.cell.as_deref(), Some("Sales!C2:C6"));
+        assert_eq!(l.col, Some(3), "C is column 3, sheet name must not be parsed as letters");
+        assert_eq!(l.row, Some(2));
+        assert_eq!(l.human(), "Sales!C2:C6");
+        let back = Locator::from_json(&l.to_json());
+        assert_eq!(back.cell, l.cell);
+        assert_eq!(back.col, l.col);
+
+        // a row locator can also be sheet-qualified and keep its range
+        let r = Locator::sheet_row("Sales", 4, "A4-D4");
+        assert_eq!(r.kind, "row");
+        assert_eq!(r.human(), "Sales row 4");
+
+        let t = Locator::timestamp(75_000);
+        assert_eq!(t.kind, "timestamp");
+        assert_eq!(t.human(), "01:15");
+        assert_eq!(Locator::from_json(&t.to_json()).at_ms, Some(75_000));
     }
 
     #[test]
@@ -8915,6 +9213,8 @@ pub struct Parsed {
     pub blocks: Vec<Block>,
     pub warnings: Vec<String>,
     pub page_count: u32,
+    /// Structured grids (spreadsheets/CSV). Empty for prose formats.
+    pub tables: Vec<crate::tables::Table>,
 }
 
 /// Chunking targets. Small enough for precise citations, large enough to be
@@ -8972,35 +9272,68 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
                 .into_iter()
                 .map(|(loc, text)| Block { text, locator: loc })
                 .collect();
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings: doc.warnings, page_count: doc.pages.len() as u32 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings: doc.warnings, page_count: doc.pages.len() as u32, tables: Vec::new() })
         }
         "docx" => {
             let (blocks, warnings) = ooxml::docx(bytes)?;
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
         "pptx" => {
             let (blocks, warnings) = ooxml::pptx(bytes)?;
             let slides = blocks.len() as u32;
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: slides })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: slides, tables: Vec::new() })
         }
         "xlsx" => {
-            let (blocks, warnings) = ooxml::xlsx(bytes)?;
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            // The grid is the source of truth: it gives every sheet, real row numbers and
+            // exact cell references, which flattened text cannot. The row-oriented path in
+            // `ooxml::xlsx` remains the fallback when the workbook has no usable grid.
+            match crate::tables::parse_xlsx(bytes, "", "") {
+                Ok(tables) if !tables.is_empty() => {
+                    let blocks = crate::tables::table_blocks(&tables);
+                    let warnings: Vec<String> = tables
+                        .iter()
+                        .flat_map(|t| t.warnings.iter().cloned())
+                        .collect();
+                    Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables })
+                }
+                other => {
+                    let (blocks, mut warnings) = ooxml::xlsx(bytes)?;
+                    if let Err(e) = other {
+                        warnings.push(format!("worksheet structure could not be read: {}", e));
+                    }
+                    Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
+                }
+            }
         }
         "csv" | "tsv" => {
             let raw = decode_text(bytes);
-            let (blocks, warnings) = text::csv_blocks(&raw, kind == "tsv");
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            let forced = if kind == "tsv" { Some('\t') } else { None };
+            match crate::tables::parse_delimited(bytes, filename, forced, "", "") {
+                // Row passages come from the parsed grid, so a quoted separator or a
+                // decimal comma cannot shift values into the wrong field.
+                Ok(t) if !t.rows.is_empty() => {
+                    let warnings = t.warnings.clone();
+                    let blocks = crate::tables::table_blocks(&[t.clone()]);
+                    Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: vec![t] })
+                }
+                other => {
+                    let (blocks, mut warnings) = text::csv_blocks(&raw, kind == "tsv");
+                    if let Err(e) = other {
+                        warnings.push(format!("table structure could not be read: {}", e));
+                    }
+                    Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
+                }
+            }
         }
         "html" | "htm" => {
             let raw = decode_text(bytes);
             let (blocks, warnings) = text::html_blocks(&raw);
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
         "markdown" | "md" => {
             let raw = decode_text(bytes);
             let blocks = text::markdown_blocks(&raw);
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings: Vec::new(), page_count: 0 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings: Vec::new(), page_count: 0, tables: Vec::new() })
         }
         _ => {
             let raw = decode_text(bytes);
@@ -9010,7 +9343,7 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
             } else {
                 Vec::new()
             };
-            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0 })
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
     }
 }
@@ -11104,6 +11437,7 @@ pub mod providers;
 pub mod retrieve;
 pub mod security;
 pub mod store;
+pub mod tables;
 pub mod web;
 
 pub use domain::*;
@@ -12637,6 +12971,9 @@ use std::net::{IpAddr, ToSocketAddrs};
 pub const MAX_SOURCE_BYTES: usize = 25 * 1024 * 1024;
 pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_URL_LEN: usize = 2048;
+/// Rows kept per worksheet. Beyond this the grid is truncated and aggregations refuse
+/// to run, because a total over a partial sheet would be a wrong number stated confidently.
+pub const MAX_TABLE_ROWS: usize = 20_000;
 
 #[derive(Debug, PartialEq)]
 pub enum UrlVerdict {
@@ -13044,6 +13381,7 @@ mod tests {
 
 use crate::domain::*;
 use crate::json::{self, Value};
+use crate::obj;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13057,6 +13395,9 @@ pub struct Db {
     pub conversations: Vec<Conversation>,
     pub notes: Vec<Note>,
     pub artifacts: Vec<Artifact>,
+    /// Structured grids parsed from spreadsheet/CSV sources, stored verbatim so an
+    /// aggregation after a restart uses the same cells it used before one.
+    pub tables: Vec<crate::tables::Table>,
 }
 
 pub struct Store {
@@ -13127,6 +13468,7 @@ fn encode_db(db: &Db) -> Value {
     );
     m.insert("notes".into(), Value::Arr(db.notes.iter().map(note_json).collect()));
     m.insert("artifacts".into(), Value::Arr(db.artifacts.iter().map(artifact_json).collect()));
+    m.insert("tables".into(), Value::Arr(db.tables.iter().map(table_json).collect()));
     Value::Obj(m)
 }
 
@@ -13140,6 +13482,7 @@ fn decode_db(text: &str) -> Option<Db> {
         conversations: arr("conversations").iter().map(conv_from).collect(),
         notes: arr("notes").iter().map(note_from).collect(),
         artifacts: arr("artifacts").iter().map(artifact_from).collect(),
+        tables: arr("tables").iter().filter_map(table_from).collect(),
     })
 }
 
@@ -13247,6 +13590,115 @@ fn chunk_from(v: &Value) -> Chunk {
     }
 }
 
+pub fn table_json(t: &crate::tables::Table) -> Value {
+    use crate::tables::CellValue;
+    let rows: Vec<Value> = t
+        .rows
+        .iter()
+        .map(|r| {
+            let cells: Vec<Value> = r
+                .cells
+                .iter()
+                .map(|c| {
+                    let mut m = BTreeMap::new();
+                    m.insert("col".into(), Value::from(c.col as u64));
+                    m.insert("header".into(), Value::from(c.header.as_str()));
+                    m.insert("text".into(), Value::from(c.text.as_str()));
+                    m.insert("ref".into(), Value::from(c.reference.as_str()));
+                    m.insert("unit".into(), Value::from(c.unit.as_str()));
+                    if let CellValue::Number(n) = c.value {
+                        m.insert("num".into(), Value::from(n));
+                    }
+                    if let Some(f) = &c.formula {
+                        m.insert("formula".into(), Value::from(f.as_str()));
+                    }
+                    Value::Obj(m)
+                })
+                .collect();
+            obj! { "row" => r.number as u64, "cells" => Value::Arr(cells) }
+        })
+        .collect();
+    obj! {
+        "id" => t.id.as_str(),
+        "source_id" => t.source_id.as_str(),
+        "notebook_id" => t.notebook_id.as_str(),
+        "sheet" => t.sheet.as_str(),
+        "hidden" => t.hidden,
+        "truncated" => t.truncated,
+        "headers" => Value::Arr(t.headers.iter().map(|h| Value::from(h.as_str())).collect()),
+        "warnings" => Value::Arr(t.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
+        "rows" => Value::Arr(rows),
+    }
+}
+
+pub fn table_from(v: &Value) -> Option<crate::tables::Table> {
+    use crate::tables::{Cell, CellValue, Row, Table};
+    let id = s(v, "id");
+    if id.is_empty() {
+        return None;
+    }
+    let headers: Vec<String> = v
+        .get("headers")
+        .and_then(|x| x.as_arr())
+        .map(|a| a.iter().map(|h| h.as_str().unwrap_or("").to_string()).collect())
+        .unwrap_or_default();
+    let rows = v
+        .get("rows")
+        .and_then(|x| x.as_arr())
+        .map(|arr| {
+            arr.iter()
+                .map(|r| {
+                    let cells = r
+                        .get("cells")
+                        .and_then(|x| x.as_arr())
+                        .map(|ca| {
+                            ca.iter()
+                                .map(|c| {
+                                    let text = s(c, "text");
+                                    let num = c.get("num").and_then(|x| x.as_f64());
+                                    let value = match num {
+                                        Some(n) => CellValue::Number(n),
+                                        None if text.is_empty() => CellValue::Empty,
+                                        None => CellValue::Text(text.clone()),
+                                    };
+                                    Cell {
+                                        col: c.get("col").and_then(|x| x.as_f64()).unwrap_or(1.0) as u32,
+                                        header: s(c, "header"),
+                                        value,
+                                        text,
+                                        reference: s(c, "ref"),
+                                        unit: s(c, "unit"),
+                                        formula: c.str_of("formula").map(|f| f.to_string()),
+                                    }
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Row {
+                        number: r.get("row").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
+                        cells,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Table {
+        id,
+        source_id: s(v, "source_id"),
+        notebook_id: s(v, "notebook_id"),
+        sheet: s(v, "sheet"),
+        hidden: v.get("hidden").and_then(|b| b.as_bool()).unwrap_or(false),
+        truncated: v.get("truncated").and_then(|b| b.as_bool()).unwrap_or(false),
+        headers,
+        rows,
+        warnings: v
+            .get("warnings")
+            .and_then(|x| x.as_arr())
+            .map(|a| a.iter().filter_map(|w| w.as_str().map(|x| x.to_string())).collect())
+            .unwrap_or_default(),
+    })
+}
+
 fn conv_json(c: &Conversation) -> Value {
     let mut m = BTreeMap::new();
     m.insert("id".into(), Value::from(c.id.as_str()));
@@ -13338,6 +13790,41 @@ mod tests {
     }
 
     #[test]
+    fn tables_survive_a_restart_with_cells_intact() {
+        let dir = tmpdir("tables");
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/sales.xlsx");
+        let bytes = fs::read(fixture).unwrap();
+        let mut parsed = crate::tables::parse_xlsx(&bytes, "src-1", "nb-1").unwrap();
+        assert_eq!(parsed.len(), 2);
+        {
+            let st = Store::open(&dir).unwrap();
+            st.write(|db| db.tables.append(&mut parsed)).unwrap();
+        }
+        // reopen: a fresh process would do exactly this
+        let st = Store::open(&dir).unwrap();
+        let (tables, reopened_json) = st.read(|db| (db.tables.clone(), json::to_string(&encode_db(db))));
+        assert_eq!(tables.len(), 2, "both sheets persisted");
+        let sales = tables.iter().find(|t| t.sheet == "Sales").expect("Sales");
+        assert_eq!(sales.headers, vec!["Region", "Channel", "Revenue", "Units"]);
+        assert_eq!(sales.rows.len(), 5);
+        let c2 = sales.rows.iter().find(|r| r.number == 2).unwrap();
+        assert_eq!(sales.cell(c2, 2).unwrap().number(), Some(1200.5), "precision kept");
+        let c4 = sales.rows.iter().find(|r| r.number == 4).unwrap();
+        assert_eq!(sales.cell(c4, 2).unwrap().formula.as_deref(), Some("SUM(C2:C3)"));
+        assert!(matches!(sales.cell(c4, 3).unwrap().value, crate::tables::CellValue::Empty));
+        let meta = tables.iter().find(|t| t.sheet == "Meta").expect("Meta");
+        assert!(meta.hidden, "hidden flag persists");
+
+        // and the aggregation after a restart produces the same number
+        let src = Source { id: "src-1".into(), title: "Sales 2026".into(), ..Default::default() };
+        let a = crate::tables::try_answer("total revenue", &tables, &[src]).unwrap();
+        assert!(a.text.contains("2350.5"), "{}", a.text);
+        // the encoded document stays parseable
+        assert!(json::parse(&reopened_json).is_ok());
+    }
+
+    #[test]
     fn persists_across_reopen() {
         let dir = tmpdir("persist");
         {
@@ -13388,6 +13875,1695 @@ mod tests {
         let p = st.backup().unwrap();
         assert!(p.exists());
         fs::remove_dir_all(&dir).ok();
+    }
+}
+```
+
+## `crates/forge-core/src/tables.rs`
+
+```rust
+//! Structured tables: parsing, cell-level locators and deterministic aggregation.
+//!
+//! Spreadsheets and CSVs are not prose. Flattening them into text destroys exactly the
+//! information a user asks about — which row, which column, which cell — so this module
+//! keeps the grid intact:
+//!
+//! * every cell has an A1-style reference (`Sheet2!B7`) and a display value;
+//! * every row keeps its **original** row number (the header is row 1);
+//! * empty and unparseable cells stay empty — they are never coerced to `0`;
+//! * aggregations are computed **only** over cells that really hold a number, and the
+//!   answer states how many rows were excluded and why.
+//!
+//! Parsing is RFC 4180 for CSV/TSV (quoted fields, embedded newlines, `""` escapes,
+//! CRLF, BOM, delimiter sniffing) and real OOXML for XLSX (every sheet, shared strings,
+//! inline strings, formulas' cached values, hidden sheets flagged).
+
+use crate::domain::{Citation, Locator};
+use crate::grounded::Answer;
+use crate::retrieve;
+use std::collections::BTreeMap;
+
+// ---------------------------------------------------------------- model
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CellValue {
+    Number(f64),
+    Text(String),
+    /// Nothing was there, or the cell held an explicit placeholder (`-`, `N/A`).
+    Empty,
+}
+
+#[derive(Debug, Clone)]
+pub struct Cell {
+    /// 1-based column index.
+    pub col: u32,
+    pub header: String,
+    pub value: CellValue,
+    /// Display text exactly as it appeared (trimmed).
+    pub text: String,
+    /// A1 reference within the sheet, e.g. `B7`.
+    pub reference: String,
+    /// Unit suffix if the cell looked like `12 kg` / `45%` / `$1,200`.
+    pub unit: String,
+    /// The formula text when the workbook stored one (e.g. `SUM(C2:C3)`).
+    /// We keep it because a cached formula result is *derived*, not authored data.
+    pub formula: Option<String>,
+}
+
+impl Cell {
+    pub fn is_number(&self) -> bool {
+        matches!(self.value, CellValue::Number(_))
+    }
+    pub fn number(&self) -> Option<f64> {
+        match self.value {
+            CellValue::Number(n) => Some(n),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Row {
+    /// Original row number in the document (header row is 1).
+    pub number: u32,
+    pub cells: Vec<Cell>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Table {
+    pub id: String,
+    pub source_id: String,
+    pub notebook_id: String,
+    /// Sheet name, or the file name for a flat CSV.
+    pub sheet: String,
+    pub hidden: bool,
+    pub headers: Vec<String>,
+    pub rows: Vec<Row>,
+    /// True when the sheet had more rows than `security::MAX_TABLE_ROWS`.
+    pub truncated: bool,
+    /// Warnings produced while parsing (ragged rows, duplicate headers, ...).
+    pub warnings: Vec<String>,
+}
+
+impl Table {
+    pub fn column_index(&self, header: &str) -> Option<usize> {
+        self.headers.iter().position(|h| h == header)
+    }
+
+    pub fn cell<'a>(&self, row: &'a Row, col_idx: usize) -> Option<&'a Cell> {
+        row.cells.iter().find(|c| c.col as usize == col_idx + 1)
+    }
+
+    /// A1 range covering a whole column of data (excluding the header row).
+    pub fn column_range(&self, col_idx: usize, first_row: u32, last_row: u32) -> String {
+        let letter = column_letter(col_idx as u32 + 1);
+        format!("{}!{}{}:{}{}", self.sheet, letter, first_row, letter, last_row)
+    }
+
+    /// JSON view. `max_rows` caps the row list (`row_count` always reports the truth),
+    /// so a 50,000-row sheet cannot blow up an HTTP response.
+    pub fn json(&self, max_rows: usize) -> crate::json::Value {
+        use crate::json::Value;
+        use crate::obj;
+        let rows: Vec<Value> = self
+            .rows
+            .iter()
+            .take(max_rows)
+            .map(|r| {
+                let cells: Vec<Value> = r
+                    .cells
+                    .iter()
+                    .map(|c| {
+                        obj! {
+                            "ref" => c.reference.as_str(),
+                            "column" => c.header.as_str(),
+                            "text" => c.text.as_str(),
+                            "number" => match c.number() { Some(n) => Value::from(n), None => Value::Null },
+                            "unit" => c.unit.as_str(),
+                        }
+                    })
+                    .collect();
+                obj! { "row" => r.number as u64, "cells" => Value::Arr(cells) }
+            })
+            .collect();
+        obj! {
+            "id" => self.id.as_str(),
+            "source_id" => self.source_id.as_str(),
+            "sheet" => self.sheet.as_str(),
+            "hidden" => self.hidden,
+            "columns" => Value::Arr(self.headers.iter().map(|h| Value::from(h.as_str())).collect()),
+            "row_count" => self.rows.len() as u64,
+            "truncated" => self.truncated || self.rows.len() > max_rows,
+            "rows" => Value::Arr(rows),
+            "warnings" => Value::Arr(self.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
+        }
+    }
+}
+
+/// 1 → `A`, 26 → `Z`, 27 → `AA`.
+pub fn column_letter(mut col: u32) -> String {
+    let mut out = Vec::new();
+    while col > 0 {
+        let rem = ((col - 1) % 26) as u8;
+        out.push(b'A' + rem);
+        col = (col - 1) / 26;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// `AA12` → (27, 12). Returns `None` for a malformed reference.
+pub fn parse_reference(raw: &str) -> Option<(u32, u32)> {
+    let letters: String = raw.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+    let digits: String = raw.chars().skip(letters.len()).collect();
+    if letters.is_empty() || digits.is_empty() {
+        return None;
+    }
+    let mut col = 0u32;
+    for ch in letters.to_ascii_uppercase().bytes() {
+        col = col * 26 + (ch - b'A' + 1) as u32;
+    }
+    let row: u32 = digits.parse().ok()?;
+    Some((col, row))
+}
+
+// ---------------------------------------------------------------- numbers
+
+/// Parse a spreadsheet-looking number.
+///
+/// Returns `(value, unit)` where `unit` is whatever meaningful suffix followed the
+/// digits (`%`, `kg`, `ms`). Separators are disambiguated rather than assumed:
+///
+/// | input      | value    | why                                        |
+/// |------------|----------|--------------------------------------------|
+/// | `1,234.50` | 1234.5   | `.` rightmost → decimal, `,` grouping      |
+/// | `1.234,50` | 1234.5   | `,` rightmost → decimal, `.` grouping      |
+/// | `1200,50`  | 1200.5   | one comma, 2-digit tail → decimal comma    |
+/// | `1,200`    | 1200     | one comma, 3-digit tail → grouping         |
+/// | `1,23,456` | —        | inconsistent grouping → **rejected**       |
+///
+/// A value that cannot be parsed is treated as missing, never as zero.
+pub fn parse_number(raw: &str) -> Option<(f64, String)> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let placeholders = ["-", "--", "n/a", "na", "null", "none", "nan", "?"];
+    if placeholders.contains(&t.to_ascii_lowercase().as_str()) {
+        return None;
+    }
+
+    let mut s = t.to_string();
+    let mut unit_prefix = String::new();
+    let mut negative = false;
+    // accounting negatives: (1,200)
+    if s.starts_with('(') && s.ends_with(')') {
+        negative = true;
+        s = s[1..s.len() - 1].trim().to_string();
+    }
+    // currency prefix / suffix
+    for sym in ["$", "€", "£", "₹", "¥"] {
+        if let Some(rest) = s.strip_prefix(sym) {
+            s = rest.trim().to_string();
+        }
+        if let Some(rest) = s.strip_suffix(sym) {
+            s = rest.trim().to_string();
+        }
+    }
+    if let Some(rest) = s.strip_suffix('%') {
+        let (n, _) = parse_number(rest.trim())?;
+        return Some((if negative { -n } else { n }, "%".to_string()));
+    }
+    if let Some(rest) = s.strip_prefix('-') {
+        negative = !negative;
+        s = rest.trim().to_string();
+    } else if let Some(rest) = s.strip_prefix('+') {
+        s = rest.trim().to_string();
+    }
+
+    // Split the leading numeric token (digits and separators) from a trailing unit.
+    let mut body = String::new();
+    let mut saw_digit = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.peek().copied() {
+        match c {
+            '0'..='9' => {
+                body.push(c);
+                saw_digit = true;
+                chars.next();
+            }
+            ',' | '.' => {
+                body.push(c);
+                chars.next();
+            }
+            _ => break,
+        }
+    }
+    if !saw_digit {
+        return None;
+    }
+    let unit: String = chars.collect::<String>().trim().to_string();
+    // A unit must look like a unit, not a sentence fragment.
+    if unit.len() > 12 || unit.contains(' ') || unit.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if !unit.is_empty() {
+        unit_prefix = unit;
+    }
+
+    let value = normalize_number_body(&body)?;
+    let value = if negative { -value } else { value };
+    Some((value, unit_prefix))
+}
+
+/// Turn a digit string with arbitrary `,`/`.` separators into a number, or reject it.
+fn normalize_number_body(body: &str) -> Option<f64> {
+    let digit_groups_ok = |groups: &[&str]| {
+        groups.first().map(|g| !g.is_empty() && g.len() <= 3).unwrap_or(false)
+            && groups.iter().all(|g| g.chars().all(|c| c.is_ascii_digit()))
+            && groups[1..].iter().all(|g| g.len() == 3)
+    };
+    let commas = body.matches(',').count();
+    let dots = body.matches('.').count();
+
+    let normalized = if commas > 0 && dots > 0 {
+        // The rightmost separator is the decimal point; the other one must group in 3s.
+        let decimal_is_comma = body.rfind(',') > body.rfind('.');
+        let (dec_at, dec_sep) = if decimal_is_comma { (body.rfind(','), ',') } else { (body.rfind('.'), '.') };
+        let dec_at = dec_at?;
+        let (int_part, frac_part) = (&body[..dec_at], &body[dec_at + 1..]);
+        if frac_part.is_empty() || !frac_part.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        let grouping_sep = if dec_sep == ',' { '.' } else { ',' };
+        if int_part.contains(grouping_sep) {
+            let groups: Vec<&str> = int_part.split(grouping_sep).collect();
+            if !digit_groups_ok(&groups) {
+                return None;
+            }
+            format!("{}.{}", groups.concat(), frac_part)
+        } else if int_part.chars().all(|c| c.is_ascii_digit()) && !int_part.is_empty() {
+            format!("{}.{}", int_part, frac_part)
+        } else {
+            return None;
+        }
+    } else if commas > 0 {
+        let parts: Vec<&str> = body.split(',').collect();
+        if !parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit())) {
+            return None;
+        }
+        if digit_groups_ok(&parts) {
+            parts.concat() // thousands grouping
+        } else if parts.len() == 2 && (1..=2).contains(&parts[1].len()) {
+            format!("{}.{}", parts[0], parts[1]) // decimal comma
+        } else {
+            return None; // ambiguous or inconsistent grouping — refuse rather than guess
+        }
+    } else if dots > 1 {
+        let parts: Vec<&str> = body.split('.').collect();
+        if !parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit())) {
+            return None;
+        }
+        if digit_groups_ok(&parts) {
+            parts.concat() // dot thousands grouping, e.g. 1.234.567
+        } else {
+            return None;
+        }
+    } else {
+        body.to_string()
+    };
+    if normalized.is_empty() || normalized == "." {
+        return None;
+    }
+    normalized.parse::<f64>().ok()
+}
+
+fn cell_from_text(raw: &str, col: u32, header: &str, row_number: u32) -> Cell {
+    let text = raw.trim().to_string();
+    let (value, unit) = match parse_number(&text) {
+        Some((n, u)) => (CellValue::Number(n), u),
+        None if text.is_empty() => (CellValue::Empty, String::new()),
+        None => {
+            // explicit placeholders are missing data, not text that happens to be "-"
+            let lower = text.to_ascii_lowercase();
+            if ["-", "--", "n/a", "na", "null", "none", "nan"].contains(&lower.as_str()) {
+                (CellValue::Empty, String::new())
+            } else {
+                (CellValue::Text(text.clone()), String::new())
+            }
+        }
+    };
+    Cell {
+        col,
+        header: header.to_string(),
+        value,
+        text,
+        reference: format!("{}{}", column_letter(col), row_number),
+        unit,
+        formula: None,
+    }
+}
+
+// ---------------------------------------------------------------- CSV / TSV
+
+/// Split CSV text into rows of fields (RFC 4180).
+pub fn csv_rows(text: &str, delimiter: char) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row: Vec<String> = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if quoted {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    field.push('"');
+                    chars.next();
+                } else {
+                    quoted = false;
+                }
+            } else {
+                field.push(c);
+            }
+            continue;
+        }
+        match c {
+            '"' if field.trim().is_empty() => {
+                field.clear();
+                quoted = true;
+            }
+            c if c == delimiter => {
+                row.push(std::mem::take(&mut field));
+            }
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+            }
+            '\n' => {
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+            }
+            _ => field.push(c),
+        }
+    }
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        rows.push(row);
+    }
+    // drop a trailing empty row produced by a final newline
+    while rows.last().map(|r| r.iter().all(|f| f.trim().is_empty())).unwrap_or(false) {
+        rows.pop();
+    }
+    rows
+}
+
+/// Guess the delimiter by counting candidates outside quoted regions in the first line.
+pub fn sniff_delimiter(text: &str) -> char {
+    let first_line_end = text.find('\n').unwrap_or(text.len());
+    let head = &text[..first_line_end];
+    let mut best = (',', 0usize);
+    for cand in [',', ';', '\t', '|'] {
+        let mut count = 0usize;
+        let mut quoted = false;
+        for c in head.chars() {
+            match c {
+                '"' => quoted = !quoted,
+                c if c == cand && !quoted => count += 1,
+                _ => {}
+            }
+        }
+        if count > best.1 {
+            best = (cand, count);
+        }
+    }
+    best.0
+}
+
+fn normalize_headers(raw: &[String], warnings: &mut Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(raw.len());
+    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    for (i, h) in raw.iter().enumerate() {
+        let mut name = h.trim().to_string();
+        if name.is_empty() {
+            name = format!("Column {}", column_letter(i as u32 + 1));
+            warnings.push(format!("header {} was empty; named it \"{}\"", i + 1, name));
+        }
+        let count = seen.entry(name.clone()).or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            let renamed = format!("{} ({})", name, count);
+            warnings.push(format!("duplicate header \"{}\" renamed to \"{}\"", name, renamed));
+            name = renamed;
+        }
+        out.push(name);
+    }
+    out
+}
+
+/// Build a `Table` from raw rows. `sheet` names the table; row numbers are 1-based and
+/// the first row is the header.
+pub fn table_from_rows(
+    rows: Vec<Vec<String>>,
+    sheet: &str,
+    source_id: &str,
+    notebook_id: &str,
+    warnings: &mut Vec<String>,
+) -> Option<Table> {
+    if rows.is_empty() {
+        return None;
+    }
+    let header_row = &rows[0];
+    let mut headers = normalize_headers(header_row, warnings);
+    let width = headers.len();
+    let mut extra_cols = 0usize;
+
+    let mut out_rows: Vec<Row> = Vec::new();
+    for (i, raw) in rows.iter().enumerate().skip(1) {
+        let number = (i + 1) as u32;
+        if raw.iter().all(|f| f.trim().is_empty()) {
+            continue; // blank separator line
+        }
+        let mut cells: Vec<Cell> = Vec::with_capacity(raw.len().max(width));
+        for (j, field) in raw.iter().enumerate() {
+            let header = headers
+                .get(j)
+                .cloned()
+                .unwrap_or_else(|| format!("Column {}", column_letter(j as u32 + 1)));
+            if j >= headers.len() {
+                headers.push(header.clone());
+                extra_cols += 1;
+            }
+            cells.push(cell_from_text(field, j as u32 + 1, &header, number));
+        }
+        out_rows.push(Row { number, cells });
+    }
+    if extra_cols > 0 {
+        warnings.push(format!(
+            "{} row(s) had more fields than the header; {} extra column(s) were added",
+            out_rows.len(),
+            extra_cols
+        ));
+    }
+    if out_rows.is_empty() {
+        warnings.push("the table has a header but no data rows".to_string());
+    }
+    let mut truncated = false;
+    if out_rows.len() > crate::security::MAX_TABLE_ROWS {
+        truncated = true;
+        warnings.push(format!(
+            "only the first {} of {} rows were kept; totals over a partial sheet are refused",
+            crate::security::MAX_TABLE_ROWS,
+            out_rows.len()
+        ));
+        out_rows.truncate(crate::security::MAX_TABLE_ROWS);
+    }
+    Some(Table {
+        id: format!("tbl_{}", crate::domain::short_hash(&format!("{}|{}", source_id, sheet))),
+        source_id: source_id.to_string(),
+        notebook_id: notebook_id.to_string(),
+        sheet: sheet.to_string(),
+        hidden: false,
+        headers,
+        rows: out_rows,
+        truncated,
+        warnings: warnings.clone(),
+    })
+}
+
+/// Parse a delimited text file (CSV/TSV) into one table.
+pub fn parse_delimited(
+    bytes: &[u8],
+    name: &str,
+    forced: Option<char>,
+    source_id: &str,
+    notebook_id: &str,
+) -> Result<Table, String> {
+    let text = crate::ingest::decode_text(bytes);
+    if text.trim().is_empty() {
+        return Err("the file is empty".into());
+    }
+    let delim = forced.unwrap_or_else(|| sniff_delimiter(&text));
+    let rows = csv_rows(&text, delim);
+    if rows.is_empty() {
+        return Err("no rows could be parsed".into());
+    }
+    let mut warnings = Vec::new();
+    let sheet = name
+        .rsplit('/')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(".csv")
+        .trim_end_matches(".tsv")
+        .to_string();
+    table_from_rows(rows, &sheet, source_id, notebook_id, &mut warnings)
+        .ok_or_else(|| "the file produced no table".to_string())
+}
+
+// ---------------------------------------------------------------- XLSX
+
+fn xml_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        if let Some(semi) = tail.find(';') {
+            let entity = &tail[1..semi];
+            let replaced = match entity {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                _ => entity
+                    .strip_prefix("#x")
+                    .or_else(|| entity.strip_prefix("#X"))
+                    .and_then(|h| u32::from_str_radix(h, 16).ok())
+                    .and_then(char::from_u32)
+                    .or_else(|| {
+                        entity
+                            .strip_prefix('#')
+                            .and_then(|d| d.parse::<u32>().ok())
+                            .and_then(char::from_u32)
+                    }),
+            };
+            match replaced {
+                Some(c) => {
+                    out.push(c);
+                    rest = &tail[semi + 1..];
+                }
+                None => {
+                    out.push('&');
+                    rest = &tail[1..];
+                }
+            }
+        } else {
+            out.push_str(tail);
+            rest = "";
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Text of every `<t>` inside a fragment (handles rich-text runs).
+fn joined_text(fragment: &str) -> String {
+    let mut out = String::new();
+    let mut rest = fragment;
+    while let Some(start) = rest.find("<t") {
+        let tail = &rest[start..];
+        let Some(open_end) = tail.find('>') else { break };
+        let after = &tail[open_end + 1..];
+        let Some(close) = after.find("</t>") else { break };
+        out.push_str(&xml_unescape(&after[..close]));
+        rest = &after[close + 4..];
+    }
+    out
+}
+
+fn shared_strings(bytes: &[u8]) -> Vec<String> {
+    let raw = match crate::ingest::zip::read_named(bytes, "xl/sharedStrings.xml") {
+        Ok(Some(v)) => v,
+        _ => return Vec::new(),
+    };
+    let xml = String::from_utf8_lossy(&raw).to_string();
+    let mut out = Vec::new();
+    let mut rest = xml.as_str();
+    while let Some(start) = rest.find("<si>").or_else(|| rest.find("<si ")) {
+        let tail = &rest[start..];
+        let Some(end) = tail.find("</si>") else { break };
+        out.push(joined_text(&tail[..end]));
+        rest = &tail[end + 5..];
+    }
+    out
+}
+
+/// Sheet name → worksheet path, in workbook order.
+fn workbook_sheets(bytes: &[u8]) -> Vec<(String, String, bool)> {
+    let mut sheets = Vec::new();
+    let rels: BTreeMap<String, String> = match crate::ingest::zip::read_named(bytes, "xl/_rels/workbook.xml.rels") {
+        Ok(Some(raw)) => {
+            let xml = String::from_utf8_lossy(&raw).to_string();
+            let mut map = BTreeMap::new();
+            let mut rest = xml.as_str();
+            while let Some(start) = rest.find("<Relationship") {
+                let tail = &rest[start..];
+                let Some(end) = tail.find('>') else { break };
+                let tag = &tail[..end];
+                if let (Some(id), Some(target)) = (attr_of(tag, "Id"), attr_of(tag, "Target")) {
+                    let path = target.trim_start_matches('/').trim_start_matches("xl/").to_string();
+                    map.insert(id, format!("xl/{}", path));
+                }
+                rest = &tail[end + 1..];
+            }
+            map
+        }
+        _ => BTreeMap::new(),
+    };
+
+    if let Ok(Some(raw)) = crate::ingest::zip::read_named(bytes, "xl/workbook.xml") {
+        let xml = String::from_utf8_lossy(&raw).to_string();
+        let mut rest = xml.as_str();
+        while let Some(start) = rest.find("<sheet ") {
+            let tail = &rest[start..];
+            let Some(end) = tail.find('>') else { break };
+            let tag = &tail[..end];
+            let name = attr_of(tag, "name").map(|n| xml_unescape(&n)).unwrap_or_default();
+            let hidden = attr_of(tag, "state").map(|s| s == "hidden" || s == "veryHidden").unwrap_or(false);
+            let path = attr_of(tag, "r:id")
+                .and_then(|id| rels.get(&id).cloned())
+                .unwrap_or_else(|| format!("xl/worksheets/sheet{}.xml", sheets.len() + 1));
+            sheets.push((name, path, hidden));
+            rest = &tail[end + 1..];
+        }
+    }
+    sheets
+}
+
+/// The `<f>` formula text of a cell body, if the workbook stored one.
+fn formula_of(cbody: &str) -> Option<String> {
+    let start = cbody.find("<f")?;
+    let open = cbody[start..].find('>')? + start + 1;
+    let end = cbody[open..].find("</f>")? + open;
+    let f = xml_unescape(cbody[open..end].trim());
+    if f.is_empty() {
+        None
+    } else {
+        Some(f)
+    }
+}
+
+/// Value of an attribute in a raw tag, e.g. `r="B7"` → `B7`.
+fn attr_of(tag: &str, name: &str) -> Option<String> {
+    let needle = format!("{}=\"", name);
+    let mut from = 0usize;
+    while let Some(rel) = tag[from..].find(&needle) {
+        let at = from + rel;
+        // make sure it is a whole attribute name (not a suffix of another one)
+        let ok = at == 0
+            || tag[..at]
+                .chars()
+                .last()
+                .map(|c| c.is_whitespace() || c == '<')
+                .unwrap_or(false);
+        if ok {
+            let start = at + needle.len();
+            let end = tag[start..].find('"')? + start;
+            return Some(tag[start..end].to_string());
+        }
+        from = at + needle.len();
+    }
+    None
+}
+
+/// Parse every worksheet of an XLSX file.
+pub fn parse_xlsx(bytes: &[u8], source_id: &str, notebook_id: &str) -> Result<Vec<Table>, String> {
+    if !crate::ingest::zip::entries(bytes).map(|e| !e.is_empty()).unwrap_or(false) {
+        return Err("not a ZIP container".into());
+    }
+    let shared = shared_strings(bytes);
+    let mut sheets = workbook_sheets(bytes);
+    if sheets.is_empty() {
+        // fall back to discovery when workbook.xml is missing
+        if let Ok(entries) = crate::ingest::zip::find(bytes, "xl/worksheets/", ".xml") {
+            for (i, e) in entries.iter().enumerate() {
+                sheets.push((format!("Sheet{}", i + 1), e.name.clone(), false));
+            }
+        }
+    }
+    let mut tables = Vec::new();
+    for (name, path, hidden) in sheets {
+        let raw = match crate::ingest::zip::read_named(bytes, &path) {
+            Ok(Some(v)) => v,
+            _ => continue,
+        };
+        let xml = String::from_utf8_lossy(&raw).to_string();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut formulas: BTreeMap<(u32, u32), String> = BTreeMap::new();
+        let mut max_row = 0u32;
+        let mut rest = xml.as_str();
+        // Rows are addressed by their own r="N"; honour it rather than counting.
+        while let Some(start) = rest.find("<row") {
+            let tail = &rest[start..];
+            let Some(tag_end) = tail.find('>') else { break };
+            let row_tag = &tail[..tag_end];
+            let row_num: u32 = attr_of(row_tag, "r").and_then(|r| r.parse().ok()).unwrap_or(max_row + 1);
+            let body_start = tag_end + 1;
+            let body_end = tail[body_start..].find("</row>").map(|e| body_start + e).unwrap_or(tail.len());
+            let body = &tail[body_start..body_end];
+            let mut cells: Vec<(u32, String, Option<String>)> = Vec::new();
+            let mut cel = body;
+            while let Some(cstart) = cel.find("<c ") {
+                let ctail = &cel[cstart..];
+                let Some(ctag_end) = ctail.find('>') else { break };
+                let ctag = &ctail[..ctag_end];
+                let self_closing = ctag.trim_end().ends_with('/');
+                let cbody = if self_closing {
+                    ""
+                } else {
+                    let rest_body = &ctail[ctag_end + 1..];
+                    match rest_body.find("</c>") {
+                        Some(e) => &rest_body[..e],
+                        None => "",
+                    }
+                };
+                let col = attr_of(ctag, "r")
+                    .and_then(|r| parse_reference(&r).map(|(c, _)| c))
+                    .unwrap_or(cells.last().map(|(c, _, _)| c + 1).unwrap_or(1));
+                let ty = attr_of(ctag, "t").unwrap_or_default();
+                let raw_value = if ty == "inlineStr" {
+                    joined_text(cbody)
+                } else {
+                    // <v> holds the value; for t="s" it is an index into shared strings
+                    let v = cbody
+                        .find("<v>")
+                        .and_then(|s| cbody[s + 3..].find("</v>").map(|e| (s + 3, s + 3 + e)))
+                        .map(|(s, e)| cbody[s..e].to_string())
+                        .unwrap_or_default();
+                    match ty.as_str() {
+                        "s" => v
+                            .parse::<usize>()
+                            .ok()
+                            .and_then(|i| shared.get(i).cloned())
+                            .unwrap_or_default(),
+                        "b" => {
+                            if v.trim() == "1" {
+                                "TRUE".to_string()
+                            } else if v.trim() == "0" {
+                                "FALSE".to_string()
+                            } else {
+                                v
+                            }
+                        }
+                        _ => xml_unescape(&v),
+                    }
+                };
+                cells.push((col, raw_value, formula_of(cbody)));
+                cel = &ctail[ctag_end + 1..];
+            }
+            let width = cells.iter().map(|(c, _, _)| *c).max().unwrap_or(0);
+            let mut fields = vec![String::new(); width as usize];
+            for (col, value, formula) in cells {
+                if col >= 1 {
+                    fields[col as usize - 1] = value;
+                    if formula.is_some() {
+                        formulas.insert((row_num, col), formula.unwrap());
+                    }
+                }
+            }
+            while rows.len() < row_num as usize {
+                rows.push(Vec::new());
+            }
+            rows[row_num as usize - 1] = fields;
+            max_row = max_row.max(row_num);
+            rest = &tail[body_end..];
+        }
+        // leading empty rows would become a blank header
+        while rows.first().map(|r| r.iter().all(|f| f.trim().is_empty())).unwrap_or(false) {
+            rows.remove(0);
+        }
+        if rows.is_empty() {
+            continue;
+        }
+        let mut warnings = Vec::new();
+        if hidden {
+            warnings.push("this sheet is hidden in the workbook".to_string());
+        }
+        if let Some(mut t) = table_from_rows(rows, &name, source_id, notebook_id, &mut warnings) {
+            t.hidden = hidden;
+            for r in t.rows.iter_mut() {
+                for c in r.cells.iter_mut() {
+                    if let Some(f) = formulas.get(&(r.number, c.col)) {
+                        c.formula = Some(f.clone());
+                    }
+                }
+            }
+            tables.push(t);
+        }
+    }
+    if tables.is_empty() {
+        return Err("no worksheet contained any cells".into());
+    }
+    Ok(tables)
+}
+
+// ---------------------------------------------------------------- retrieval bridge
+
+/// A compact textual view of a table for lexical retrieval.
+///
+/// Each row becomes one block whose locator points at the row's first and last cell, so
+/// even a plain search answer can be traced to a spreadsheet row.
+pub fn table_blocks(tables: &[Table]) -> Vec<crate::ingest::Block> {
+    let mut out = Vec::new();
+    for t in tables {
+        if t.hidden {
+            continue;
+        }
+        for r in &t.rows {
+            let mut parts: Vec<String> = Vec::new();
+            for c in &r.cells {
+                if c.text.is_empty() {
+                    continue;
+                }
+                parts.push(match &c.formula {
+                    // A cached formula result is derived data; say so in the passage too.
+                    Some(f) => format!("{}: {} (formula ={})", c.header, c.text, f),
+                    None => format!("{}: {}", c.header, c.text),
+                });
+            }
+            if parts.is_empty() {
+                continue;
+            }
+            let text = format!("{} row {} — {}", t.sheet, r.number, parts.join("; "));
+            let last_col = r.cells.iter().map(|c| c.col).max().unwrap_or(1);
+            out.push(crate::ingest::Block {
+                text,
+                locator: Locator::sheet_row(
+                    &t.sheet,
+                    r.number,
+                    &format!("A{}-{}{}", r.number, column_letter(last_col), r.number),
+                ),
+            });
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------- aggregation
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Agg {
+    Sum,
+    Average,
+    Min,
+    Max,
+    Count,
+}
+
+impl Agg {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Agg::Sum => "sum",
+            Agg::Average => "average",
+            Agg::Min => "minimum",
+            Agg::Max => "maximum",
+            Agg::Count => "count",
+        }
+    }
+}
+
+/// Words that signal an aggregation, checked in priority order.
+const AGG_WORDS: &[(&str, Agg)] = &[
+    ("sum", Agg::Sum),
+    ("total", Agg::Sum),
+    ("add", Agg::Sum),
+    ("combined", Agg::Sum),
+    ("average", Agg::Average),
+    ("mean", Agg::Average),
+    ("avg", Agg::Average),
+    ("maximum", Agg::Max),
+    ("max", Agg::Max),
+    ("highest", Agg::Max),
+    ("largest", Agg::Max),
+    ("biggest", Agg::Max),
+    ("most", Agg::Max),
+    ("minimum", Agg::Min),
+    ("min", Agg::Min),
+    ("lowest", Agg::Min),
+    ("smallest", Agg::Min),
+    ("least", Agg::Min),
+    ("count", Agg::Count),
+    ("how many", Agg::Count),
+    ("number of", Agg::Count),
+];
+
+pub fn detect_aggregation(question: &str) -> Option<Agg> {
+    let q = question.to_ascii_lowercase();
+    for (word, agg) in AGG_WORDS {
+        if q.split(|c: char| !c.is_alphanumeric() && c != ' ').any(|w| w.trim() == *word)
+            || q.contains(&format!("{} ", word))
+            || q.ends_with(word)
+        {
+            return Some(*agg);
+        }
+    }
+    None
+}
+
+/// Columns whose header matches the question, best first.
+///
+/// Ranking is lexicographic: header-word match, then "does this column actually hold
+/// numbers", then how many. Without the numeric tie-break a question like
+/// "highest score by team" ranks the *label* column (`team`) above the value column
+/// (`score`) purely because "team" appears in the question, and we would refuse an
+/// answer we can compute.
+pub fn ranked_columns(table: &Table, question: &str) -> Vec<usize> {
+    let q: Vec<String> = retrieve::terms(question).into_iter().map(|t| retrieve::stem(&t)).collect();
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let mut scored: Vec<(usize, f64, usize)> = Vec::new();
+    for (i, header) in table.headers.iter().enumerate() {
+        let h: Vec<String> = retrieve::terms(header).into_iter().map(|t| retrieve::stem(&t)).collect();
+        if h.is_empty() {
+            continue;
+        }
+        let hits = h.iter().filter(|t| q.contains(t)).count();
+        if hits == 0 {
+            continue;
+        }
+        let score = hits as f64 / h.len() as f64;
+        let numeric = table
+            .rows
+            .iter()
+            .filter(|r| table.cell(r, i).map(|c| c.is_number()).unwrap_or(false))
+            .count();
+        scored.push((i, score, numeric));
+    }
+    scored.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.2.cmp(&a.2))
+            .then(a.0.cmp(&b.0))
+    });
+    scored.into_iter().map(|(i, _, _)| i).collect()
+}
+
+/// The single best-matching column, if any header matches the question.
+pub fn pick_column(table: &Table, question: &str) -> Option<usize> {
+    ranked_columns(table, question).first().copied()
+}
+
+/// Pick a grouping column from "by X" / "per X" / "for each X".
+pub fn pick_group_column(table: &Table, question: &str, exclude: usize) -> Option<usize> {
+    let q = question.to_ascii_lowercase();
+    let marker = ["by ", "per ", "for each ", "grouped by "]
+        .iter()
+        .filter_map(|m| q.find(m).map(|i| (i, m.len())))
+        .max_by_key(|(i, _)| *i)?;
+    let tail = &question[marker.0 + marker.1..];
+    for (i, header) in table.headers.iter().enumerate() {
+        if i == exclude {
+            continue;
+        }
+        let h = header.to_ascii_lowercase();
+        if !h.is_empty() && tail.to_ascii_lowercase().trim().starts_with(&h) {
+            return Some(i);
+        }
+    }
+    match ranked_columns(table, tail).first().copied() {
+        Some(i) if i != exclude => Some(i),
+        _ => None,
+    }
+}
+
+/// True when `formula` totals a range inside `letter`'s column, e.g. `SUM(C2:C3)` in C.
+fn is_column_total(formula: &str, letter: &str) -> bool {
+    let f = formula.to_ascii_uppercase();
+    let lb = letter.to_ascii_uppercase().into_bytes();
+    let b = f.as_bytes();
+    let mut i = 0;
+    while i + lb.len() <= b.len() {
+        if &b[i..i + lb.len()] == lb.as_slice() {
+            if let Some((r1, next)) = digits_at(&f, i + lb.len()) {
+                if next < b.len() && b[next] == b':' && b[next + 1..].starts_with(lb.as_slice()) {
+                    if let Some((r2, _)) = digits_at(&f, next + 1 + lb.len()) {
+                        if r2 > r1 {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn digits_at(s: &str, from: usize) -> Option<(u32, usize)> {
+    let rest = s.get(from..)?;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    Some((digits.parse().ok()?, from + digits.len()))
+}
+
+fn fmt_number(n: f64) -> String {
+    if (n - n.round()).abs() < 1e-9 {
+        format!("{}", n.round() as i64)
+    } else {
+        let s = format!("{:.4}", n);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+/// Try to answer an aggregation question from a table.
+///
+/// Returns `None` when the question is not clearly an aggregation over a real column —
+/// the caller then falls back to the ordinary evidence path. It never guesses: an
+/// ambiguous column, mixed units, or a column with no numeric cells yields `None` or an
+/// explicit refusal rather than a number.
+pub fn try_answer(question: &str, tables: &[Table], sources: &[crate::domain::Source]) -> Option<Answer> {
+    let agg = detect_aggregation(question)?;
+    let mut best: Option<(usize, usize, usize, usize, f64)> = None; // table, col, group, numeric, score
+    for (ti, t) in tables.iter().enumerate() {
+        if t.hidden {
+            continue;
+        }
+        for (rank, col) in ranked_columns(t, question).into_iter().enumerate() {
+            let numeric = t
+                .rows
+                .iter()
+                .filter(|r| t.cell(r, col).map(|c| c.is_number()).unwrap_or(false))
+                .count();
+            // a value column is required for every aggregation except `count`
+            if numeric == 0 {
+                continue;
+            }
+            let group = pick_group_column(t, question, col).unwrap_or(usize::MAX);
+            // later tables must beat both the match quality and the data volume
+            let score = numeric as f64 - rank as f64 * 0.001;
+            if best.map(|(_, _, _, _, s)| score > s).unwrap_or(true) {
+                best = Some((ti, col, group, numeric, score));
+            }
+            break; // best-ranked usable column of this table only
+        }
+    }
+    let (ti, col, group_col, _, _) = best?;
+    let table = &tables[ti];
+    if table.truncated {
+        return Some(Answer {
+            text: format!(
+                "I cannot {} “{}” in {}: the sheet has more rows than Forge keeps ({}), so a figure computed over the rows I hold would be wrong.",
+                agg.as_str(),
+                table.headers.get(col).cloned().unwrap_or_default(),
+                table.sheet,
+                table.rows.len()
+            ),
+            citations: Vec::new(),
+            abstained: true,
+            engine: "table".into(),
+            coverage: 0,
+        });
+    }
+    Some(compute(question, table, col, group_col, agg, sources))
+}
+
+fn compute(
+    _question: &str,
+    table: &Table,
+    col: usize,
+    group_col: usize,
+    agg: Agg,
+    sources: &[crate::domain::Source],
+) -> Answer {
+    let source = sources.iter().find(|s| s.id == table.source_id);
+    let source_title = source.map(|s| s.title.clone()).unwrap_or_else(|| table.sheet.clone());
+    let header = table.headers.get(col).cloned().unwrap_or_default();
+
+    // ---- gather values, remembering exactly which rows were used and skipped
+    let letter = column_letter(col as u32 + 1);
+    let mut used: Vec<(u32, f64, String, Option<String>)> = Vec::new();
+    let mut skipped: Vec<(u32, &'static str)> = Vec::new();
+    let mut subtotals: Vec<(u32, String, String)> = Vec::new();
+    let mut units: Vec<String> = Vec::new();
+    for r in &table.rows {
+        match table.cell(r, col) {
+            Some(c) => match c.number() {
+                Some(n) => {
+                    // A cell that totals its own column is derived from the rows above it.
+                    // Counting it as data would double the figure, so it is excluded and named.
+                    match &c.formula {
+                        Some(f) if is_column_total(f, &letter) => {
+                            subtotals.push((r.number, c.reference.clone(), f.clone()));
+                        }
+                        _ => {
+                            used.push((r.number, n, c.reference.clone(), c.formula.clone()));
+                            if !c.unit.is_empty() && !units.contains(&c.unit) {
+                                units.push(c.unit.clone());
+                            }
+                        }
+                    }
+                }
+                None if matches!(c.value, CellValue::Empty) => skipped.push((r.number, "no value")),
+                None => skipped.push((r.number, "not a number")),
+            },
+            None => skipped.push((r.number, "missing cell")),
+        }
+    }
+
+    // ---- refuse rather than mix units
+    if units.len() > 1 {
+        return Answer {
+            text: format!(
+                "I cannot total “{}” in {} because the column mixes units ({}). Summing them would be meaningless, so I am not giving a number.",
+                header,
+                table.sheet,
+                units.join(", ")
+            ),
+            citations: Vec::new(),
+            abstained: true,
+            engine: "table".into(),
+            coverage: 0,
+        };
+    }
+    let unit = units.first().cloned().unwrap_or_default();
+    let unit_suffix = if unit.is_empty() || unit == "%" { unit.clone() } else { format!(" {}", unit) };
+
+    if used.is_empty() {
+        return Answer {
+            text: format!(
+                "I found the “{}” column in {} but none of its {} data rows hold a number, so there is nothing to {}.",
+                header,
+                table.sheet,
+                table.rows.len(),
+                agg.as_str()
+            ),
+            citations: Vec::new(),
+            abstained: true,
+            engine: "table".into(),
+            coverage: 0,
+        };
+    }
+
+    let first_row = used.iter().map(|(r, _, _, _)| *r).min().unwrap_or(0);
+    let last_row = used.iter().map(|(r, _, _, _)| *r).max().unwrap_or(0);
+    let range = table.column_range(col, first_row, last_row);
+    let citation_id = "c1".to_string();
+
+    let mut text = String::new();
+
+    if group_col != usize::MAX {
+        let group_header = table.headers.get(group_col).cloned().unwrap_or_default();
+        let mut groups: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        for r in &table.rows {
+            if subtotals.iter().any(|(row, _, _)| *row == r.number) {
+                continue; // never fold a column total back into a group
+            }
+            let Some(g) = table.cell(r, group_col) else { continue };
+            let Some(n) = table.cell(r, col).and_then(|c| c.number()) else { continue };
+            if g.text.is_empty() {
+                continue;
+            }
+            groups.entry(g.text.clone()).or_default().push(n);
+        }
+        if groups.is_empty() {
+            return Answer {
+                text: format!("I could not group {} by {} because no row has both values.", table.sheet, group_header),
+                citations: Vec::new(),
+                abstained: true,
+                engine: "table".into(),
+                coverage: 0,
+            };
+        }
+        let mut lines = Vec::new();
+        for (name, values) in &groups {
+            let v = match agg {
+                Agg::Sum => values.iter().sum(),
+                Agg::Average => values.iter().sum::<f64>() / values.len() as f64,
+                Agg::Min => values.iter().cloned().fold(f64::INFINITY, f64::min),
+                Agg::Max => values.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+                Agg::Count => values.len() as f64,
+            };
+            lines.push(format!("{} {}: {}{}", agg.as_str(), name, fmt_number(v), unit_suffix));
+        }
+        text.push_str(&format!(
+            "{} of “{}” by “{}” in {} ({} groups, {} rows with values):\n\n- {}",
+            match agg { Agg::Sum => "Totals", Agg::Average => "Averages", Agg::Min => "Minimums", Agg::Max => "Maximums", Agg::Count => "Counts" },
+            header,
+            group_header,
+            table.sheet,
+            groups.len(),
+            used.len(),
+            lines.join("\n- ")
+        ));
+    } else {
+        let value = match agg {
+            Agg::Sum => used.iter().map(|(_, n, _, _)| n).sum::<f64>(),
+            Agg::Average => used.iter().map(|(_, n, _, _)| n).sum::<f64>() / used.len() as f64,
+            Agg::Min => used.iter().map(|(_, n, _, _)| *n).fold(f64::INFINITY, f64::min),
+            Agg::Max => used.iter().map(|(_, n, _, _)| *n).fold(f64::NEG_INFINITY, f64::max),
+            Agg::Count => used.len() as f64,
+        };
+        let label = match agg {
+            Agg::Sum => "Total",
+            Agg::Average => "Average",
+            Agg::Min => "Minimum",
+            Agg::Max => "Maximum",
+            Agg::Count => "Count",
+        };
+        let mut detail = format!(
+            "{} of “{}”: {}{} — computed over {} numeric cell(s) in {}",
+            label,
+            header,
+            fmt_number(value),
+            unit_suffix,
+            used.len(),
+            range
+        );
+        if agg == Agg::Max || agg == Agg::Min {
+            let target = value;
+            if let Some((row, _, reference, _)) = used.iter().find(|(_, n, _, _)| (*n - target).abs() < 1e-9) {
+                detail.push_str(&format!(" (row {}, cell {})", row, reference));
+            }
+        }
+        text.push_str(&detail);
+    }
+
+    if !skipped.is_empty() {
+        let sample: Vec<String> = skipped
+            .iter()
+            .take(6)
+            .map(|(r, why)| format!("row {} ({})", r, why))
+            .collect();
+        text.push_str(&format!(
+            "\n\n{} row(s) were excluded and are not counted as zero: {}{}.",
+            skipped.len(),
+            sample.join(", "),
+            if skipped.len() > 6 { ", …" } else { "" }
+        ));
+    }
+    if !subtotals.is_empty() {
+        let listed: Vec<String> = subtotals
+            .iter()
+            .map(|(row, reference, formula)| format!("{} (row {}, ={})", reference, row, formula))
+            .collect();
+        text.push_str(&format!(
+            "\n\n{} cell(s) were excluded because they already total this column: {}.",
+            subtotals.len(),
+            listed.join(", ")
+        ));
+    }
+    if !unit.is_empty() {
+        text.push_str(&format!("\n\nUnit: cells are reported in {}.", unit));
+    }
+    text.push_str(&format!("\n\nSource: {} · {} · columns {}", source_title, table.sheet, range));
+
+    let quote = if group_col != usize::MAX {
+        format!(
+            "{} by {} in {} ({} rows)",
+            header,
+            table.headers.get(group_col).cloned().unwrap_or_default(),
+            table.sheet,
+            used.len()
+        )
+    } else {
+        format!("{} column of {} ({} numeric cells)", header, table.sheet, used.len())
+    };
+
+    Answer {
+        text,
+        citations: vec![Citation {
+            citation_id,
+            source_id: table.source_id.clone(),
+            chunk_id: table.id.clone(),
+            quote,
+            locator: Locator::cell(&table.sheet, &range, first_row),
+            score: 1.0,
+            source_title,
+        }],
+        abstained: false,
+        engine: "table".into(),
+        coverage: 1,
+    }
+}
+
+/// Verify that every cell a table answer claims to have used really exists in the table.
+pub fn validate(answer: &Answer, tables: &[Table]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for c in &answer.citations {
+        let Some(t) = tables.iter().find(|t| t.id == c.chunk_id) else {
+            problems.push(format!("citation {} refers to an unknown table", c.citation_id));
+            continue;
+        };
+        if t.source_id != c.source_id {
+            problems.push(format!("citation {} table/source mismatch", c.citation_id));
+        }
+        if c.locator.sheet.as_deref() != Some(t.sheet.as_str()) {
+            problems.push(format!("citation {} points at the wrong sheet", c.citation_id));
+        }
+        if t.rows.is_empty() {
+            problems.push(format!("citation {} table has no rows", c.citation_id));
+        }
+    }
+    problems
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::Source;
+
+    fn table(rows: Vec<Vec<String>>) -> Table {
+        let mut w = Vec::new();
+        table_from_rows(rows, "Sheet1", "src1", "nb1", &mut w).expect("table")
+    }
+
+    fn source(id: &str, title: &str) -> Source {
+        Source { id: id.into(), title: title.into(), ..Default::default() }
+    }
+
+    // ---------------- CSV
+
+    #[test]
+    fn csv_handles_quotes_commas_newlines_and_crlf() {
+        let csv = "name,notes,amount\r\n\
+                   \"Acme, Inc\",\"said \"\"hello\"\"\",1200\r\n\
+                   Beta,\"line one\nline two\",850\r\n";
+        let rows = csv_rows(csv, ',');
+        assert_eq!(rows.len(), 3, "header + 2 rows: {:?}", rows);
+        assert_eq!(rows[1][0], "Acme, Inc", "comma inside quotes");
+        assert_eq!(rows[1][1], "said \"hello\"", "escaped quotes");
+        assert_eq!(rows[2][1], "line one\nline two", "newline inside quotes");
+    }
+
+    #[test]
+    fn csv_sniffs_semicolon_and_tab() {
+        assert_eq!(sniff_delimiter("a;b;c\n1;2;3"), ';');
+        assert_eq!(sniff_delimiter("a\tb\tc\n1\t2\t3"), '\t');
+        assert_eq!(sniff_delimiter("a,b,c\n1,2,3"), ',');
+        // delimiters inside quotes must not count
+        assert_eq!(sniff_delimiter("\"a;b\";c\n1;2"), ';');
+    }
+
+    #[test]
+    fn csv_keeps_row_numbers_and_cell_references() {
+        let mut w = Vec::new();
+        let t = table_from_rows(
+            vec![
+                vec!["region".into(), "revenue".into()],
+                vec!["north".into(), "1200".into()],
+                vec!["south".into(), "850".into()],
+            ],
+            "Q1",
+            "s",
+            "n",
+            &mut w,
+        )
+        .unwrap();
+        assert_eq!(t.rows[0].number, 2, "header is row 1, so data starts at row 2");
+        assert_eq!(t.rows[0].cells[1].reference, "B2");
+        assert_eq!(t.headers, vec!["region", "revenue"]);
+    }
+
+    #[test]
+    fn ragged_and_blank_headers_are_reported_not_guessed() {
+        let mut w = Vec::new();
+        let t = table_from_rows(
+            vec![
+                vec!["name".into(), "".into(), "name".into()],
+                vec!["a".into(), "1".into(), "2".into(), "extra".into()],
+                vec!["".into(), "".into(), "".into()],
+            ],
+            "S",
+            "s",
+            "n",
+            &mut w,
+        )
+        .unwrap();
+        assert_eq!(t.headers[1], "Column B", "empty header named by column letter");
+        assert_eq!(t.headers[2], "name (2)", "duplicate header disambiguated");
+        assert_eq!(t.headers[3], "Column D", "extra field becomes a column");
+        assert_eq!(t.rows.len(), 1, "blank line skipped");
+        assert!(t.warnings.iter().any(|x| x.contains("duplicate header")));
+        assert!(t.warnings.iter().any(|x| x.contains("more fields")));
+    }
+
+    #[test]
+    fn numbers_parse_with_units_currency_and_accounting_negatives() {
+        assert_eq!(parse_number("1,234.5"), Some((1234.5, String::new())));
+        assert_eq!(parse_number("$1,200"), Some((1200.0, String::new())));
+        assert_eq!(parse_number("45%"), Some((45.0, "%".to_string())));
+        assert_eq!(parse_number("(1,200)"), Some((-1200.0, String::new())));
+        assert_eq!(parse_number("12 kg"), Some((12.0, "kg".to_string())));
+        assert_eq!(parse_number("-3.5"), Some((-3.5, String::new())));
+        // these must not look like numbers
+        assert_eq!(parse_number("N/A"), None);
+        assert_eq!(parse_number("-"), None);
+        assert_eq!(parse_number("12abc34"), None);
+        assert_eq!(parse_number("two"), None);
+    }
+
+    #[test]
+    fn missing_values_stay_missing() {
+        let t = table(vec![
+            vec!["item".into(), "cost".into()],
+            vec!["a".into(), "".into()],
+            vec!["b".into(), "N/A".into()],
+            vec!["c".into(), "10".into()],
+        ]);
+        let costs: Vec<_> = t.rows.iter().map(|r| t.cell(r, 1).unwrap().clone()).collect();
+        assert!(matches!(costs[0].value, CellValue::Empty), "blank is empty, not 0");
+        assert!(matches!(costs[1].value, CellValue::Empty), "'N/A' is empty, not text");
+        assert_eq!(costs[2].number(), Some(10.0));
+    }
+
+    // ---------------- aggregation
+
+    #[test]
+    fn sums_only_numeric_cells_and_says_what_it_skipped() {
+        let t = table(vec![
+            vec!["region".into(), "revenue".into()],
+            vec!["north".into(), "1200".into()],
+            vec!["south".into(), "850".into()],
+            vec!["east".into(), "".into()],
+            vec!["west".into(), "unknown".into()],
+        ]);
+        let a = try_answer("what is the total revenue", &[t], &[source("src1", "Sales")]).expect("answer");
+        assert!(!a.abstained);
+        assert!(a.text.contains("2050"), "{}", a.text);
+        assert!(a.text.contains("2 row(s) were excluded"), "{}", a.text);
+        assert!(a.text.contains("row 4"), "names the excluded row: {}", a.text);
+        assert_eq!(a.citations.len(), 1);
+        assert_eq!(a.citations[0].locator.kind, "cell");
+        assert_eq!(a.citations[0].locator.sheet.as_deref(), Some("Sheet1"));
+        assert_eq!(a.citations[0].source_id, "src1");
+    }
+
+    #[test]
+    fn refuses_to_mix_units() {
+        let t = table(vec![
+            vec!["trip".into(), "distance".into()],
+            vec!["a".into(), "12 km".into()],
+            vec!["b".into(), "3 miles".into()],
+        ]);
+        let a = try_answer("total distance", &[t], &[source("src1", "Trips")]).unwrap();
+        assert!(a.abstained, "{}", a.text);
+        assert!(a.text.contains("mixes units"), "{}", a.text);
+        assert!(a.citations.is_empty());
+    }
+
+    #[test]
+    fn average_min_max_and_count_are_right() {
+        let t = table(vec![
+            vec!["team".into(), "score".into()],
+            vec!["a".into(), "10".into()],
+            vec!["b".into(), "20".into()],
+            vec!["c".into(), "30".into()],
+        ]);
+        let avg = try_answer("what is the average score", &[t.clone()], &[source("src1", "S")]).unwrap();
+        assert!(avg.text.contains("20"), "{}", avg.text);
+        let max = try_answer("which team has the highest score", &[t.clone()], &[source("src1", "S")]).unwrap();
+        assert!(max.text.contains("30"), "{}", max.text);
+        assert!(max.text.contains("row 4"), "max names the winning row: {}", max.text);
+        let count = try_answer("how many score values are there", &[t], &[source("src1", "S")]).unwrap();
+        assert!(count.text.contains("3"), "{}", count.text);
+    }
+
+    #[test]
+    fn groups_by_a_second_column() {
+        let t = table(vec![
+            vec!["region".into(), "channel".into(), "revenue".into()],
+            vec!["north".into(), "web".into(), "100".into()],
+            vec!["north".into(), "store".into(), "50".into()],
+            vec!["south".into(), "web".into(), "25".into()],
+        ]);
+        let a = try_answer("total revenue by region", &[t], &[source("src1", "Sales")]).unwrap();
+        assert!(!a.abstained, "{}", a.text);
+        assert!(a.text.contains("sum north: 150"), "{}", a.text);
+        assert!(a.text.contains("sum south: 25"), "{}", a.text);
+    }
+
+    #[test]
+    fn unrelated_questions_fall_through_to_text_answering() {
+        let t = table(vec![
+            vec!["region".into(), "revenue".into()],
+            vec!["north".into(), "1200".into()],
+        ]);
+        assert!(try_answer("who wrote this document", &[t], &[source("src1", "S")]).is_none());
+    }
+
+    #[test]
+    fn a_column_with_no_numbers_abstains_instead_of_returning_zero() {
+        let t = table(vec![
+            vec!["item".into(), "colour".into()],
+            vec!["a".into(), "red".into()],
+            vec!["b".into(), "blue".into()],
+        ]);
+        assert!(try_answer("total colour", &[t], &[source("src1", "S")]).is_none());
+    }
+
+    #[test]
+    fn validation_catches_a_wrong_table_reference() {
+        let t = table(vec![
+            vec!["region".into(), "revenue".into()],
+            vec!["north".into(), "10".into()],
+        ]);
+        let mut a = try_answer("total revenue", &[t.clone()], &[source("src1", "S")]).unwrap();
+        assert!(validate(&a, &[t.clone()]).is_empty());
+        a.citations[0].chunk_id = "tbl_other".into();
+        assert!(!validate(&a, &[t]).is_empty());
+    }
+
+    fn fixture(name: &str) -> Vec<u8> {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures")
+            .join(name);
+        std::fs::read(&p).unwrap_or_else(|e| panic!("fixture {} missing: {}", name, e))
+    }
+
+    // ---------------- real XLSX
+
+    #[test]
+    fn xlsx_parses_every_sheet_with_real_cell_references() {
+        let tables = parse_xlsx(&fixture("sales.xlsx"), "src9", "nb9").expect("xlsx");
+        assert_eq!(tables.len(), 2, "both worksheets: {:?}", tables.iter().map(|t| &t.sheet).collect::<Vec<_>>());
+        let sales = tables.iter().find(|t| t.sheet == "Sales").expect("Sales sheet");
+        assert_eq!(sales.headers, vec!["Region", "Channel", "Revenue", "Units"]);
+        assert_eq!(sales.rows.len(), 5, "data rows 2-6, blanks skipped");
+        assert_eq!(sales.rows[0].number, 2, "original row numbers survive");
+        assert_eq!(sales.rows[0].cells[2].reference, "C2");
+        assert_eq!(sales.rows[0].cells[2].number(), Some(1200.5));
+        // the cached formula result is kept, and flagged as a formula
+        let subtotal = sales.rows.iter().find(|r| r.number == 4).unwrap();
+        let c4 = sales.cell(subtotal, 2).unwrap();
+        assert_eq!(c4.number(), Some(2050.5));
+        assert_eq!(c4.formula.as_deref(), Some("SUM(C2:C3)"));
+        // a self-closing cell with no value is missing, not zero
+        assert!(matches!(sales.cell(subtotal, 3).unwrap().value, CellValue::Empty));
+        // shared string "N/A" is missing data
+        let na = sales.rows.iter().find(|r| r.number == 5).unwrap();
+        assert!(matches!(sales.cell(na, 2).unwrap().value, CellValue::Empty));
+        // inline string cell parses as a number
+        let last = sales.rows.iter().find(|r| r.number == 6).unwrap();
+        assert_eq!(sales.cell(last, 3).unwrap().number(), Some(2.0));
+
+        let meta = tables.iter().find(|t| t.sheet == "Meta").expect("Meta sheet");
+        assert!(meta.hidden, "hidden state from workbook.xml");
+        assert!(meta.warnings.iter().any(|w| w.contains("hidden")));
+        // rich-text shared string is joined, not truncated at the first run
+        assert_eq!(meta.headers[0], "note");
+    }
+
+    #[test]
+    fn xlsx_aggregation_excludes_the_cached_subtotal_row() {
+        let tables = parse_xlsx(&fixture("sales.xlsx"), "src9", "nb9").expect("xlsx");
+        let src = source("src9", "Sales 2026");
+        let a = try_answer("what is the total revenue", &tables, &[src]).expect("answer");
+        assert!(!a.abstained, "{}", a.text);
+        // 1200.5 + 850 + 300 = 2350.5; C4 (=SUM(C2:C3) = 2050.5) must not be counted
+        assert!(a.text.contains("2350.5"), "{}", a.text);
+        assert!(!a.text.contains("4401"), "subtotal must not be double counted: {}", a.text);
+        assert!(a.text.contains("excluded because they already total"), "{}", a.text);
+        assert!(a.text.contains("C4"), "{}", a.text);
+        assert_eq!(a.citations[0].locator.sheet.as_deref(), Some("Sales"));
+        assert_eq!(a.citations[0].locator.kind, "cell");
+        assert_eq!(a.citations[0].locator.cell.as_deref(), Some("Sales!C2:C6"));
+        assert!(validate(&a, &tables).is_empty());
+    }
+
+    #[test]
+    fn xlsx_grouping_uses_the_named_column() {
+        let tables = parse_xlsx(&fixture("sales.xlsx"), "src9", "nb9").expect("xlsx");
+        let a = try_answer("total revenue by channel", &tables, &[source("src9", "Sales 2026")]).unwrap();
+        assert!(a.text.contains("sum Web: 1500.5"), "{}", a.text);
+        assert!(a.text.contains("sum Store: 850"), "{}", a.text);
+    }
+
+    #[test]
+    fn hidden_sheets_are_never_used_for_answers() {
+        let tables = parse_xlsx(&fixture("sales.xlsx"), "src9", "nb9").expect("xlsx");
+        assert!(try_answer("total revenue", &tables, &[source("src9", "S")]).is_some());
+        // the hidden sheet's only number is in a column named "note"; hide it and it is ignored
+        let blocks = table_blocks(&tables);
+        assert!(blocks.iter().all(|b| !b.text.starts_with("Meta")));
+        assert!(blocks.iter().any(|b| b.locator.sheet.as_deref() == Some("Sales")));
+    }
+
+    // ---------------- real CSV
+
+    #[test]
+    fn csv_fixture_sniffs_delimiter_and_handles_quoted_commas() {
+        let t = parse_delimited(&fixture("sales.csv"), "sales.csv", None, "src8", "nb8").expect("csv");
+        assert_eq!(t.sheet, "sales");
+        assert_eq!(t.headers, vec!["Region", "Channel", "Revenue", "Units"]);
+        assert_eq!(t.rows.len(), 3);
+        assert_eq!(t.rows[1].cells[0].text, "South, Ltd", "quoted comma kept whole");
+        // European decimal comma in a semicolon file
+        assert_eq!(t.rows[0].cells[2].number(), Some(1200.5), "{:?}", t.rows[0].cells[2]);
+        assert!(matches!(t.rows[2].cells[2].value, CellValue::Empty), "blank cell is missing");
+    }
+
+    #[test]
+    fn ambiguous_number_grouping_is_rejected_not_guessed() {
+        assert_eq!(parse_number("1,234.50"), Some((1234.5, String::new())));
+        assert_eq!(parse_number("1.234,50"), Some((1234.5, String::new())));
+        assert_eq!(parse_number("1200,50"), Some((1200.5, String::new())));
+        assert_eq!(parse_number("1,200"), Some((1200.0, String::new())));
+        assert_eq!(parse_number("1.234.567"), Some((1234567.0, String::new())));
+        assert_eq!(parse_number("1,23,456"), None, "inconsistent grouping must not be guessed");
+        assert_eq!(parse_number("12,3,45"), None);
+        assert_eq!(parse_number("1.2.3"), None);
+    }
+
+    #[test]
+    fn oversized_sheets_are_truncated_and_aggregations_refuse() {
+        let mut rows = vec![vec!["id".to_string(), "amount".to_string()]];
+        for i in 0..(crate::security::MAX_TABLE_ROWS + 5) {
+            rows.push(vec![format!("r{}", i), "1".to_string()]);
+        }
+        let t = table(rows);
+        assert_eq!(t.rows.len(), crate::security::MAX_TABLE_ROWS);
+        assert!(t.truncated);
+        assert!(t.warnings.iter().any(|w| w.contains("only the first")), "{:?}", t.warnings);
+        // a total over a partial sheet would be a confidently wrong number: refuse
+        let a = try_answer("total amount", &[t], &[source("src1", "Big")]).unwrap();
+        assert!(a.abstained, "{}", a.text);
+        assert!(a.text.contains("more rows than Forge keeps"), "{}", a.text);
+        assert!(a.citations.is_empty());
+    }
+
+    #[test]
+    fn column_letters_and_references_round_trip() {
+        assert_eq!(column_letter(1), "A");
+        assert_eq!(column_letter(26), "Z");
+        assert_eq!(column_letter(27), "AA");
+        assert_eq!(column_letter(702), "ZZ");
+        assert_eq!(parse_reference("A1"), Some((1, 1)));
+        assert_eq!(parse_reference("AA12"), Some((27, 12)));
+        assert_eq!(parse_reference("12"), None);
+    }
+
+    #[test]
+    fn blocks_keep_row_context_and_cell_locators() {
+        let t = table(vec![
+            vec!["region".into(), "revenue".into()],
+            vec!["north".into(), "1200".into()],
+        ]);
+        let blocks = table_blocks(&[t]);
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].text.contains("region: north"), "{}", blocks[0].text);
+        assert!(blocks[0].text.contains("revenue: 1200"));
+        assert_eq!(blocks[0].locator.kind, "row", "row kind keeps the existing contract");
+        assert_eq!(blocks[0].locator.row, Some(2));
+        assert_eq!(blocks[0].locator.sheet.as_deref(), Some("Sheet1"));
+        assert_eq!(blocks[0].locator.cell.as_deref(), Some("A2-B2"));
+        assert_eq!(blocks[0].locator.human(), "Sheet1 row 2");
     }
 }
 ```
@@ -14277,6 +16453,176 @@ fn note_can_become_a_cited_source() {
     assert_eq!(st, 200, "{:?}", still);
     assert_eq!(still.str_of("origin"), Some("note"));
 }
+
+/// Journey: a spreadsheet answer is computed from real cells and cites the exact range.
+#[test]
+fn spreadsheet_questions_are_computed_over_real_cells() {
+    let dir = tempdir("tables");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[("title", Value::from("Sales review"))])),
+    );
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+
+    let bytes = std::fs::read(fixtures.join("sales.xlsx")).unwrap();
+    let (status, body) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=sales.xlsx", nb_id),
+        Some(&bytes),
+        "application/octet-stream",
+    );
+    assert_eq!(status, 201, "upload failed: {}", body);
+    let v = json::parse(&body).unwrap();
+    let source_id = v.str_of("source_id").unwrap().to_string();
+    assert_eq!(v.get("table_count").and_then(|x| x.as_f64()), Some(2.0), "{:?}", v);
+    let tables = v.get("tables").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(tables.len(), 2);
+    assert!(tables.iter().any(|t| t.str_of("sheet") == Some("Sales")));
+    let hidden = tables.iter().find(|t| t.str_of("sheet") == Some("Meta")).expect("Meta");
+    assert_eq!(hidden.get("hidden").and_then(|b| b.as_bool()), Some(true));
+
+    // the derived answer is a computation, not a quote
+    let (st, chat) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("what is the total revenue"))])),
+    );
+    assert_eq!(st, 200, "chat failed: {:?}", chat);
+    assert_eq!(chat.get("computed").and_then(|b| b.as_bool()), Some(true), "{:?}", chat);
+    assert_eq!(chat.str_of("engine"), Some("table"));
+    let answer = chat.str_of("answer").unwrap_or("");
+    assert!(answer.contains("2350.5"), "total must exclude the cached subtotal: {}", answer);
+    assert!(answer.contains("C4"), "the excluded subtotal row is named: {}", answer);
+    let cites = chat.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(cites.len(), 1, "{:?}", cites);
+    let loc = cites[0].get("locator").expect("locator");
+    assert_eq!(loc.str_of("kind"), Some("cell"));
+    assert_eq!(loc.str_of("sheet"), Some("Sales"));
+    assert_eq!(loc.str_of("cell"), Some("Sales!C2:C6"));
+    assert_eq!(cites[0].str_of("source_id"), Some(source_id.as_str()));
+    assert_eq!(
+        chat.get("citation_problems").and_then(|p| p.as_arr()).map(|a| a.len()),
+        Some(0),
+        "{:?}",
+        chat.get("citation_problems")
+    );
+
+    // the table is browsable with real cell references, and row numbers are original
+    let (st, tables_json) = s.json("GET", &format!("/api/sources/{}/tables", source_id), None);
+    assert_eq!(st, 200);
+    let sales = tables_json
+        .get("tables")
+        .and_then(|t| t.as_arr())
+        .and_then(|a| a.iter().find(|t| t.str_of("sheet") == Some("Sales")).cloned())
+        .expect("Sales table");
+    assert_eq!(sales.get("row_count").and_then(|x| x.as_f64()), Some(5.0));
+    let first_row = sales.get("rows").and_then(|r| r.as_arr()).and_then(|a| a.first()).cloned().unwrap();
+    assert_eq!(first_row.get("row").and_then(|x| x.as_f64()), Some(2.0), "data starts at row 2");
+    let cells = first_row.get("cells").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(cells[2].str_of("ref"), Some("C2"));
+    assert_eq!(cells[2].get("number").and_then(|x| x.as_f64()), Some(1200.5));
+
+    // capping rows never lies about the size
+    let (st, capped) = s.json("GET", &format!("/api/sources/{}/tables?rows=2", source_id), None);
+    assert_eq!(st, 200);
+    let capped_sales = capped
+        .get("tables")
+        .and_then(|t| t.as_arr())
+        .and_then(|a| a.iter().find(|t| t.str_of("sheet") == Some("Sales")).cloned())
+        .unwrap();
+    assert_eq!(capped_sales.get("rows").and_then(|r| r.as_arr()).map(|a| a.len()), Some(2));
+    assert_eq!(capped_sales.get("row_count").and_then(|x| x.as_f64()), Some(5.0));
+    assert_eq!(capped_sales.get("truncated").and_then(|b| b.as_bool()), Some(true));
+
+    // a prose question about the same source still goes through text evidence
+    let (st, prose) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("which channel does North use"))])),
+    );
+    assert_eq!(st, 200);
+    assert_eq!(prose.get("computed").and_then(|b| b.as_bool()), Some(false), "{}", prose.str_of("answer").unwrap_or(""));
+
+    // deleting the source removes its tables too
+    let (st, _) = s.json("DELETE", &format!("/api/sources/{}", source_id), None);
+    assert_eq!(st, 200);
+    let (st, after) = s.json("GET", &format!("/api/sources/{}/tables", source_id), None);
+    assert_eq!(st, 404);
+    assert_eq!(after.str_of("code"), Some("not_found"));
+
+    // survival across restart is tested in store::tests::tables_survive_a_restart
+}
+
+/// A notebook export must carry the grids, otherwise a re-import silently loses every
+/// cell reference and the ability to compute.
+#[test]
+fn exported_notebooks_keep_their_tables() {
+    let dir = tempdir("export-tables");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[("title", Value::from("Export check"))])),
+    );
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let bytes = std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sales.xlsx"),
+    )
+    .unwrap();
+    let (status, body) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=sales.xlsx", nb_id),
+        Some(&bytes),
+        "application/octet-stream",
+    );
+    assert_eq!(status, 201, "{}", body);
+    let src = json::parse(&body).unwrap();
+    let source_id = src.str_of("source_id").unwrap().to_string();
+
+    let (st, exported) = s.json("GET", &format!("/api/notebooks/{}/export", nb_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(
+        exported.get("tables").and_then(|t| t.as_arr()).map(|a| a.len()),
+        Some(2),
+        "both sheets exported"
+    );
+
+    let (st, imported) = s.json("POST", "/api/import", Some(exported.clone()));
+    assert_eq!(st, 201, "{:?}", imported);
+    assert_eq!(
+        imported.get("imported").and_then(|i| i.get("tables")).and_then(|x| x.as_f64()),
+        Some(2.0),
+        "{:?}",
+        imported
+    );
+    let new_nb = imported.str_of("notebook_id").unwrap().to_string();
+
+    // the copied notebook answers the same question with the same number and a cell citation
+    let (st, chat) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", new_nb),
+        Some(obj(&[("question", Value::from("what is the total revenue"))])),
+    );
+    assert_eq!(st, 200, "{:?}", chat);
+    assert_eq!(chat.get("computed").and_then(|b| b.as_bool()), Some(true));
+    assert!(chat.str_of("answer").unwrap_or("").contains("2350.5"));
+    let cites = chat.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(cites[0].get("locator").and_then(|l| l.str_of("sheet")), Some("Sales"));
+    assert_ne!(
+        cites[0].str_of("source_id"),
+        Some(source_id.as_str()),
+        "imported sources get new ids"
+    );
+
+    // and the imported source exposes its tables under its new id
+    let new_source = cites[0].str_of("source_id").unwrap().to_string();
+    let (st, tables) = s.json("GET", &format!("/api/sources/{}/tables", new_source), None);
+    assert_eq!(st, 200);
+    assert_eq!(tables.get("count").and_then(|c| c.as_f64()), Some(2.0));
+}
 ```
 
 ## `crates/forge-server/Cargo.toml`
@@ -15022,6 +17368,45 @@ afterwards does not delete the evidence, which is stated in the test.
 
 **Revisit when** direct note selection is added: it should reuse `to-source` internally
 (lazily converting), so there is still exactly one retrieval path.
+
+## D15 — Tables are a first-class representation, and aggregations refuse rather than guess
+
+**Date.** 2026-10-31. **Background.** §7.10 and §10.1 of the spec require cell-level locators
+for spreadsheets; the chat contract (§7.6) requires "table answers". The previous XLSX parser
+flattened row 1 of sheet 1 into text, which makes a sum impossible and a cell citation a lie.
+
+**Chosen.** A spreadsheet/CSV is parsed into a `Table` (sheet name, headers, rows with
+**original** row numbers, cells with header, raw text, parsed number, unit, A1 reference and
+formula text), stored next to the chunks in `db.json`, and exposed at
+`GET /api/sources/:id/tables`. Row passages for retrieval are generated **from the grid**, so
+a citation can name `Sales row 2` / `Sales!A2-D2`. `POST .../chat` runs `tables::try_answer`
+before text retrieval: if the question names an aggregation and a column, the answer is
+computed; otherwise it falls through unchanged to the evidence path.
+
+Four refusals are deliberate, and each is covered by a test:
+
+1. **Missing values are never zero.** Blank cells, `-`, `N/A`, `null`, `NaN` are `Empty` and
+   reported as excluded rows; the answer says how many and which.
+2. **Mixed units are never summed.** `12 km` + `3 miles` → abstain with the reason.
+3. **A cached column total is never counted.** `=SUM(C2:C3)` in the same column is excluded
+   from the aggregation *and named in the answer*, because counting it would double the figure.
+4. **A truncated sheet refuses.** Above `security::MAX_TABLE_ROWS` the grid is marked
+   `truncated` and aggregations abstain: a total over half a sheet is a wrong number stated
+   confidently.
+
+Separators are disambiguated, not assumed: `1,234.50`, `1.234,50`, `1200,50`, `1,200` parse as
+expected; `1,23,456` and `1.2.3` are **rejected** rather than guessed at.
+
+**Rejected.** (a) A text-only XLSX path with "sum" implemented over regex-matched numbers — it
+cannot tell a header from a value or a subtotal from data. (b) Loading the sheet into the
+chunk index and hoping retrieval surfaces the right row — retrieval returns passages, not
+totals, and the spec asks for both. (c) Evaluating formulas — there is no formula engine here,
+and silently returning a computed value the file did not contain would fabricate data; we use
+the cached value the spreadsheet stored and print the formula beside it.
+
+**Consequences.** `db.json` grows with the grid (capped at 20,000 rows/sheet). Hidden sheets are
+stored (so a user can inspect them) but excluded from retrieval, aggregation and citations.
+`.xls`/ODS remain unsupported and are rejected at kind detection.
 ```
 
 ## `docs/FEATURE_PARITY.md`
@@ -18043,6 +20428,10 @@ authenticated reverse proxy. This is stated rather than hidden — there is no
 | API key leakage | keys are stored in `data/secrets.json` with mode `0600`, never returned (`key_set` only), never logged, never included in notebook export (`export` emits notebooks/sources/chunks/notes/artifacts only) | `providers::secrets_are_private_and_removable`, e2e `provider_keys_are_write_only_and_never_used_unsafely` |
 | Cleartext key transmission | `providers::validate` refuses any `base_url` not starting with `https://` | `providers::rejects_cleartext_endpoints_and_short_keys` |
 | Oversized request bodies | header cap 64 KiB, body cap 32 MiB at the HTTP layer; `MAX_SOURCE_BYTES` 25 MiB, `MAX_TEXT_BYTES` 8 MiB at the API | `http` tests; e2e empty/oversize upload |
+| Oversized worksheets (memory/JSON blow-up) | `MAX_TABLE_ROWS` 20,000 rows per sheet; the grid is marked `truncated` and aggregations **refuse** instead of totalling partial data | `tables::tests::oversized_sheets_are_truncated_and_aggregations_refuse` |
+| Table rows leaking into an HTTP response | `GET /api/sources/:id/tables?rows=N` caps rows (default 200, max 2,000) while `row_count` reports the true size | e2e `spreadsheet_questions_are_computed_over_real_cells` |
+| Hidden worksheets used as evidence | hidden sheets are stored for inspection but excluded from retrieval, aggregation and citations | `tables::tests::hidden_sheets_are_never_used_for_answers` |
+| Fabricated numbers from a spreadsheet | non-numeric/empty cells are `Empty` (never `0`), mixed units are refused, cached column totals are excluded and named, ambiguous separators are rejected | `tables` tests (4 refusal cases) |
 | Malformed JSON / unknown routes | strict parser → `400 bad_json`; unknown route → `404 not_found` with a code | e2e `rejects_bad_input_and_dangerous_urls` |
 | Zip bombs / hostile OOXML | entries are read through the central directory with declared sizes; the ZIP reader rejects ZIP64, unknown compression and out-of-bounds offsets; DOCX/PPTX/XLSX extraction reads only named parts (not every entry) | `ingest::zip::rejects_non_zip_and_garbage`, `ingest::ooxml::non_ooxml_is_rejected_clearly` |
 | Data corruption / partial writes | every mutation rewrites a temp file and `rename`s it; a corrupt `db.json` decodes to an empty database instead of crashing | `store` tests incl. corrupt-db safety |
@@ -18098,8 +20487,9 @@ curl is out of scope for this layer.
 ```markdown
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-31 (URL ingestion, refresh, source metadata). Everything below was executed in this workspace; nothing
-is aspirational. Where a claim is untested it says so.
+Last updated: 2026-10-31 (spreadsheet tables: real cells, exact references, computed answers).
+Everything below was executed in this workspace; nothing is aspirational. Where a claim is
+untested it says so.
 
 ## Where the work stands (2026-10-31)
 
@@ -18116,11 +20506,15 @@ is aspirational. Where a claim is untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **146 passing, 0 failing** (26 `bininspect` + 106 lib + 9 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **41 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **172 passing, 0 failing** (26 `bininspect` + 130 lib + 11 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **53 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
+| Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
+| Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 new assertions) |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
-| DOCX/PPTX/XLSX | real OOXML → paragraph/slide/row locators | `ingest::ooxml` + e2e |
+| DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
+| CSV/TSV | RFC 4180 (quotes, embedded newlines, delimiter sniffing, decimal comma) → row + cell locators | `tables::csv_rows` + `parse_delimited` |
 | Grounded answering | extractive, citation-verified, abstains | `grounded`, `api` e2e |
 | Artifacts | flashcards, quiz, report, mindmap, study guide, FAQ, summary, narration script | `artifacts` tests + UI smoke |
 | Persistence | JSON store, atomic replace, backups, corruption safety | `store` tests |
@@ -18134,29 +20528,35 @@ is aspirational. Where a claim is untested it says so.
 | NotebookLM protocol | 14 RPCs, source specs, artifact configs, streamed-chat parsing — built from pinned public RE evidence | `notebooklm` (15 tests), `docs/NOTEBOOKLM_PROTOCOL.md` |
 | REA tool | installs and runs on Node 22.22.3 (engine floor is a warning) | `docs/REA_EVIDENCE_INDEX.md` |
 
-## Test counts by module (measured with `cargo test --lib -- --list`)
+## Test counts by module (measured with `cargo test -- --list`)
 
 ```
-security        7
-artifacts       7
-retrieve        6
-json            6
-ingest::text    6
-http            6
-grounded        8
-domain          5
-store           4
-providers       4
-ingest::ooxml   4
-web             3
-ingest          3   (PDF + dispatch)
-ingest::zip     2
-inflate         2
+tables          22
+notebooklm      15
+fetch           11
+retrieve         9
+grounded         8
+artifacts        7
+security         6
+json             6
+ingest::text     6
+http             6
+store            5
+hashes           5
+domain           5
+providers        4
+ingest::ooxml    4
+web              3
+ingest           3   (PDF + dispatch)
+ingest::zip      2
+inflate          2
 --------------------
-lib total      72
-e2e (HTTP)      5
+lib total      130
+bininspect      26   (separate crate)
+e2e (HTTP)      11
+server           5
 ====================
-total          77
+total          172
 ```
 
 ## Not available, with reasons
@@ -18169,6 +20569,10 @@ total          77
 | Image OCR | `tesseract` absent | images inside DOCX are counted in warnings, not read |
 | Semantic/vector retrieval | no embedding model offline | lexical BM25 only; documented, not disguised |
 | Multi-user auth | out of scope for a single-operator notebook | bind to `127.0.0.1` or a private network |
+| Spreadsheet formula evaluation | no formula engine; only the cached value Excel/LibreOffice stored is read | the cached value is used **and the formula is printed** (`=SUM(C2:C3)`) so a derived cell is never mistaken for data |
+| Sheets beyond 20,000 rows | self-imposed cap (`security::MAX_TABLE_ROWS`) | the grid is marked `truncated`, the reason is reported, and aggregations **refuse** rather than total a partial sheet |
+| `.xls` (BIFF), ODS, Google Sheets | no parser written; binary formats out of scope for now | upload is rejected by kind detection with a clear error, never half-indexed |
+| Data Tables artifact (schema-inferred extraction, charts) | not implemented | reported as `planned`; existing spreadsheets are queried directly instead |
 | Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps
@@ -18190,7 +20594,7 @@ total          77
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 92 tests: 87 lib + 5 e2e
+cargo test --offline                        # 172 tests: 130 lib + 11 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -18198,10 +20602,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 29 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 53 assertions
 ```
 
-## Unit tests (87) — exact names from `cargo test --lib -- --list`
+## Unit tests (130) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -18210,11 +20614,14 @@ export.
 
 ### `domain` (5)
 `iso_timestamps_are_correct`, `ids_are_unique_and_prefixed`, `locator_roundtrip`,
-`json_roundtrip_message`, `kind_detection_from_filename`.
+`json_roundtrip_message`, `kind_detection_from_filename`,
+`cell_locators_carry_sheet_reference_and_column` (a sheet-qualified `Sales!C2:C6` locator keeps
+column 3, survives JSON, and a timestamp locator renders `01:15`).
 
-### `store` (4)
+### `store` (5)
 `persists_across_reopen`, `atomic_write_leaves_no_tmp_file`, `backup_writes_a_copy`,
-`corrupt_db_does_not_panic`.
+`corrupt_db_does_not_panic`, `tables_survive_a_restart_with_cells_intact` (grids, precision,
+formula text and the computed total are identical after a reopen).
 
 ### `http` (6)
 `parses_query_and_percent_encoding`, `encodes_response_with_content_length`,
@@ -18337,6 +20744,78 @@ Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/m
 | UI | 3 assertions | the Add-from-URL control exists and its input is labelled; capabilities reports the fetch transport; a note offers conversion to a source |
 | e2e | `note_can_become_a_cited_source` (Journey D) | note → source with `converted_from` provenance; second conversion refused `409 already_a_source`; a question about a number present only in the note is answered **and cited to the note-source**; deselecting it removes the influence; deleting the note leaves the source intact |
 
+## Spreadsheet tables and computed answers (22 unit tests + 1 store round-trip + 1 e2e + 12 UI assertions)
+
+Test module `tables`; fixture `tests/fixtures/sales.xlsx` (two sheets, one hidden, real cell
+references, a cached `SUM(C2:C3)` subtotal, an empty cell, an `N/A` placeholder, an inline
+string) and `tests/fixtures/sales.csv` (semicolon-delimited, quoted comma, decimal comma).
+
+**Parsing**
+* `csv_handles_quotes_commas_newlines_and_crlf` — RFC 4180: `"Acme, Inc"`, `""` escapes, a
+  newline inside quotes, CRLF line endings.
+* `csv_sniffs_semicolon_and_tab` — delimiter chosen by counting candidates **outside**
+  quotes; `"a;b";c` sniffs `;`, not `,`.
+* `csv_keeps_row_numbers_and_cell_references` — the header is row 1, so the first data row is
+  row 2 / cell `B2`.
+* `ragged_and_blank_headers_are_reported_not_guessed` — empty header → `Column B`,
+  duplicate header → `name (2)`, extra fields → an added column, each with a warning.
+* `numbers_parse_with_units_currency_and_accounting_negatives` — `1,234.5`, `$1,200`, `45%`,
+  `(1,200)`, `12 kg`, `-3.5` parse; `N/A`, `-`, `12abc34`, `two` do not.
+* `ambiguous_number_grouping_is_rejected_not_guessed` — `1,234.50` and `1.234,50` → `1234.5`;
+  `1200,50` → `1200.5`; `1,200` → `1200`; `1,23,456` and `1.2.3` → **rejected**.
+* `missing_values_stay_missing` — a blank cell and `N/A` are `Empty`, never `0`.
+* `xlsx_parses_every_sheet_with_real_cell_references` — both sheets, `C2 = 1200.5`, cached
+  `C4 = 2050.5` with `formula = SUM(C2:C3)`, empty `D4`, `N/A` → empty, inline string → number,
+  `Meta` flagged hidden, rich-text shared string joined (`Rev`+`enue notes`).
+* `csv_fixture_sniffs_delimiter_and_handles_quoted_commas` — the same file end-to-end.
+* `column_letters_and_references_round_trip` — `A`/`Z`/`AA`/`ZZ`, `A1`, `AA12`, and a
+  malformed reference rejected.
+
+**Computing**
+* `sums_only_numeric_cells_and_says_what_it_skipped` — 1200 + 850 = 2050, "2 row(s) were
+  excluded", excluded row numbers named, citation kind `cell`, sheet `Sheet1`.
+* `xlsx_aggregation_excludes_the_cached_subtotal_row` — 1200.5 + 850 + 300 = **2350.5**; the
+  `=SUM(C2:C3)` cell is excluded and named; citation `Sales!C2:C6`; validator reports nothing.
+* `xlsx_grouping_uses_the_named_column` — "total revenue by channel" → `Web 1500.5`,
+  `Store 850`; the subtotal row is not folded back into its group.
+* `refuses_to_mix_units` — `12 km` + `3 miles` abstains instead of adding.
+* `a_column_with_no_numbers_abstains_instead_of_returning_zero`.
+* `average_min_max_and_count_are_right` — average 20, max 30 names row 4, count 3.
+* `groups_by_a_second_column` — `total revenue by region` → north 150, south 25.
+* `unrelated_questions_fall_through_to_text_answering` — "who wrote this document" is not
+  aggregated over an arbitrary column.
+* `oversized_sheets_are_truncated_and_aggregations_refuse` — 20,005 rows → 20,000 kept, a
+  warning, and a refusal instead of a wrong total.
+* `validation_catches_a_wrong_table_reference` — the table validator rejects a citation whose
+  table id does not exist.
+* `blocks_keep_row_context_and_cell_locators` — retrieval passages carry `Sheet1 row 2` and
+  the A1 range `A2-B2`.
+* `hidden_sheets_are_never_used_for_answers` — hidden-sheet rows produce no passages.
+
+**Persistence**
+* `store::tests::tables_survive_a_restart_with_cells_intact` — reopen the store: headers,
+  precision (`1200.5`), the formula, the empty cell, the hidden flag, and the same computed
+  total after the restart.
+
+**Over HTTP**
+* `spreadsheet_questions_are_computed_over_real_cells` — upload `sales.xlsx` → `table_count: 2`,
+  hidden flag visible → chat `"what is the total revenue"` → `computed: true`,
+  `engine: table`, answer `2350.5`, `C4` named, one citation `cell` / `Sales` / `Sales!C2:C6`,
+  no citation problems → `GET /api/sources/:id/tables` returns row 2 as original row number
+  with `C2` = 1200.5 → `?rows=2` caps rows but keeps `row_count: 5` and `truncated: true` →
+  a prose question about the same source is **not** computed → deleting the source removes
+  its tables (`404`).
+* `exported_notebooks_keep_their_tables` — export carries both sheets; import rebuilds them
+  under remapped source ids and the copy still answers `2350.5` citing `Sales`.
+
+**UI**
+`upload control accepts spreadsheets`, `spreadsheet imported through the UI`, `source item
+reports its sheets and rows`, `spreadsheet total is computed, not quoted`, `computed answer
+says so`, `computed answer names the excluded subtotal row`, `computed answer carries a cell
+citation`, `viewer renders the real grid`, `grid keeps original row numbers`, `grid shows the
+cached formula value`, `grid cells expose their A1 reference`, `hidden sheets are labelled
+when shown`.
+
 ## Binary analysis (31 unit tests + 5 HTTP tests + 6 UI assertions)
 
 Hash vectors (SHA-256/SHA-1 published values), entropy separation, AXML parsing of a real
@@ -18350,6 +20829,10 @@ endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
 * No concurrency/load test; store writes are serialised by a mutex.
 * No fuzzing of the PDF/ZIP parsers.
 * No multi-megabyte corpus test.
+* Spreadsheet fixtures are synthetic: no real-world `.xlsx` produced by Excel, Numbers or
+  LibreOffice was tested (no authorized sample), so merged cells, date serials, sheet-scoped
+  named ranges and shared-formula groups remain unverified.
+* No `.xls`/ODS fixtures at all — those formats have no parser here.
 ```
 
 ## `docs/UNKNOWN_AND_LIMITATIONS.md`
@@ -18452,6 +20935,42 @@ bug, or a limitation for a feature.
 * **Live product, video evidence, ASR/OCR/TTS/LLM, search providers, sharing and roles**
   remain blocked or unimplemented; see `docs/RESEARCH_BLOCKERS.md` and
   `docs/reference/FEATURE_MATRIX.md`.
+
+## Spreadsheet tables (2026-10-31)
+
+What was measured: `tests/fixtures/sales.xlsx` and `sales.csv` are **synthetic** fixtures
+generated by `tests/fixtures/make_ooxml.py`. No spreadsheet produced by Excel, Numbers, Google
+Sheets or LibreOffice was available under an authorized licence, so anything only those
+producers emit is unverified.
+
+* **Merged cells** — a merged range is read as a value in the top-left cell and empty cells
+  elsewhere. No de-merge logic; the user sees blanks where a merged header spanned columns.
+* **Dates and times** are Excel serial numbers. Forge reads the stored number (e.g. `45658`),
+  not a formatted date; there is no number-format table in the parser, so a date column will
+  not aggregate meaningfully.
+* **Shared formulas** (`<f t="shared" si="0"/>`) give no formula text on follower cells; the
+  cached value is still read, but the "formula" annotation appears only on the master cell.
+* **Percentages** keep the stored value: a cell formatted `45%` that stores `0.45` is read as
+  `0.45`. The `45%` case is only recognised for CSV text.
+* **No formula evaluation.** Only the cached result stored in the file is used. A workbook saved
+  without cached values (rare, but possible) will read formula cells as empty.
+* **`.xls` (BIFF8/5), ODS, Google Sheets exports that are not XLSX/CSV** — no parser, rejected
+  at kind detection.
+* **Aggregation scope**: sum / average / min / max / count, one value column, at most one
+  grouping column. No weighted averages, no distinct-count, no median, no date bucketing, no
+  multi-column pivots.
+* **Column choice is lexical.** The value column is picked by header-word overlap with the
+  question (with a numeric-column tie-break). A vague question ("how much did we make?") where
+  no header shares a word with the question is **not** aggregated — it falls through to the
+  text path, which may be less useful but is not wrong.
+* **Ambiguous separators are refused.** `1,234` is read as one thousand two hundred thirty-four
+  (three-digit tail = grouping); a European file meaning `1.234` with exactly three decimals
+  would be misread. `1,23,456` is rejected outright.
+* **Truncation**: sheets over 20,000 rows keep the first 20,000 and refuse aggregation. The cut
+  is reported in the table's warnings and in the answer, never silent.
+* **Row passages are one row per chunk** for spreadsheets, so a question spanning many rows is
+  answered by several citations rather than a summary. That is intentional (one citation per
+  row) but differs from prose chunking.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -22674,14 +25193,16 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | NB-04 | sort / filter / search library | documented | planned | — | — |
 | SRC-01 | paste text | documented | done | `ingest::text` | lib + UI |
 | SRC-02 | PDF with page locators | documented | done | `ingest::pdf` | lib + e2e |
-| SRC-03 | DOCX / PPTX / XLSX | documented | done | `ingest::ooxml` | lib + e2e |
-| SRC-04 | CSV / TSV rows | documented | done | `text::csv_blocks` | lib |
+| SRC-03 | DOCX / PPTX / XLSX | documented | done | `ingest::ooxml` (docx/pptx) + `tables::parse_xlsx` (every sheet, cell refs) | lib + e2e |
+| SRC-04 | CSV / TSV rows | documented | done | `tables::parse_delimited` (RFC 4180, delimiter sniffed) | lib + e2e |
 | SRC-05 | HTML files | documented | done | `text::html_blocks` | lib |
 | SRC-06 | **web URL fetch** | documented | **done** | `fetch.rs` + `api.rs` | 11 unit + 1 e2e |
 | SRC-07 | PDF served over a URL | documented | done | `Fetched::ingest_kind` | unit |
 | SRC-08 | duplicate URL refused, names the original | inferred (sane default) | done | `add_url_source` | e2e |
 | SRC-09 | source refresh / sync | documented ("Click to sync"; outputs do not change) | **done** | `refresh_source` | e2e |
 | SRC-18 | note → source conversion | documented ("convert note to source") | **done** | `note_to_source` | e2e |
+| SRC-19 | spreadsheet grid with sheet + A1 cell locators (§10.1) | documented (XLSX: sheet, cell range, formula/value) | **done** | `tables.rs` + `Locator::cell/sheet_row` | 22 unit + e2e + UI |
+| SRC-20 | hidden worksheets stored but never cited | own policy (safety) | **done** | `Table.hidden` | unit |
 | SRC-10 | rename source + labels | documented | **done** | `PATCH /api/sources/:id` | e2e |
 | SRC-11 | images / OCR | documented | blocked | — | no OCR engine |
 | SRC-12 | audio → transcript | documented | blocked | — | no ASR |
@@ -22697,6 +25218,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | CHAT-05 | conversation persistence / history | documented | done | `store.rs` | e2e |
 | CHAT-06 | streaming + stop | documented | planned | — | — |
 | CHAT-07 | style / length / custom instructions | documented | partial (notebook instructions only) | `api.rs` | — |
+| CHAT-08 | **table answers** (aggregation over source cells) | documented ("table answers" in the answer modes; Data Tables journey I) | **partial** — sum/average/min/max/count over an existing grid, optional group-by; no schema inference, no charts | `tables::try_answer`, `api::chat` | 22 unit + e2e + UI |
 | NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
 | NOTE-02 | save answer as note | documented | done | UI | UI smoke |
 | NOTE-03 | note used as chat context | documented | **done** via conversion to a source (reference also allows direct selection) | `POST /api/notes/:id/to-source` | e2e Journey D |
@@ -22705,7 +25227,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |
 | ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** | `Artifact.stale` | e2e |
 | ART-05 | audio / video / slides / infographics | documented | blocked | — | no TTS/renderer |
-| ART-06 | data tables (per-cell evidence) | documented | planned | — | provider-free, high value |
+| ART-06 | data tables as an artifact (schema inference, per-cell evidence, export) | documented | planned — querying source grids is done (CHAT-08); *creating* a new table from prose is not | — | needs extraction + review UI |
 | RES-01 | Fast Research | documented | planned | — | no search provider |
 | RES-02 | Deep Research | documented | planned | — | no search provider |
 | SHARE-01 | roles, share links, revocation | documented | planned | — | needs identity first |
@@ -24863,8 +27385,70 @@ XLSX = [
      '</sheetData></worksheet>'),
 ]
 
+
+# --- A workbook built for table queries: two sheets, real cell references, a
+# --- cached formula subtotal, a missing cell, an N/A placeholder and an inline string.
+SALES_X = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+SALES_R = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+
+SALES_XLSX = [
+    ("[Content_Types].xml",
+     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>'),
+    ("xl/workbook.xml",
+     f'<?xml version="1.0"?><workbook {SALES_X} {SALES_R}><sheets>'
+     '<sheet name="Sales" sheetId="1" r:id="rId1"/>'
+     '<sheet name="Meta" sheetId="2" state="hidden" r:id="rId2"/>'
+     '</sheets></workbook>'),
+    ("xl/_rels/workbook.xml.rels",
+     '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+     '<Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/>'
+     '<Relationship Id="rId2" Type="worksheet" Target="worksheets/sheet2.xml"/>'
+     '</Relationships>'),
+    ("xl/sharedStrings.xml",
+     f'<?xml version="1.0"?><sst {SALES_X} uniqueCount="13">'
+     '<si><t>Region</t></si><si><t>Channel</t></si><si><t>Revenue</t></si>'
+     '<si><t>Units</t></si><si><t>North</t></si><si><t>South</t></si>'
+     '<si><t>East</t></si><si><t>West</t></si><si><t>Web</t></si>'
+     '<si><t>Store</t></si><si><r><t>Rev</t></r><r><t>enue notes</t></r></si>'
+     '<si><t>N/A</t></si><si><t>internal only</t></si>'
+     '</sst>'),
+    ("xl/worksheets/sheet1.xml",
+     f'<?xml version="1.0"?><worksheet {SALES_X}><sheetData>'
+     '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c>'
+     '<c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>3</v></c></row>'
+     '<row r="2"><c r="A2" t="s"><v>4</v></c><c r="B2" t="s"><v>8</v></c>'
+     '<c r="C2"><v>1200.5</v></c><c r="D2"><v>10</v></c></row>'
+     '<row r="3"><c r="A3" t="s"><v>5</v></c><c r="B3" t="s"><v>9</v></c>'
+     '<c r="C3"><v>850</v></c><c r="D3"><v>6</v></c></row>'
+     '<row r="4"><c r="A4" t="s"><v>4</v></c><c r="B4" t="s"><v>9</v></c>'
+     '<c r="C4"><f>SUM(C2:C3)</f><v>2050.5</v></c><c r="D4"/></row>'
+     '<row r="5"><c r="A5" t="s"><v>6</v></c><c r="B5" t="s"><v>8</v></c>'
+     '<c r="C5" t="s"><v>11</v></c><c r="D5"><v>4</v></c></row>'
+     '<row r="6"><c r="A6" t="s"><v>7</v></c><c r="B6" t="s"><v>8</v></c>'
+     '<c r="C6"><v>300</v></c><c r="D6" t="inlineStr"><is><t>2</t></is></c></row>'
+     '</sheetData></worksheet>'),
+    ("xl/worksheets/sheet2.xml",
+     f'<?xml version="1.0"?><worksheet {SALES_X}><sheetData>'
+     '<row r="1"><c r="A1" t="inlineStr"><is><t>note</t></is></c>'
+     '<c r="B1" t="s"><v>12</v></c></row>'
+     '<row r="2"><c r="A2" t="s"><v>10</v></c><c r="B2"><v>0</v></c></row>'
+     '</sheetData></worksheet>'),
+]
+
+# A semicolon-delimited CSV: sniffing, a quoted field with a comma, a blank cell.
+SALES_CSV = (
+    "Region;Channel;Revenue;Units\n"
+    "North;Web;1200,50;10\n"
+    "\"South, Ltd\";Store;850;6\n"
+    "East;Web;;4\n"
+)
+
 if __name__ == "__main__":
-    for name, parts in (("sample.docx", DOCX), ("sample.pptx", PPTX), ("sample.xlsx", XLSX)):
+    with open(os.path.join(HERE, "sales.csv"), "w", encoding="utf-8", newline="") as f:
+        f.write(SALES_CSV)
+    print("sales.csv")
+    for name, parts in (("sample.docx", DOCX), ("sample.pptx", PPTX),
+                        ("sample.xlsx", XLSX), ("sales.xlsx", SALES_XLSX)):
         p = write_zip(name, parts)
         print(f"{os.path.basename(p)}  {os.path.getsize(p)} bytes")
 ```
@@ -25045,6 +27629,15 @@ if __name__ == "__main__":
     print(f"wrote {OUT} ({len(blob)} bytes)")
 ```
 
+## `tests/fixtures/sales.csv`
+
+```
+Region;Channel;Revenue;Units
+North;Web;1200,50;10
+"South, Ltd";Store;850;6
+East;Web;;4
+```
+
 ## `tests/ui-smoke.js`
 
 ```javascript
@@ -25192,6 +27785,51 @@ async function main() {
   byText("#sideContent button", "Build report").click();
   await wait(900);
   check("report built with citations", $$("#sideContent .cite").length > 0);
+
+  // --- a spreadsheet question is answered by computing over real cells
+  window.location.hash = `#/nb/${nbId}`;
+  await wait(500);
+  const sheetPath = path.join(WEB, "../../tests/fixtures/sales.xlsx");
+  const sheetFile = new window.File([fs.readFileSync(sheetPath)], "sales.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const uploadInput = $("#fileInput");
+  check("upload control accepts spreadsheets", /\.xlsx/.test(uploadInput?.getAttribute("accept") || ""));
+  Object.defineProperty(uploadInput, "files", { value: [sheetFile], writable: true });
+  uploadInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await wait(1500);
+  const sheetSources = $$(".source-item");
+  const sheetSource = sheetSources.find((el) => /sales\.xlsx/i.test(el.textContent));
+  check("spreadsheet imported through the UI", !!sheetSource, sheetSources.map((e) => e.textContent).join(" | "));
+  check("source item reports its sheets and rows",
+    /2 sheets/.test(sheetSource?.textContent || "") && /6 rows/.test(sheetSource?.textContent || ""),
+    sheetSource?.textContent);
+
+  const askSheet = $(".composer textarea");
+  askSheet.value = "what is the total revenue";
+  byText(".composer button", "Ask").click();
+  await wait(1200);
+  const sheetAnswers = $$(".msg.assistant");
+  const computedMsg = sheetAnswers[sheetAnswers.length - 1];
+  check("spreadsheet total is computed, not quoted", /2350\.5/.test(computedMsg.textContent), computedMsg.textContent.slice(0, 300));
+  check("computed answer says so", /computed from table cells/.test(computedMsg.textContent), computedMsg.textContent.slice(0, 200));
+  check("computed answer names the excluded subtotal row", /C4/.test(computedMsg.textContent), computedMsg.textContent.slice(0, 300));
+  const sheetCite = computedMsg.querySelector(".cite");
+  check("computed answer carries a cell citation", /Sales/.test(sheetCite?.textContent || ""), sheetCite?.textContent);
+
+  sheetCite.click();
+  await wait(800);
+  const gridViewer = $(".overlay .viewer");
+  check("viewer renders the real grid", !!gridViewer?.querySelector("table.grid"), "no grid");
+  check("grid keeps original row numbers",
+    gridViewer?.querySelector("tbody tr th.rownum")?.textContent === "2",
+    gridViewer?.querySelector("tbody tr")?.textContent);
+  check("grid shows the cached formula value", /2050\.5/.test(gridViewer?.textContent || ""));
+  check("grid cells expose their A1 reference", !!gridViewer?.querySelector('td[title^="C2"]'));
+  const hiddenNote = /hidden sheet/.test(gridViewer?.textContent || "");
+  check("hidden sheets are labelled when shown", hiddenNote, "Meta sheet not labelled");
+  byText(".viewer header button", "✕").click();
+  await wait(200);
 
   // --- URL import is a real control, not a prompt() box
   check("add-from-URL control exists", !!window.document.querySelector("#addUrlBtn"));

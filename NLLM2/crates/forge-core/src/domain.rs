@@ -8,6 +8,12 @@
 use crate::json::Value;
 use std::collections::BTreeMap;
 
+/// Stable, content-derived 16-hex-digit id fragment. Used for table ids so that
+/// re-ingesting identical bytes yields identical ids.
+pub fn short_hash(input: &str) -> String {
+    crate::hashes::sha256(input.as_bytes())[..16].to_string()
+}
+
 pub fn new_id(prefix: &str) -> String {
     // Time-ordered, collision-resistant enough for a local single-user app.
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -132,37 +138,123 @@ impl SourceKind {
 /// can navigate to the exact page/row/paragraph instead of a loose text match.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Locator {
-    pub kind: String, // "page" | "paragraph" | "row" | "section" | "line"
+    /// "page" | "paragraph" | "row" | "section" | "line" | "cell" | "slide" | "timestamp"
+    pub kind: String,
     pub page: Option<u32>,
     pub paragraph: Option<u32>,
     pub row: Option<u32>,
     pub section: Option<String>,
+    /// Worksheet name for spreadsheet cells (also used for slide names).
+    pub sheet: Option<String>,
+    /// A1 reference or A1 range, e.g. `B7` or `B2:B19`.
+    pub cell: Option<String>,
+    /// 1-based column index; set only when the evidence is a whole column.
+    pub col: Option<u32>,
+    /// Offset into the media timeline, in milliseconds (`kind = "timestamp"`).
+    pub at_ms: Option<u32>,
     pub start: u32,
     pub end: u32,
 }
 
 impl Locator {
     pub fn page(p: u32, start: u32, end: u32) -> Locator {
-        Locator { kind: "page".into(), page: Some(p), paragraph: None, row: None, section: None, start, end }
+        Locator { kind: "page".into(), page: Some(p), paragraph: None, row: None, section: None, sheet: None, cell: None, col: None, at_ms: None, start, end }
     }
     pub fn paragraph(idx: u32, start: u32, end: u32) -> Locator {
-        Locator { kind: "paragraph".into(), page: None, paragraph: Some(idx), row: None, section: None, start, end }
+        Locator { kind: "paragraph".into(), page: None, paragraph: Some(idx), row: None, section: None, sheet: None, cell: None, col: None, at_ms: None, start, end }
     }
     pub fn row(idx: u32, start: u32, end: u32) -> Locator {
-        Locator { kind: "row".into(), page: None, paragraph: None, row: Some(idx), section: None, start, end }
+        Locator { kind: "row".into(), page: None, paragraph: None, row: Some(idx), section: None, sheet: None, cell: None, col: None, at_ms: None, start, end }
     }
+    /// A spreadsheet row: keeps `kind = "row"` (existing contracts) while adding the
+    /// sheet and the exact A1 range, so the row can be found in the grid.
+    pub fn sheet_row(sheet: &str, row: u32, reference: &str) -> Locator {
+        Locator {
+            kind: "row".into(),
+            page: None,
+            paragraph: None,
+            row: Some(row),
+            section: None,
+            sheet: Some(sheet.to_string()),
+            cell: Some(reference.to_string()),
+            col: None,
+            at_ms: None,
+            start: 0,
+            end: 0,
+        }
+    }
+
     pub fn section(name: impl Into<String>, start: u32, end: u32) -> Locator {
-        Locator { kind: "section".into(), page: None, paragraph: None, row: None, section: Some(name.into()), start, end }
+        Locator { kind: "section".into(), page: None, paragraph: None, row: None, section: Some(name.into()), sheet: None, cell: None, col: None, at_ms: None, start, end }
     }
     pub fn line(idx: u32, start: u32, end: u32) -> Locator {
-        Locator { kind: "line".into(), page: None, paragraph: None, row: None, section: Some(idx.to_string()), start, end }
+        Locator { kind: "line".into(), page: None, paragraph: None, row: None, section: Some(idx.to_string()), sheet: None, cell: None, col: None, at_ms: None, start, end }
+    }
+
+    /// A spreadsheet cell or cell range: `Locator::cell("Q1", "B2:B19", 2)`.
+    /// The row is the first row of the range, so a single-cell citation and a
+    /// column citation share one representation.
+    pub fn cell(sheet: &str, reference: &str, row: u32) -> Locator {
+        // the reference may arrive sheet-qualified ("Sales!C2:C6"); the column letters
+        // start after the last '!'
+        let bare = reference.rsplit('!').next().unwrap_or(reference);
+        let col = bare
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .fold(0u32, |acc, c| acc * 26 + (c.to_ascii_uppercase() as u32 - 64));
+        Locator {
+            kind: "cell".into(),
+            page: None,
+            paragraph: None,
+            row: Some(row),
+            section: None,
+            sheet: Some(sheet.to_string()),
+            cell: Some(reference.to_string()),
+            col: if col > 0 { Some(col) } else { None },
+            at_ms: None,
+            start: 0,
+            end: 0,
+        }
+    }
+
+    /// A point on a media timeline (milliseconds).
+    pub fn timestamp(ms: u32) -> Locator {
+        Locator {
+            kind: "timestamp".into(),
+            page: None,
+            paragraph: None,
+            row: None,
+            section: None,
+            sheet: None,
+            cell: None,
+            col: None,
+            at_ms: Some(ms),
+            start: 0,
+            end: 0,
+        }
     }
 
     pub fn human(&self) -> String {
         match self.kind.as_str() {
             "page" => format!("page {}", self.page.unwrap_or(0)),
-            "row" => format!("row {}", self.row.unwrap_or(0)),
+            "row" => match &self.sheet {
+                Some(sheet) => format!("{} row {}", sheet, self.row.unwrap_or(0)),
+                None => format!("row {}", self.row.unwrap_or(0)),
+            },
             "section" => format!("section {}", self.section.clone().unwrap_or_default()),
+            "cell" => {
+                let cell = self.cell.clone().unwrap_or_default();
+                if cell.contains('!') {
+                    cell // already sheet-qualified, e.g. "Sales!C2:C6"
+                } else {
+                    format!("{}!{}", self.sheet.clone().unwrap_or_default(), cell)
+                }
+            }
+            "timestamp" => {
+                let ms = self.at_ms.unwrap_or(0);
+                let total = ms / 1000;
+                format!("{:02}:{:02}", total / 60, total % 60)
+            }
             _ => format!("paragraph {}", self.paragraph.unwrap_or(0)),
         }
     }
@@ -182,6 +274,18 @@ impl Locator {
         if let Some(s) = &self.section {
             m.insert("section".into(), Value::from(s.as_str()));
         }
+        if let Some(s) = &self.sheet {
+            m.insert("sheet".into(), Value::from(s.as_str()));
+        }
+        if let Some(c) = &self.cell {
+            m.insert("cell".into(), Value::from(c.as_str()));
+        }
+        if let Some(c) = self.col {
+            m.insert("col".into(), Value::from(c as u64));
+        }
+        if let Some(ms) = self.at_ms {
+            m.insert("at_ms".into(), Value::from(ms as u64));
+        }
         m.insert("start".into(), Value::from(self.start as u64));
         m.insert("end".into(), Value::from(self.end as u64));
         Value::Obj(m)
@@ -194,6 +298,10 @@ impl Locator {
             paragraph: v.get("paragraph").and_then(|x| x.as_f64()).map(|x| x as u32),
             row: v.get("row").and_then(|x| x.as_f64()).map(|x| x as u32),
             section: v.str_of("section").map(|s| s.to_string()),
+            sheet: v.str_of("sheet").map(|s| s.to_string()),
+            cell: v.str_of("cell").map(|s| s.to_string()),
+            col: v.get("col").and_then(|x| x.as_f64()).map(|x| x as u32),
+            at_ms: v.get("at_ms").and_then(|x| x.as_f64()).map(|x| x as u32),
             start: v.get("start").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
             end: v.get("end").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
         }
@@ -443,6 +551,30 @@ mod tests {
         assert_eq!(back.page, Some(7));
         assert_eq!(back.kind, "page");
         assert_eq!(l.human(), "page 7");
+    }
+
+    #[test]
+    fn cell_locators_carry_sheet_reference_and_column() {
+        let l = Locator::cell("Sales", "Sales!C2:C6", 2);
+        assert_eq!(l.kind, "cell");
+        assert_eq!(l.sheet.as_deref(), Some("Sales"));
+        assert_eq!(l.cell.as_deref(), Some("Sales!C2:C6"));
+        assert_eq!(l.col, Some(3), "C is column 3, sheet name must not be parsed as letters");
+        assert_eq!(l.row, Some(2));
+        assert_eq!(l.human(), "Sales!C2:C6");
+        let back = Locator::from_json(&l.to_json());
+        assert_eq!(back.cell, l.cell);
+        assert_eq!(back.col, l.col);
+
+        // a row locator can also be sheet-qualified and keep its range
+        let r = Locator::sheet_row("Sales", 4, "A4-D4");
+        assert_eq!(r.kind, "row");
+        assert_eq!(r.human(), "Sales row 4");
+
+        let t = Locator::timestamp(75_000);
+        assert_eq!(t.kind, "timestamp");
+        assert_eq!(t.human(), "01:15");
+        assert_eq!(Locator::from_json(&t.to_json()).at_ms, Some(75_000));
     }
 
     #[test]

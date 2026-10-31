@@ -7,6 +7,7 @@
 
 use crate::domain::*;
 use crate::json::{self, Value};
+use crate::obj;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,9 @@ pub struct Db {
     pub conversations: Vec<Conversation>,
     pub notes: Vec<Note>,
     pub artifacts: Vec<Artifact>,
+    /// Structured grids parsed from spreadsheet/CSV sources, stored verbatim so an
+    /// aggregation after a restart uses the same cells it used before one.
+    pub tables: Vec<crate::tables::Table>,
 }
 
 pub struct Store {
@@ -90,6 +94,7 @@ fn encode_db(db: &Db) -> Value {
     );
     m.insert("notes".into(), Value::Arr(db.notes.iter().map(note_json).collect()));
     m.insert("artifacts".into(), Value::Arr(db.artifacts.iter().map(artifact_json).collect()));
+    m.insert("tables".into(), Value::Arr(db.tables.iter().map(table_json).collect()));
     Value::Obj(m)
 }
 
@@ -103,6 +108,7 @@ fn decode_db(text: &str) -> Option<Db> {
         conversations: arr("conversations").iter().map(conv_from).collect(),
         notes: arr("notes").iter().map(note_from).collect(),
         artifacts: arr("artifacts").iter().map(artifact_from).collect(),
+        tables: arr("tables").iter().filter_map(table_from).collect(),
     })
 }
 
@@ -210,6 +216,115 @@ fn chunk_from(v: &Value) -> Chunk {
     }
 }
 
+pub fn table_json(t: &crate::tables::Table) -> Value {
+    use crate::tables::CellValue;
+    let rows: Vec<Value> = t
+        .rows
+        .iter()
+        .map(|r| {
+            let cells: Vec<Value> = r
+                .cells
+                .iter()
+                .map(|c| {
+                    let mut m = BTreeMap::new();
+                    m.insert("col".into(), Value::from(c.col as u64));
+                    m.insert("header".into(), Value::from(c.header.as_str()));
+                    m.insert("text".into(), Value::from(c.text.as_str()));
+                    m.insert("ref".into(), Value::from(c.reference.as_str()));
+                    m.insert("unit".into(), Value::from(c.unit.as_str()));
+                    if let CellValue::Number(n) = c.value {
+                        m.insert("num".into(), Value::from(n));
+                    }
+                    if let Some(f) = &c.formula {
+                        m.insert("formula".into(), Value::from(f.as_str()));
+                    }
+                    Value::Obj(m)
+                })
+                .collect();
+            obj! { "row" => r.number as u64, "cells" => Value::Arr(cells) }
+        })
+        .collect();
+    obj! {
+        "id" => t.id.as_str(),
+        "source_id" => t.source_id.as_str(),
+        "notebook_id" => t.notebook_id.as_str(),
+        "sheet" => t.sheet.as_str(),
+        "hidden" => t.hidden,
+        "truncated" => t.truncated,
+        "headers" => Value::Arr(t.headers.iter().map(|h| Value::from(h.as_str())).collect()),
+        "warnings" => Value::Arr(t.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
+        "rows" => Value::Arr(rows),
+    }
+}
+
+pub fn table_from(v: &Value) -> Option<crate::tables::Table> {
+    use crate::tables::{Cell, CellValue, Row, Table};
+    let id = s(v, "id");
+    if id.is_empty() {
+        return None;
+    }
+    let headers: Vec<String> = v
+        .get("headers")
+        .and_then(|x| x.as_arr())
+        .map(|a| a.iter().map(|h| h.as_str().unwrap_or("").to_string()).collect())
+        .unwrap_or_default();
+    let rows = v
+        .get("rows")
+        .and_then(|x| x.as_arr())
+        .map(|arr| {
+            arr.iter()
+                .map(|r| {
+                    let cells = r
+                        .get("cells")
+                        .and_then(|x| x.as_arr())
+                        .map(|ca| {
+                            ca.iter()
+                                .map(|c| {
+                                    let text = s(c, "text");
+                                    let num = c.get("num").and_then(|x| x.as_f64());
+                                    let value = match num {
+                                        Some(n) => CellValue::Number(n),
+                                        None if text.is_empty() => CellValue::Empty,
+                                        None => CellValue::Text(text.clone()),
+                                    };
+                                    Cell {
+                                        col: c.get("col").and_then(|x| x.as_f64()).unwrap_or(1.0) as u32,
+                                        header: s(c, "header"),
+                                        value,
+                                        text,
+                                        reference: s(c, "ref"),
+                                        unit: s(c, "unit"),
+                                        formula: c.str_of("formula").map(|f| f.to_string()),
+                                    }
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Row {
+                        number: r.get("row").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
+                        cells,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(Table {
+        id,
+        source_id: s(v, "source_id"),
+        notebook_id: s(v, "notebook_id"),
+        sheet: s(v, "sheet"),
+        hidden: v.get("hidden").and_then(|b| b.as_bool()).unwrap_or(false),
+        truncated: v.get("truncated").and_then(|b| b.as_bool()).unwrap_or(false),
+        headers,
+        rows,
+        warnings: v
+            .get("warnings")
+            .and_then(|x| x.as_arr())
+            .map(|a| a.iter().filter_map(|w| w.as_str().map(|x| x.to_string())).collect())
+            .unwrap_or_default(),
+    })
+}
+
 fn conv_json(c: &Conversation) -> Value {
     let mut m = BTreeMap::new();
     m.insert("id".into(), Value::from(c.id.as_str()));
@@ -298,6 +413,41 @@ mod tests {
         let p = std::env::temp_dir().join(format!("forge-test-{}-{}", tag, new_id("t")));
         fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn tables_survive_a_restart_with_cells_intact() {
+        let dir = tmpdir("tables");
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/sales.xlsx");
+        let bytes = fs::read(fixture).unwrap();
+        let mut parsed = crate::tables::parse_xlsx(&bytes, "src-1", "nb-1").unwrap();
+        assert_eq!(parsed.len(), 2);
+        {
+            let st = Store::open(&dir).unwrap();
+            st.write(|db| db.tables.append(&mut parsed)).unwrap();
+        }
+        // reopen: a fresh process would do exactly this
+        let st = Store::open(&dir).unwrap();
+        let (tables, reopened_json) = st.read(|db| (db.tables.clone(), json::to_string(&encode_db(db))));
+        assert_eq!(tables.len(), 2, "both sheets persisted");
+        let sales = tables.iter().find(|t| t.sheet == "Sales").expect("Sales");
+        assert_eq!(sales.headers, vec!["Region", "Channel", "Revenue", "Units"]);
+        assert_eq!(sales.rows.len(), 5);
+        let c2 = sales.rows.iter().find(|r| r.number == 2).unwrap();
+        assert_eq!(sales.cell(c2, 2).unwrap().number(), Some(1200.5), "precision kept");
+        let c4 = sales.rows.iter().find(|r| r.number == 4).unwrap();
+        assert_eq!(sales.cell(c4, 2).unwrap().formula.as_deref(), Some("SUM(C2:C3)"));
+        assert!(matches!(sales.cell(c4, 3).unwrap().value, crate::tables::CellValue::Empty));
+        let meta = tables.iter().find(|t| t.sheet == "Meta").expect("Meta");
+        assert!(meta.hidden, "hidden flag persists");
+
+        // and the aggregation after a restart produces the same number
+        let src = Source { id: "src-1".into(), title: "Sales 2026".into(), ..Default::default() };
+        let a = crate::tables::try_answer("total revenue", &tables, &[src]).unwrap();
+        assert!(a.text.contains("2350.5"), "{}", a.text);
+        // the encoded document stays parseable
+        assert!(json::parse(&reopened_json).is_ok());
     }
 
     #[test]

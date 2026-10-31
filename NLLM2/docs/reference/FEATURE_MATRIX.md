@@ -15,14 +15,16 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | NB-04 | sort / filter / search library | documented | planned | — | — |
 | SRC-01 | paste text | documented | done | `ingest::text` | lib + UI |
 | SRC-02 | PDF with page locators | documented | done | `ingest::pdf` | lib + e2e |
-| SRC-03 | DOCX / PPTX / XLSX | documented | done | `ingest::ooxml` | lib + e2e |
-| SRC-04 | CSV / TSV rows | documented | done | `text::csv_blocks` | lib |
+| SRC-03 | DOCX / PPTX / XLSX | documented | done | `ingest::ooxml` (docx/pptx) + `tables::parse_xlsx` (every sheet, cell refs) | lib + e2e |
+| SRC-04 | CSV / TSV rows | documented | done | `tables::parse_delimited` (RFC 4180, delimiter sniffed) | lib + e2e |
 | SRC-05 | HTML files | documented | done | `text::html_blocks` | lib |
 | SRC-06 | **web URL fetch** | documented | **done** | `fetch.rs` + `api.rs` | 11 unit + 1 e2e |
 | SRC-07 | PDF served over a URL | documented | done | `Fetched::ingest_kind` | unit |
 | SRC-08 | duplicate URL refused, names the original | inferred (sane default) | done | `add_url_source` | e2e |
 | SRC-09 | source refresh / sync | documented ("Click to sync"; outputs do not change) | **done** | `refresh_source` | e2e |
 | SRC-18 | note → source conversion | documented ("convert note to source") | **done** | `note_to_source` | e2e |
+| SRC-19 | spreadsheet grid with sheet + A1 cell locators (§10.1) | documented (XLSX: sheet, cell range, formula/value) | **done** | `tables.rs` + `Locator::cell/sheet_row` | 22 unit + e2e + UI |
+| SRC-20 | hidden worksheets stored but never cited | own policy (safety) | **done** | `Table.hidden` | unit |
 | SRC-10 | rename source + labels | documented | **done** | `PATCH /api/sources/:id` | e2e |
 | SRC-11 | images / OCR | documented | blocked | — | no OCR engine |
 | SRC-12 | audio → transcript | documented | blocked | — | no ASR |
@@ -38,6 +40,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | CHAT-05 | conversation persistence / history | documented | done | `store.rs` | e2e |
 | CHAT-06 | streaming + stop | documented | planned | — | — |
 | CHAT-07 | style / length / custom instructions | documented | partial (notebook instructions only) | `api.rs` | — |
+| CHAT-08 | **table answers** (aggregation over source cells) | documented ("table answers" in the answer modes; Data Tables journey I) | **partial** — sum/average/min/max/count over an existing grid, optional group-by; no schema inference, no charts | `tables::try_answer`, `api::chat` | 22 unit + e2e + UI |
 | NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
 | NOTE-02 | save answer as note | documented | done | UI | UI smoke |
 | NOTE-03 | note used as chat context | documented | **done** via conversion to a source (reference also allows direct selection) | `POST /api/notes/:id/to-source` | e2e Journey D |
@@ -46,7 +49,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |
 | ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** | `Artifact.stale` | e2e |
 | ART-05 | audio / video / slides / infographics | documented | blocked | — | no TTS/renderer |
-| ART-06 | data tables (per-cell evidence) | documented | planned | — | provider-free, high value |
+| ART-06 | data tables as an artifact (schema inference, per-cell evidence, export) | documented | planned — querying source grids is done (CHAT-08); *creating* a new table from prose is not | — | needs extraction + review UI |
 | RES-01 | Fast Research | documented | planned | — | no search provider |
 | RES-02 | Deep Research | documented | planned | — | no search provider |
 | SHARE-01 | roles, share links, revocation | documented | planned | — | needs identity first |

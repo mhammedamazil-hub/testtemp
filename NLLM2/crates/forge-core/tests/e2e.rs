@@ -797,3 +797,173 @@ fn note_can_become_a_cited_source() {
     assert_eq!(st, 200, "{:?}", still);
     assert_eq!(still.str_of("origin"), Some("note"));
 }
+
+/// Journey: a spreadsheet answer is computed from real cells and cites the exact range.
+#[test]
+fn spreadsheet_questions_are_computed_over_real_cells() {
+    let dir = tempdir("tables");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[("title", Value::from("Sales review"))])),
+    );
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+
+    let bytes = std::fs::read(fixtures.join("sales.xlsx")).unwrap();
+    let (status, body) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=sales.xlsx", nb_id),
+        Some(&bytes),
+        "application/octet-stream",
+    );
+    assert_eq!(status, 201, "upload failed: {}", body);
+    let v = json::parse(&body).unwrap();
+    let source_id = v.str_of("source_id").unwrap().to_string();
+    assert_eq!(v.get("table_count").and_then(|x| x.as_f64()), Some(2.0), "{:?}", v);
+    let tables = v.get("tables").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(tables.len(), 2);
+    assert!(tables.iter().any(|t| t.str_of("sheet") == Some("Sales")));
+    let hidden = tables.iter().find(|t| t.str_of("sheet") == Some("Meta")).expect("Meta");
+    assert_eq!(hidden.get("hidden").and_then(|b| b.as_bool()), Some(true));
+
+    // the derived answer is a computation, not a quote
+    let (st, chat) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("what is the total revenue"))])),
+    );
+    assert_eq!(st, 200, "chat failed: {:?}", chat);
+    assert_eq!(chat.get("computed").and_then(|b| b.as_bool()), Some(true), "{:?}", chat);
+    assert_eq!(chat.str_of("engine"), Some("table"));
+    let answer = chat.str_of("answer").unwrap_or("");
+    assert!(answer.contains("2350.5"), "total must exclude the cached subtotal: {}", answer);
+    assert!(answer.contains("C4"), "the excluded subtotal row is named: {}", answer);
+    let cites = chat.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(cites.len(), 1, "{:?}", cites);
+    let loc = cites[0].get("locator").expect("locator");
+    assert_eq!(loc.str_of("kind"), Some("cell"));
+    assert_eq!(loc.str_of("sheet"), Some("Sales"));
+    assert_eq!(loc.str_of("cell"), Some("Sales!C2:C6"));
+    assert_eq!(cites[0].str_of("source_id"), Some(source_id.as_str()));
+    assert_eq!(
+        chat.get("citation_problems").and_then(|p| p.as_arr()).map(|a| a.len()),
+        Some(0),
+        "{:?}",
+        chat.get("citation_problems")
+    );
+
+    // the table is browsable with real cell references, and row numbers are original
+    let (st, tables_json) = s.json("GET", &format!("/api/sources/{}/tables", source_id), None);
+    assert_eq!(st, 200);
+    let sales = tables_json
+        .get("tables")
+        .and_then(|t| t.as_arr())
+        .and_then(|a| a.iter().find(|t| t.str_of("sheet") == Some("Sales")).cloned())
+        .expect("Sales table");
+    assert_eq!(sales.get("row_count").and_then(|x| x.as_f64()), Some(5.0));
+    let first_row = sales.get("rows").and_then(|r| r.as_arr()).and_then(|a| a.first()).cloned().unwrap();
+    assert_eq!(first_row.get("row").and_then(|x| x.as_f64()), Some(2.0), "data starts at row 2");
+    let cells = first_row.get("cells").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(cells[2].str_of("ref"), Some("C2"));
+    assert_eq!(cells[2].get("number").and_then(|x| x.as_f64()), Some(1200.5));
+
+    // capping rows never lies about the size
+    let (st, capped) = s.json("GET", &format!("/api/sources/{}/tables?rows=2", source_id), None);
+    assert_eq!(st, 200);
+    let capped_sales = capped
+        .get("tables")
+        .and_then(|t| t.as_arr())
+        .and_then(|a| a.iter().find(|t| t.str_of("sheet") == Some("Sales")).cloned())
+        .unwrap();
+    assert_eq!(capped_sales.get("rows").and_then(|r| r.as_arr()).map(|a| a.len()), Some(2));
+    assert_eq!(capped_sales.get("row_count").and_then(|x| x.as_f64()), Some(5.0));
+    assert_eq!(capped_sales.get("truncated").and_then(|b| b.as_bool()), Some(true));
+
+    // a prose question about the same source still goes through text evidence
+    let (st, prose) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("which channel does North use"))])),
+    );
+    assert_eq!(st, 200);
+    assert_eq!(prose.get("computed").and_then(|b| b.as_bool()), Some(false), "{}", prose.str_of("answer").unwrap_or(""));
+
+    // deleting the source removes its tables too
+    let (st, _) = s.json("DELETE", &format!("/api/sources/{}", source_id), None);
+    assert_eq!(st, 200);
+    let (st, after) = s.json("GET", &format!("/api/sources/{}/tables", source_id), None);
+    assert_eq!(st, 404);
+    assert_eq!(after.str_of("code"), Some("not_found"));
+
+    // survival across restart is tested in store::tests::tables_survive_a_restart
+}
+
+/// A notebook export must carry the grids, otherwise a re-import silently loses every
+/// cell reference and the ability to compute.
+#[test]
+fn exported_notebooks_keep_their_tables() {
+    let dir = tempdir("export-tables");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[("title", Value::from("Export check"))])),
+    );
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let bytes = std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sales.xlsx"),
+    )
+    .unwrap();
+    let (status, body) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=sales.xlsx", nb_id),
+        Some(&bytes),
+        "application/octet-stream",
+    );
+    assert_eq!(status, 201, "{}", body);
+    let src = json::parse(&body).unwrap();
+    let source_id = src.str_of("source_id").unwrap().to_string();
+
+    let (st, exported) = s.json("GET", &format!("/api/notebooks/{}/export", nb_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(
+        exported.get("tables").and_then(|t| t.as_arr()).map(|a| a.len()),
+        Some(2),
+        "both sheets exported"
+    );
+
+    let (st, imported) = s.json("POST", "/api/import", Some(exported.clone()));
+    assert_eq!(st, 201, "{:?}", imported);
+    assert_eq!(
+        imported.get("imported").and_then(|i| i.get("tables")).and_then(|x| x.as_f64()),
+        Some(2.0),
+        "{:?}",
+        imported
+    );
+    let new_nb = imported.str_of("notebook_id").unwrap().to_string();
+
+    // the copied notebook answers the same question with the same number and a cell citation
+    let (st, chat) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", new_nb),
+        Some(obj(&[("question", Value::from("what is the total revenue"))])),
+    );
+    assert_eq!(st, 200, "{:?}", chat);
+    assert_eq!(chat.get("computed").and_then(|b| b.as_bool()), Some(true));
+    assert!(chat.str_of("answer").unwrap_or("").contains("2350.5"));
+    let cites = chat.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(cites[0].get("locator").and_then(|l| l.str_of("sheet")), Some("Sales"));
+    assert_ne!(
+        cites[0].str_of("source_id"),
+        Some(source_id.as_str()),
+        "imported sources get new ids"
+    );
+
+    // and the imported source exposes its tables under its new id
+    let new_source = cites[0].str_of("source_id").unwrap().to_string();
+    let (st, tables) = s.json("GET", &format!("/api/sources/{}/tables", new_source), None);
+    assert_eq!(st, 200);
+    assert_eq!(tables.get("count").and_then(|c| c.as_f64()), Some(2.0));
+}

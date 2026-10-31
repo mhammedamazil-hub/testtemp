@@ -143,6 +143,51 @@ async function main() {
   await wait(900);
   check("report built with citations", $$("#sideContent .cite").length > 0);
 
+  // --- a spreadsheet question is answered by computing over real cells
+  window.location.hash = `#/nb/${nbId}`;
+  await wait(500);
+  const sheetPath = path.join(WEB, "../../tests/fixtures/sales.xlsx");
+  const sheetFile = new window.File([fs.readFileSync(sheetPath)], "sales.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const uploadInput = $("#fileInput");
+  check("upload control accepts spreadsheets", /\.xlsx/.test(uploadInput?.getAttribute("accept") || ""));
+  Object.defineProperty(uploadInput, "files", { value: [sheetFile], writable: true });
+  uploadInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await wait(1500);
+  const sheetSources = $$(".source-item");
+  const sheetSource = sheetSources.find((el) => /sales\.xlsx/i.test(el.textContent));
+  check("spreadsheet imported through the UI", !!sheetSource, sheetSources.map((e) => e.textContent).join(" | "));
+  check("source item reports its sheets and rows",
+    /2 sheets/.test(sheetSource?.textContent || "") && /6 rows/.test(sheetSource?.textContent || ""),
+    sheetSource?.textContent);
+
+  const askSheet = $(".composer textarea");
+  askSheet.value = "what is the total revenue";
+  byText(".composer button", "Ask").click();
+  await wait(1200);
+  const sheetAnswers = $$(".msg.assistant");
+  const computedMsg = sheetAnswers[sheetAnswers.length - 1];
+  check("spreadsheet total is computed, not quoted", /2350\.5/.test(computedMsg.textContent), computedMsg.textContent.slice(0, 300));
+  check("computed answer says so", /computed from table cells/.test(computedMsg.textContent), computedMsg.textContent.slice(0, 200));
+  check("computed answer names the excluded subtotal row", /C4/.test(computedMsg.textContent), computedMsg.textContent.slice(0, 300));
+  const sheetCite = computedMsg.querySelector(".cite");
+  check("computed answer carries a cell citation", /Sales/.test(sheetCite?.textContent || ""), sheetCite?.textContent);
+
+  sheetCite.click();
+  await wait(800);
+  const gridViewer = $(".overlay .viewer");
+  check("viewer renders the real grid", !!gridViewer?.querySelector("table.grid"), "no grid");
+  check("grid keeps original row numbers",
+    gridViewer?.querySelector("tbody tr th.rownum")?.textContent === "2",
+    gridViewer?.querySelector("tbody tr")?.textContent);
+  check("grid shows the cached formula value", /2050\.5/.test(gridViewer?.textContent || ""));
+  check("grid cells expose their A1 reference", !!gridViewer?.querySelector('td[title^="C2"]'));
+  const hiddenNote = /hidden sheet/.test(gridViewer?.textContent || "");
+  check("hidden sheets are labelled when shown", hiddenNote, "Meta sheet not labelled");
+  byText(".viewer header button", "✕").click();
+  await wait(200);
+
   // --- URL import is a real control, not a prompt() box
   check("add-from-URL control exists", !!window.document.querySelector("#addUrlBtn"));
   check("URL input is labelled for assistive tech",
