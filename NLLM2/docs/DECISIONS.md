@@ -229,3 +229,31 @@ the cached value the spreadsheet stored and print the formula beside it.
 **Consequences.** `db.json` grows with the grid (capped at 20,000 rows/sheet). Hidden sheets are
 stored (so a user can inspect them) but excluded from retrieval, aggregation and citations.
 `.xls`/ODS remain unsupported and are rejected at kind detection.
+
+## D16 — The Source Guide quotes; it does not summarise with a model
+
+**Date.** 2026-10-31. **Background.** The reference product shows a source guide/summary when a
+source is opened. Forge has no reachable LLM (no TLS client, no key, no local model), so
+"summarise this source" cannot be done honestly by generation.
+
+**Chosen.** `GET /api/sources/:id/guide` returns a deterministic, **extractive** guide:
+a headline and up to five summary lines, each a sentence copied verbatim out of one chunk with
+that chunk's id and human locator; recurring terms with counts and first locations (two-word
+phrases preferred over their parts, so the guide says "Calvin cycle" once rather than "calvin"
+and "cycle" twice); an outline built only from structure the parser recorded (markdown/HTML
+sections, PPTX slides, XLSX sheets); and suggested questions templated over observed topics and
+real numeric columns. The payload states its own nature: `generated_by: "extractive"`,
+`model: null`, `deterministic: true`.
+
+**Rejected.** (a) Calling a "summary" the first 280 characters of the first chunk (what
+`artifacts::summary` does for its `lead` field) — it is a prefix, not a guide. (b) Writing
+templated prose around extracted sentences ("This source discusses…") — it reads like
+generation and cannot be verified. (c) Hiding the provenance so the guide looks like an AI
+summary — that is precisely the deception §1 forbids.
+
+**Consequences.** A guide cannot tell the user *what the source is about* in the way a model
+could; it can only show what recurs and what the structure is. That limitation is stated in
+`docs/UNKNOWN_AND_LIMITATIONS.md`, in the capability matrix (`SRC-17 partial`), and in the UI
+badge ("extractive · quoted, not generated"). When a provider is configured, a model-written
+guide becomes possible — but it must be a *separate*, clearly labelled field, never a silent
+upgrade of this one.

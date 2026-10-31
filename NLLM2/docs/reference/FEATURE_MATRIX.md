@@ -32,7 +32,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-14 | ePub | documented | planned | — | — |
 | SRC-15 | Drive / Docs / Sheets | documented | blocked | — | OAuth + credentials |
 | SRC-16 | GitHub repo/issues | not in reference | planned | — | `api.github.com` reachable |
-| SRC-17 | Source Guide auto-summary | documented | planned | — | — |
+| SRC-17 | Source Guide auto-summary | documented | **partial (honest)** — extractive guide: quoted headline/summary with locators, topics, outline, suggested questions; **no model-written summary** (no reachable LLM) | `guide.rs`, `GET /api/sources/:id/guide` | 8 unit + e2e + 9 UI |
 | CHAT-01 | notebook-scoped grounded chat | documented | done | `grounded.rs` | lib + e2e |
 | CHAT-02 | exact citations + quote preview | documented | done | `Citation` | lib + UI |
 | CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |

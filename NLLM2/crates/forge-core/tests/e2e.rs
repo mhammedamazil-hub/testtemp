@@ -967,3 +967,97 @@ fn exported_notebooks_keep_their_tables() {
     assert_eq!(st, 200);
     assert_eq!(tables.get("count").and_then(|c| c.as_f64()), Some(2.0));
 }
+
+/// Source Guide: orientation that quotes the source instead of paraphrasing it.
+#[test]
+fn source_guide_quotes_the_source_and_refuses_when_empty() {
+    let dir = tempdir("guide");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[("title", Value::from("Guide"))])),
+    );
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    // long enough to index as several passages, so the guide must choose between them
+    let markdown = "# Photosynthesis\n\n\
+Photosynthesis converts light energy into chemical energy inside chloroplasts, where the light reactions split water and release oxygen as a by-product.\n\n\
+## Where it happens\n\n\
+Chlorophyll absorbs light most strongly in the blue and red bands and reflects green light, which is why healthy leaves look green to the eye. The Calvin cycle runs in the stroma of the chloroplast and builds glucose from carbon dioxide using the ATP and NADPH produced by the light reactions.\n\n\
+## Limits\n\n\
+Stomata close under drought stress, which limits carbon dioxide uptake and slows the Calvin cycle even when light is plentiful. Temperature also matters: the enzymes of the Calvin cycle lose activity above roughly forty degrees.\n\n\
+## Measurement\n\n\
+Gas exchange measurements record carbon dioxide uptake per leaf area, so a drought experiment reports both stomatal conductance and the assimilation rate for each plant.\n";
+    let (st, src) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Biology")),
+            ("text", Value::from(markdown)),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let sid = src.str_of("source_id").unwrap().to_string();
+
+    let (st, guide) = s.json("GET", &format!("/api/sources/{}/guide", sid), None);
+    assert_eq!(st, 200, "{:?}", guide);
+    assert_eq!(guide.str_of("generated_by"), Some("extractive"));
+    assert!(guide.get("model").map(|m| m.is_null()).unwrap_or(false), "no model may be claimed");
+    assert_eq!(guide.get("deterministic").and_then(|d| d.as_bool()), Some(true));
+
+    // the headline is a verbatim quotation that exists in the stored chunks
+    let (_, chunks_json) = s.json("GET", &format!("/api/sources/{}/chunks", sid), None);
+    let chunks = chunks_json.get("chunks").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    let headline = guide.get("headline").expect("headline");
+    let quoted = headline.str_of("text").unwrap().to_string();
+    assert!(
+        chunks.iter().any(|c| c.str_of("text").map(|t| t.contains(&quoted)).unwrap_or(false)),
+        "headline is not a quote from the source: {}",
+        quoted
+    );
+    assert!(headline.str_of("chunk_id").is_some());
+
+    // every summary line resolves to a real chunk id and carries a locator
+    let summary = guide.get("summary").and_then(|x| x.as_arr()).cloned().unwrap_or_default();
+    assert!(!summary.is_empty(), "{:?}", guide);
+    for line in &summary {
+        let cid = line.str_of("chunk_id").unwrap();
+        assert!(chunks.iter().any(|c| c.str_of("id") == Some(cid)), "unknown chunk {}", cid);
+        assert!(!line.str_of("locator").unwrap_or("").is_empty());
+    }
+    assert!(summary.windows(2).any(|w| w[0].str_of("chunk_id") != w[1].str_of("chunk_id"))
+        || chunks.len() == 1, "the guide should not quote one passage only");
+
+    // structure comes from the parser, topics carry a location
+    let outline: Vec<String> = guide.get("outline").and_then(|o| o.as_arr()).map(|a| a.iter().filter_map(|x| x.str_of("x").map(|s| s.to_string())).collect()).unwrap_or_default();
+    assert!(outline.is_empty() || outline.iter().any(|o| o.contains("Photosynthesis")), "{:?}", outline);
+    let topics = guide.get("topics").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
+    assert!(!topics.is_empty());
+    for t in &topics {
+        assert!(!t.str_of("locator").unwrap_or("").is_empty(), "topic without a location: {:?}", t);
+    }
+    let questions = guide.get("questions").and_then(|q| q.as_arr()).cloned().unwrap_or_default();
+    assert!(!questions.is_empty());
+
+    // unknown source, and a source that never indexed anything
+    let (st, _) = s.json("GET", "/api/sources/src-missing/guide", None);
+    assert_eq!(st, 404);
+    let bad = b"%PDF-1.4 not really a pdf";
+    let (st, _) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=broken.pdf", nb_id),
+        Some(bad),
+        "application/pdf",
+    );
+    assert_eq!(st, 422);
+    let (_, list) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let failed = list
+        .get("sources")
+        .and_then(|x| x.as_arr())
+        .and_then(|a| a.iter().find(|s| s.str_of("status") == Some("failed")).cloned())
+        .expect("failed source recorded");
+    let failed_id = failed.str_of("id").unwrap().to_string();
+    let (st, body) = s.json("GET", &format!("/api/sources/{}/guide", failed_id), None);
+    assert_eq!(st, 409, "{:?}", body);
+    assert_eq!(body.str_of("code"), Some("guide_unavailable"));
+}

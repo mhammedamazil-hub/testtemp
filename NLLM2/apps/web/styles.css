@@ -236,3 +236,12 @@ table.grid thead th { position: sticky; top: 0; background: var(--bg-elev2); fon
 table.grid th.rownum { color: var(--faint); font-family: var(--mono); font-size: 11px; text-align: right; background: var(--bg-elev); }
 table.grid td.num { text-align: right; font-family: var(--mono); }
 table.grid tbody tr:hover { background: var(--bg-elev2); }
+
+/* Source guide: quotations with locators, never a generated paraphrase. */
+.guide { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; background: var(--bg-elev); }
+.guide-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.guide-quote { cursor: pointer; padding: 4px 0 4px 8px; border-left: 2px solid var(--line); margin: 4px 0; font-size: 13px; }
+.guide-quote:hover { border-left-color: var(--accent); }
+.guide-quote.lead { font-weight: 600; border-left-color: var(--accent); }
+.guide-quote .loc { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }

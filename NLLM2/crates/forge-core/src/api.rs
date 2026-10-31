@@ -111,6 +111,7 @@ impl Api {
             ("GET", ["api", "sources", sid]) => Ok(self.get_source(sid)),
             ("GET", ["api", "sources", sid, "chunks"]) => Ok(self.source_chunks(sid, req)),
             ("GET", ["api", "sources", sid, "tables"]) => Ok(self.source_tables(sid, req)),
+            ("GET", ["api", "sources", sid, "guide"]) => Ok(self.source_guide(sid)),
             ("DELETE", ["api", "sources", sid]) => Ok(self.delete_source(sid)),
             ("PATCH", ["api", "sources", sid]) => self.update_source(sid, req),
             ("POST", ["api", "sources", sid, "refresh"]) => self.refresh_source(sid),
@@ -563,6 +564,31 @@ impl Api {
                 "tables" => Value::Arr(tables.iter().map(|t| t.json(limit)).collect()),
             })
         })
+    }
+
+    /// Source Guide: an extractive orientation to one source.
+    ///
+    /// Every sentence is quoted from a chunk and carries that chunk's id and locator.
+    /// `generated_by` is always `extractive` — no model is called, so no paraphrase is
+    /// presented as one.
+    fn source_guide(&self, sid: &str) -> Response {
+        let built = self.store.read(|db| {
+            let Some(source) = db.sources.iter().find(|s| s.id == sid) else {
+                return Err(err(404, "not_found", "source not found"));
+            };
+            let chunks: Vec<Chunk> = db.chunks.iter().filter(|c| c.source_id == sid).cloned().collect();
+            let tables: Vec<crate::tables::Table> =
+                db.tables.iter().filter(|t| t.source_id == sid).cloned().collect();
+            match crate::guide::build(source, &chunks, &tables) {
+                Ok(g) => Ok(ok(g.to_json())),
+                Err(e) => Err(err(
+                    409,
+                    "guide_unavailable",
+                    &format!("{} — a guide needs indexed passages to quote", e),
+                )),
+            }
+        });
+        built.unwrap_or_else(|e| e)
     }
 
     fn delete_source(&self, sid: &str) -> Response {

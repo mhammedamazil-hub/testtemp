@@ -7,6 +7,7 @@ pub mod api;
 pub mod artifacts;
 pub mod domain;
 pub mod grounded;
+pub mod guide;
 pub mod hashes;
 pub mod fetch;
 pub mod http;

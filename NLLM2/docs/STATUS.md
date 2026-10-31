@@ -1,6 +1,6 @@
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-31 (spreadsheet tables: real cells, exact references, computed answers).
+Last updated: 2026-10-31 (spreadsheet tables + Source Guide).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -19,11 +19,12 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **172 passing, 0 failing** (26 `bininspect` + 130 lib + 11 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **53 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **181 passing, 0 failing** (26 `bininspect` + 138 lib + 12 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **62 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
-| Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 new assertions) |
+| Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
+| Source Guide | per-source orientation: verbatim quoted headline + summary with locators, recurring terms (incl. two-word phrases), real outline (sections/sheets), suggested questions | `guide` (8 tests) + e2e `source_guide_quotes_the_source_and_refuses_when_empty` + UI smoke (9 assertions) |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
@@ -48,6 +49,7 @@ tables          22
 notebooklm      15
 fetch           11
 retrieve         9
+guide            8
 grounded         8
 artifacts        7
 security         6
@@ -64,12 +66,12 @@ ingest           3   (PDF + dispatch)
 ingest::zip      2
 inflate          2
 --------------------
-lib total      130
+lib total      138
 bininspect      26   (separate crate)
-e2e (HTTP)      11
+e2e (HTTP)      12
 server           5
 ====================
-total          172
+total          181
 ```
 
 ## Not available, with reasons
@@ -86,6 +88,7 @@ total          172
 | Sheets beyond 20,000 rows | self-imposed cap (`security::MAX_TABLE_ROWS`) | the grid is marked `truncated`, the reason is reported, and aggregations **refuse** rather than total a partial sheet |
 | `.xls` (BIFF), ODS, Google Sheets | no parser written; binary formats out of scope for now | upload is rejected by kind detection with a clear error, never half-indexed |
 | Data Tables artifact (schema-inferred extraction, charts) | not implemented | reported as `planned`; existing spreadsheets are queried directly instead |
+| Model-written source summaries | no reachable LLM (no TLS client, no key) | the Source Guide is **extractive**: every line is a quotation with its locator, and the payload says `generated_by: extractive`, `model: null` |
 | Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps

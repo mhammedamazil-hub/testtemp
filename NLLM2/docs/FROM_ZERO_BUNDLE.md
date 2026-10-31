@@ -10,6 +10,663 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
+## `crates/forge-core/src/guide.rs`
+
+```rust
+//! Source Guide: a per-source orientation built **only** from the source itself.
+//!
+//! The reference product shows a guide/summary when a source is opened. Forge cannot
+//! reach a model provider (no TLS client, no key), so pretending to summarise with an
+//! LLM would be a lie. What this module produces instead is a deterministic,
+//! extractive guide:
+//!
+//! * every sentence in the summary is **quoted verbatim** from one chunk and carries
+//!   that chunk's id and human locator, so the user can jump to it and check;
+//! * topics are term frequencies with the chunk where each first appears;
+//! * the outline comes from real structure the parser recorded (sections, sheets,
+//!   pages), never from guesswork;
+//! * suggested questions are templates over observed topics, labelled as suggestions.
+//!
+//! The output always says `generated_by: "extractive"` and `model: null`. Nothing here
+//! paraphrases, and nothing is inferred about the source's meaning.
+
+use crate::domain::{Chunk, Source};
+use crate::json::Value;
+use crate::obj;
+use crate::retrieve;
+use crate::tables::Table;
+use std::collections::BTreeMap;
+
+/// Default shape of a guide. Small on purpose: a guide that restates the whole source is
+/// just the source again.
+pub const MAX_SUMMARY_SENTENCES: usize = 5;
+pub const MAX_TOPICS: usize = 8;
+pub const MAX_QUESTIONS: usize = 5;
+
+#[derive(Debug, Clone)]
+pub struct GuideSentence {
+    pub text: String,
+    pub chunk_id: String,
+    pub locator: String,
+    pub ordinal: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuideTopic {
+    /// Surface form shown to the user (most frequent original casing). For a phrase this
+    /// is the words joined, e.g. "Calvin cycle".
+    pub term: String,
+    /// Stemmed words the term is made of (one for a single word, two for a phrase).
+    pub stems: Vec<String>,
+    pub count: usize,
+    /// Chunks containing the term.
+    pub chunks: usize,
+    pub first_chunk_id: String,
+    pub first_locator: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Guide {
+    pub source_id: String,
+    pub title: String,
+    pub kind: String,
+    pub headline: Option<GuideSentence>,
+    pub summary: Vec<GuideSentence>,
+    pub topics: Vec<GuideTopic>,
+    pub outline: Vec<String>,
+    pub questions: Vec<String>,
+    pub word_count: usize,
+    pub chunk_count: usize,
+    pub table_count: usize,
+    pub table_row_count: usize,
+    pub warnings: Vec<String>,
+}
+
+impl Guide {
+    pub fn to_json(&self) -> Value {
+        let sentence_json = |s: &GuideSentence| {
+            obj! {
+                "text" => s.text.as_str(),
+                "chunk_id" => s.chunk_id.as_str(),
+                "locator" => s.locator.as_str(),
+                "ordinal" => s.ordinal as u64,
+            }
+        };
+        obj! {
+            "source_id" => self.source_id.as_str(),
+            "title" => self.title.as_str(),
+            "kind" => self.kind.as_str(),
+            // Honesty fields, read by the UI: this text is quoted, not generated.
+            "generated_by" => "extractive",
+            "model" => Value::Null,
+            "deterministic" => true,
+            "headline" => match &self.headline { Some(s) => sentence_json(s), None => Value::Null },
+            "summary" => Value::Arr(self.summary.iter().map(sentence_json).collect()),
+            "topics" => Value::Arr(self.topics.iter().map(|t| obj! {
+                "term" => t.term.as_str(),
+                "count" => t.count as u64,
+                "chunks" => t.chunks as u64,
+                "chunk_id" => t.first_chunk_id.as_str(),
+                "locator" => t.first_locator.as_str(),
+            }).collect()),
+            "outline" => Value::Arr(self.outline.iter().map(|o| Value::from(o.as_str())).collect()),
+            "questions" => Value::Arr(self.questions.iter().map(|q| Value::from(q.as_str())).collect()),
+            "stats" => obj! {
+                "words" => self.word_count as u64,
+                "chunks" => self.chunk_count as u64,
+                "tables" => self.table_count as u64,
+                "table_rows" => self.table_row_count as u64,
+            },
+            "warnings" => Value::Arr(self.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
+        }
+    }
+}
+
+/// A sentence candidate: score, chunk index, position inside the chunk, text.
+struct Candidate {
+    score: f64,
+    chunk_idx: usize,
+    text: String,
+}
+
+fn jaccard(a: &[String], b: &[String]) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let mut inter = 0usize;
+    for x in a {
+        if b.contains(x) {
+            inter += 1;
+        }
+    }
+    let union = a.len() + b.len() - inter;
+    if union == 0 {
+        0.0
+    } else {
+        inter as f64 / union as f64
+    }
+}
+
+/// Choose the surface form to display for a stemmed term: most frequent original casing,
+/// preferring a capitalised form when counts tie (so "BM25" beats "bm25").
+fn surface_forms(chunks: &[Chunk]) -> BTreeMap<String, BTreeMap<String, usize>> {
+    let mut forms: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for c in chunks {
+        for raw in retrieve::tokenize(&c.text) {
+            if raw.len() < 3 {
+                continue;
+            }
+            let stem = retrieve::stem(&raw);
+            *forms.entry(stem).or_default().entry(raw.clone()).or_insert(0) += 1;
+        }
+    }
+    forms
+}
+
+/// Count content words (stemmed) and adjacent two-word phrases, with chunk coverage.
+fn ngram_counts(chunks: &[Chunk], n: usize) -> BTreeMap<String, (usize, usize)> {
+    // stem-key -> (total occurrences, chunks containing it)
+    let mut totals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for c in chunks {
+        let stems: Vec<String> = retrieve::terms(&c.text).into_iter().map(|t| retrieve::stem(&t)).collect();
+        let mut seen: Vec<String> = Vec::new();
+        for i in 0..stems.len() {
+            if i + n > stems.len() {
+                break;
+            }
+            let key = stems[i..i + n].join(" ");
+            let e = totals.entry(key.clone()).or_insert((0, 0));
+            e.0 += 1;
+            if !seen.contains(&key) {
+                seen.push(key);
+                e.1 += 1;
+            }
+        }
+    }
+    totals
+}
+
+fn surface_of(stem: &str, forms: &BTreeMap<String, BTreeMap<String, usize>>) -> String {
+    forms
+        .get(stem)
+        .and_then(|m| m.iter().max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0))).map(|(k, _)| k.clone()))
+        .unwrap_or_else(|| stem.to_string())
+}
+
+/// Topics for display, and the unigram weights used to score sentences.
+///
+/// A phrase ("calvin cycle") is preferred over its parts when it recurs: a guide that
+/// lists "calvin" and "cycle" separately is less useful than one that lists the phrase.
+fn topic_terms(chunks: &[Chunk]) -> (Vec<GuideTopic>, Vec<(String, f64)>) {
+    let forms = surface_forms(chunks);
+    let min_chunks = if chunks.len() > 1 { 2 } else { 1 };
+    let unigrams = ngram_counts(chunks, 1);
+    let bigrams = ngram_counts(chunks, 2);
+
+    let mut topics: Vec<GuideTopic> = Vec::new();
+    let mut absorbed: Vec<String> = Vec::new();
+    let mut phrases: Vec<(String, usize, usize, Vec<String>)> = Vec::new();
+    for (key, (count, chunk_count)) in &bigrams {
+        if *chunk_count < min_chunks || *count < 2 {
+            continue;
+        }
+        let parts: Vec<String> = key.split(' ').map(|x| x.to_string()).collect();
+        // a phrase made of one-word parts that never occur alone would be noise
+        if parts.iter().any(|p| p.len() < 3) {
+            continue;
+        }
+        phrases.push((key.clone(), *count, *chunk_count, parts));
+    }
+    phrases.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    phrases.truncate(4);
+
+    for (key, count, chunk_count, parts) in &phrases {
+        let surface: Vec<String> = parts.iter().map(|p| surface_of(p, &forms)).collect();
+        for p in parts {
+            // the phrase usually accounts for this word; listing both would be repetition
+            if let Some((uni_count, _)) = unigrams.get(p) {
+                if count * 2 >= *uni_count {
+                    absorbed.push(p.clone());
+                }
+            }
+        }
+        topics.push(GuideTopic {
+            term: surface.join(" "),
+            stems: parts.clone(),
+            count: *count,
+            chunks: *chunk_count,
+            first_chunk_id: String::new(),
+            first_locator: String::new(),
+        });
+        let _ = key;
+    }
+
+    for (stem, (count, chunk_count)) in &unigrams {
+        if *chunk_count < min_chunks || stem.len() < 3 || absorbed.contains(stem) {
+            continue;
+        }
+        topics.push(GuideTopic {
+            term: surface_of(stem, &forms),
+            stems: vec![stem.clone()],
+            count: *count,
+            chunks: *chunk_count,
+            first_chunk_id: String::new(),
+            first_locator: String::new(),
+        });
+    }
+
+    topics.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.term.cmp(&b.term)));
+    topics.truncate(MAX_TOPICS);
+
+    // sentence scoring keeps every unigram, including ones absorbed into a phrase
+    let mut weights: Vec<(String, f64)> = unigrams
+        .iter()
+        .filter(|(stem, (count, chunk_count))| *chunk_count >= min_chunks && stem.len() >= 3 && *count > 0)
+        .map(|(stem, (count, _))| (stem.clone(), (*count as f64).sqrt()))
+        .collect();
+    weights.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
+    (topics, weights)
+}
+
+/// Does this chunk mention the topic (all words of a phrase, in any order)?
+fn mentions(chunk: &Chunk, topic: &GuideTopic) -> bool {
+    let stems: Vec<String> = retrieve::terms(&chunk.text).into_iter().map(|t| retrieve::stem(&t)).collect();
+    topic.stems.iter().all(|want| stems.contains(want))
+}
+
+fn sentences_in(chunk: &Chunk) -> Vec<String> {
+    retrieve::split_sentences(&chunk.text)
+        .into_iter()
+        .filter(|s| {
+            let words = s.split_whitespace().count();
+            (4..=60).contains(&words)
+        })
+        .collect()
+}
+
+/// Rank sentences by how much of the source's core vocabulary they carry, but keep them
+/// in document order in the output so the guide reads like the source, not like a ranking.
+fn ranked_sentences(chunks: &[Chunk], weights: &[(String, f64)]) -> Vec<Candidate> {
+    let weight: BTreeMap<String, f64> = weights.iter().cloned().collect();
+
+    let mut out: Vec<Candidate> = Vec::new();
+    for (idx, c) in chunks.iter().enumerate() {
+        for s in sentences_in(c) {
+            let toks: Vec<String> = retrieve::terms(&s).into_iter().map(|t| retrieve::stem(&t)).collect();
+            if toks.is_empty() {
+                continue;
+            }
+            let mut score = 0.0f64;
+            let mut covered = 0usize;
+            for t in &toks {
+                if let Some(w) = weight.get(t) {
+                    score += w;
+                    covered += 1;
+                }
+            }
+            if covered == 0 {
+                continue; // a sentence sharing nothing with the source's vocabulary is noise
+            }
+            let distinct: Vec<String> = {
+                let mut d = toks.clone();
+                d.sort();
+                d.dedup();
+                d
+            };
+            // length normalisation + a bonus for covering many distinct core terms
+            score *= 1.0 + (distinct.len() as f64).sqrt() / 4.0;
+            score /= (toks.len() as f64).sqrt();
+            out.push(Candidate { score, chunk_idx: idx, text: s });
+        }
+    }
+    out.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.chunk_idx.cmp(&b.chunk_idx))
+            .then(a.text.cmp(&b.text))
+    });
+    out
+}
+
+fn pick_summary(chunks: &[Chunk], candidates: Vec<Candidate>, limit: usize) -> Vec<GuideSentence> {
+    let mut chosen: Vec<(u32, usize, GuideSentence)> = Vec::new();
+    let mut seen: Vec<Vec<String>> = Vec::new();
+    for cand in candidates {
+        if chosen.len() >= limit {
+            break;
+        }
+        let toks: Vec<String> = retrieve::terms(&cand.text).into_iter().map(|t| retrieve::stem(&t)).collect();
+        // near-duplicates make a summary look padded; one paraphrase per idea is enough
+        if seen.iter().any(|s| jaccard(s, &toks) > 0.55) {
+            continue;
+        }
+        seen.push(toks);
+        let c = &chunks[cand.chunk_idx];
+        let at = c.text.find(&cand.text).unwrap_or(usize::MAX);
+        chosen.push((
+            c.ordinal,
+            at,
+            GuideSentence {
+                text: cand.text,
+                chunk_id: c.id.clone(),
+                locator: c.locator.human(),
+                ordinal: c.ordinal,
+            },
+        ));
+    }
+    // read in document order: a score ranking jumps around and reads like a list of
+    // unrelated lines; the source's own order keeps the meaning intact
+    chosen.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    chosen.into_iter().map(|(_, _, s)| s).collect()
+}
+
+/// Real structure the parser recorded: sections/slides, then sheets, then pages.
+fn outline_of(source: &Source, chunks: &[Chunk], tables: &[Table]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in chunks {
+        if let Some(section) = &c.locator.section {
+            if !section.trim().is_empty() && !out.iter().any(|x| x.eq_ignore_ascii_case(section)) {
+                out.push(section.clone());
+            }
+        }
+    }
+    for t in tables {
+        out.push(format!(
+            "sheet {} ({} row{}{})",
+            t.sheet,
+            t.rows.len(),
+            if t.rows.len() == 1 { "" } else { "s" },
+            if t.hidden { ", hidden" } else { "" }
+        ));
+    }
+    if out.is_empty() && source.page_count > 1 {
+        out.push(format!("{} pages", source.page_count));
+    }
+    out.truncate(40);
+    out
+}
+
+fn questions_for(topics: &[GuideTopic], tables: &[Table]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in tables.iter().filter(|t| !t.hidden) {
+        // suggest a computation only when a numeric column actually exists
+        for (i, header) in t.headers.iter().enumerate() {
+            let numeric = t
+                .rows
+                .iter()
+                .filter(|r| t.cell(r, i).map(|c| c.is_number()).unwrap_or(false))
+                .count();
+            if numeric >= 2 && out.len() < MAX_QUESTIONS {
+                out.push(format!("What is the total {} in {}?", header, t.sheet));
+                break;
+            }
+        }
+    }
+    for topic in topics {
+        if out.len() >= MAX_QUESTIONS {
+            break;
+        }
+        out.push(format!("What does {} say about {}?", "this source", topic.term));
+    }
+    out.truncate(MAX_QUESTIONS);
+    out
+}
+
+/// Build the guide for one source.
+///
+/// Returns an error when there is nothing to orient the user in — an empty guide would be
+/// worse than no guide.
+pub fn build(source: &Source, chunks: &[Chunk], tables: &[Table]) -> Result<Guide, String> {
+    let mut own: Vec<Chunk> = chunks.iter().filter(|c| c.source_id == source.id).cloned().collect();
+    own.sort_by_key(|c| c.ordinal);
+    if own.is_empty() {
+        return Err("this source has no indexed passages yet".into());
+    }
+    let mine: Vec<Table> = tables.iter().filter(|t| t.source_id == source.id).cloned().collect();
+
+    let word_count = own.iter().map(|c| retrieve::tokenize(&c.text).len()).sum();
+    let (mut topics, weights) = topic_terms(&own);
+    for t in topics.iter_mut() {
+        if let Some(c) = own.iter().find(|c| mentions(c, t)) {
+            t.first_chunk_id = c.id.clone();
+            t.first_locator = c.locator.human();
+        }
+    }
+
+    let candidates = ranked_sentences(&own, &weights);
+    let mut summary = pick_summary(&own, candidates, MAX_SUMMARY_SENTENCES);
+    // The highest-ranked line is the headline; the rest are the summary.
+    let headline = if summary.is_empty() { None } else { Some(summary.remove(0)) };
+
+    let mut warnings: Vec<String> = Vec::new();
+    if own.len() == 1 {
+        warnings.push("single passage: topics cannot be cross-checked across the source".into());
+    }
+    if word_count < 40 {
+        warnings.push("very short source: the guide is close to quoting it in full".into());
+    }
+    let mut guide = Guide {
+        source_id: source.id.clone(),
+        title: source.title.clone(),
+        kind: source.kind.clone(),
+        headline,
+        summary,
+        topics,
+        outline: outline_of(source, &own, &mine),
+        questions: Vec::new(),
+        word_count,
+        chunk_count: own.len(),
+        table_count: mine.len(),
+        table_row_count: mine.iter().map(|t| t.rows.len()).sum(),
+        warnings: Vec::new(),
+    };
+    guide.questions = questions_for(&guide.topics, &mine);
+    for w in source.warnings.iter().chain(warnings.iter()) {
+        if !guide.warnings.contains(w) {
+            guide.warnings.push(w.clone());
+        }
+    }
+    Ok(guide)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::Locator;
+
+    fn src(id: &str, kind: &str) -> Source {
+        Source { id: id.into(), kind: kind.into(), title: "Doc".into(), status: "ready".into(), ..Default::default() }
+    }
+
+    fn chunk(id: &str, sid: &str, ordinal: u32, text: &str) -> Chunk {
+        Chunk {
+            id: id.into(),
+            source_id: sid.into(),
+            notebook_id: "nb".into(),
+            ordinal,
+            text: text.into(),
+            locator: Locator::paragraph(ordinal, 0, 0),
+        }
+    }
+
+    fn corpus() -> Vec<Chunk> {
+        vec![
+            chunk(
+                "c1",
+                "s1",
+                0,
+                "Photosynthesis converts light energy into chemical energy inside chloroplasts. \
+                 Chlorophyll absorbs light most strongly in the blue and red bands. \
+                 The Calvin cycle fixes carbon dioxide into glucose using ATP and NADPH.",
+            ),
+            chunk(
+                "c2",
+                "s1",
+                1,
+                "Chlorophyll reflects green light, which is why leaves look green. \
+                 The Calvin cycle runs in the stroma and does not require light directly. \
+                 Carbon dioxide enters through stomata.",
+            ),
+            chunk(
+                "c3",
+                "s1",
+                2,
+                "Light reactions produce ATP and NADPH for the Calvin cycle. \
+                 Stomata close under drought stress, limiting carbon dioxide uptake.",
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_summary_sentence_is_a_verbatim_quote_with_a_real_locator() {
+        let chunks = corpus();
+        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        let all: Vec<&GuideSentence> = g.headline.iter().chain(g.summary.iter()).collect();
+        assert!(!all.is_empty());
+        for s in all {
+            let c = chunks.iter().find(|c| c.id == s.chunk_id).expect("chunk exists");
+            assert!(c.text.contains(&s.text), "quote must appear verbatim in its chunk: {}", s.text);
+            assert_eq!(s.locator, c.locator.human());
+        }
+        let json = g.to_json();
+        assert_eq!(json.str_of("generated_by"), Some("extractive"), "never claims to be a model summary");
+        assert!(json.get("model").map(|m| m.is_null()).unwrap_or(false));
+    }
+
+    #[test]
+    fn summary_prefers_distinct_ideas_over_repeats() {
+        let chunks = corpus();
+        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        let texts: Vec<String> = g.summary.iter().map(|s| s.text.clone()).collect();
+        assert!(texts.len() >= 2, "summary too short: {:?}", texts);
+        for i in 0..texts.len() {
+            for j in (i + 1)..texts.len() {
+                let a: Vec<String> = retrieve::terms(&texts[i]).into_iter().map(|t| retrieve::stem(&t)).collect();
+                let b: Vec<String> = retrieve::terms(&texts[j]).into_iter().map(|t| retrieve::stem(&t)).collect();
+                assert!(jaccard(&a, &b) <= 0.55, "near-duplicates kept: {} / {}", texts[i], texts[j]);
+            }
+        }
+        // and the summary is not just chunk 1: a guide should cover the source
+        let distinct_chunks: std::collections::BTreeSet<&str> =
+            g.summary.iter().map(|s| s.chunk_id.as_str()).collect();
+        assert!(distinct_chunks.len() >= 2, "summary stayed in one chunk");
+    }
+
+    #[test]
+    fn topics_are_content_words_with_locations_and_a_stable_order() {
+        let chunks = corpus();
+        let g1 = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        let g2 = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        assert_eq!(
+            g1.topics.iter().map(|t| t.term.clone()).collect::<Vec<_>>(),
+            g2.topics.iter().map(|t| t.term.clone()).collect::<Vec<_>>(),
+            "same input must give the same guide"
+        );
+        assert!(g1.topics.len() >= 3, "{:?}", g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>());
+        for t in &g1.topics {
+            assert!(!t.first_chunk_id.is_empty(), "topic {} has no location", t.term);
+            let lower = t.term.to_lowercase();
+            for stop in ["the", "and", "into", "which", "does"] {
+                assert_ne!(lower, stop, "stopword leaked into topics: {}", t.term);
+            }
+            assert!(t.chunks >= 2 || chunks.len() == 1, "topic {} appears in one chunk only", t.term);
+        }
+        // "Calvin cycle" is the recurring idea in this corpus: it must surface as the phrase,
+        // not as two unrelated words
+        assert!(
+            g1.topics.iter().any(|t| t.term.eq_ignore_ascii_case("calvin cycle")),
+            "expected a Calvin-cycle phrase, got {:?}",
+            g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>()
+        );
+        assert!(
+            !g1.topics.iter().any(|t| t.term.eq_ignore_ascii_case("calvin")
+                || t.term.eq_ignore_ascii_case("cycle")),
+            "the absorbed words must not be listed twice: {:?}",
+            g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_single_short_source_says_so_instead_of_padding() {
+        let chunks = vec![chunk("c1", "s1", 0, "Only one line about ATP.")];
+        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        assert!(g.warnings.iter().any(|w| w.contains("single passage")), "{:?}", g.warnings);
+        assert!(g.warnings.iter().any(|w| w.contains("very short")), "{:?}", g.warnings);
+        assert!(g.summary.is_empty(), "one sentence cannot be a multi-sentence summary");
+    }
+
+    #[test]
+    fn a_source_without_passages_refuses() {
+        assert!(build(&src("s1", "text"), &[], &[]).is_err());
+    }
+
+    #[test]
+    fn outline_uses_real_structure_only() {
+        let chunks = vec![
+            Chunk { locator: Locator::section("Intro", 0, 0), ..chunk("c1", "s1", 0, "Intro text about ATP hydrolysis in cells.") },
+            Chunk { locator: Locator::section("Methods", 0, 0), ..chunk("c2", "s1", 1, "Methods text about ATP assays in cells.") },
+        ];
+        let g = build(&src("s1", "markdown"), &chunks, &[]).unwrap();
+        assert_eq!(g.outline, vec!["Intro", "Methods"]);
+
+        let mut parsed = crate::tables::parse_xlsx(
+            &std::fs::read(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sales.xlsx"),
+            )
+            .unwrap(),
+            "s1",
+            "nb",
+        )
+        .unwrap();
+        parsed[1].hidden = true;
+        let g = build(&src("s1", "xlsx"), &corpus(), &parsed).unwrap();
+        assert!(g.outline.iter().any(|o| o.contains("sheet Sales")), "{:?}", g.outline);
+        assert!(g.outline.iter().any(|o| o.contains("Meta (1 row, hidden)")), "{:?}", g.outline);
+        assert_eq!(g.table_count, 2);
+    }
+
+    #[test]
+    fn suggested_questions_are_grounded_in_observed_topics_and_columns() {
+        let mut tables = crate::tables::parse_xlsx(
+            &std::fs::read(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sales.xlsx"),
+            )
+            .unwrap(),
+            "s1",
+            "nb",
+        )
+        .unwrap();
+        tables[1].hidden = true;
+        let g = build(&src("s1", "xlsx"), &corpus(), &tables).unwrap();
+        assert!(g.questions.len() <= MAX_QUESTIONS);
+        assert!(
+            g.questions.iter().any(|q| q.contains("total") && q.contains("Sales")),
+            "expected a table question, got {:?}",
+            g.questions
+        );
+        for q in &g.questions {
+            assert!(!q.contains("Meta"), "hidden sheets must not be suggested: {}", q);
+        }
+    }
+
+    #[test]
+    fn the_guide_json_is_complete_and_serialisable() {
+        let g = build(&src("s1", "text"), &corpus(), &[]).unwrap();
+        let json = g.to_json();
+        let text = crate::json::to_string(&json);
+        let back = crate::json::parse(&text).expect("guide json parses");
+        for key in ["source_id", "headline", "summary", "topics", "outline", "questions", "stats", "warnings"] {
+            assert!(back.get(key).is_some(), "missing {} in guide json", key);
+        }
+        assert_eq!(
+            back.get("stats").and_then(|s| s.get("chunks")).and_then(|x| x.as_f64()),
+            Some(3.0)
+        );
+    }
+}
+```
+
 ## `.gitignore`
 
 ```
@@ -596,6 +1253,7 @@ function renderSources(pane) {
           },
         }),
         h("span", { class: "name", title: s.title, onclick: () => openViewer(s.id) }, s.title),
+        h("button", { class: "ghost", title: "Source guide (quoted, not generated)", onclick: () => openViewer(s.id) }, "guide"),
         h("button", { class: "ghost", title: "Remove source", onclick: async () => {
           if (!confirm(`Remove “${s.title}”?`)) return;
           await api.del(`/sources/${s.id}`);
@@ -1041,10 +1699,11 @@ function renderMindmap(mm) {
 
 // ---------------------------------------------------------------- source viewer
 async function openViewer(sourceId, highlightChunkId) {
-  const [src, data, tableData] = await Promise.all([
+  const [src, data, tableData, guide] = await Promise.all([
     api.get(`/sources/${sourceId}`),
     api.get(`/sources/${sourceId}/chunks`),
     api.get(`/sources/${sourceId}/tables`).catch(() => ({ tables: [] })),
+    api.get(`/sources/${sourceId}/guide`).catch(() => null),
   ]);
   let chunks = data.chunks || [];
   let page = null;
@@ -1052,6 +1711,48 @@ async function openViewer(sourceId, highlightChunkId) {
 
   const content = h("div", { class: "content" });
   const pager = h("div", { class: "pager" });
+
+  // The guide quotes the source; it never paraphrases it. Every line links to its passage.
+  function guideBlock(g) {
+    if (!g) return null;
+    const jump = (chunkId) => () => {
+      content.querySelectorAll(".chunk.hit").forEach((el) => el.classList.remove("hit"));
+      const el = content.querySelector("#chunk-" + chunkId);
+      if (el) { el.classList.add("hit"); el.scrollIntoView({ block: "center" }); }
+    };
+    const quote = (s, cls) => h("div", { class: "guide-quote" + (cls ? " " + cls : ""), title: `${s.locator} — click to open the passage`, onclick: jump(s.chunk_id) },
+      "“" + s.text + "”", h("span", { class: "loc" }, " — " + s.locator));
+    const asks = (q) => h("button", { class: "cite", title: "Put this question in the composer", onclick: () => {
+      const ta = document.querySelector(".composer textarea");
+      if (ta) { ta.value = q; ta.focus(); }
+    } }, q);
+    return h("div", { class: "guide" },
+      h("div", { class: "guide-head" },
+        h("strong", {}, "Source guide"),
+        h("span", { class: "badge", title: "No language model was used: these are verbatim quotations" },
+          "extractive · quoted, not generated")),
+      g.headline ? quote(g.headline, "lead") : null,
+      (g.summary || []).length ? h("div", {}, g.summary.map((s) => quote(s))) : null,
+      (g.topics || []).length
+        ? h("div", { class: "chips", style: "margin-top:8px" },
+            h("span", { class: "hint" }, "Recurring terms: "),
+            g.topics.map((t) => h("span", { class: "badge", title: `${t.count} mentions in ${t.chunks} passages · first at ${t.locator}` },
+              `${t.term} · ${t.count}`)))
+        : null,
+      (g.outline || []).length
+        ? h("p", { class: "hint", style: "margin-top:6px" }, "Structure: " + g.outline.join(" · "))
+        : null,
+      (g.questions || []).length
+        ? h("div", { style: "margin-top:8px" },
+            h("div", { class: "hint" }, "Try asking:"),
+            h("div", { class: "cites" }, g.questions.map(asks)))
+        : null,
+      (g.warnings || []).length
+        ? h("p", { class: "hint", style: "color:var(--warn)" }, g.warnings.join(" · "))
+        : null,
+      h("p", { class: "hint" }, `${g.stats.words} words · ${g.stats.chunks} passages` +
+        (g.stats.tables ? ` · ${g.stats.tables} sheet(s), ${g.stats.table_rows} rows` : "")));
+  }
 
   // A cited cell opens on the real grid, so "Sales!C2:C6" is verifiable, not decorative.
   function gridBlock(t) {
@@ -1086,8 +1787,9 @@ async function openViewer(sourceId, highlightChunkId) {
       h("div", { class: "chunk" + (c.id === highlightChunkId ? " hit" : ""), id: "chunk-" + c.id },
         h("div", { class: "loc" }, c.locator_label),
         h("div", { style: "white-space:pre-wrap" }, c.text))) : [h("p", { class: "empty" }, "No text on this page.")];
-    // tables come first: they are the ground truth the passages were flattened from
-    content.replaceChildren(...tables.map(gridBlock), ...chunksEl);
+    // guide first (what this source is), then the grid (the raw data), then passages
+    const guideEl = guideBlock(guide);
+    content.replaceChildren(...(guideEl ? [guideEl] : []), ...tables.map(gridBlock), ...chunksEl);
     const hit = content.querySelector(".hit");
     if (hit) hit.scrollIntoView({ block: "center" });
   }
@@ -1636,6 +2338,15 @@ table.grid thead th { position: sticky; top: 0; background: var(--bg-elev2); fon
 table.grid th.rownum { color: var(--faint); font-family: var(--mono); font-size: 11px; text-align: right; background: var(--bg-elev); }
 table.grid td.num { text-align: right; font-family: var(--mono); }
 table.grid tbody tr:hover { background: var(--bg-elev2); }
+
+/* Source guide: quotations with locators, never a generated paraphrase. */
+.guide { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; background: var(--bg-elev); }
+.guide-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.guide-quote { cursor: pointer; padding: 4px 0 4px 8px; border-left: 2px solid var(--line); margin: 4px 0; font-size: 13px; }
+.guide-quote:hover { border-left-color: var(--accent); }
+.guide-quote.lead { font-weight: 600; border-left-color: var(--accent); }
+.guide-quote .loc { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 ```
 
 ## `apps/web/sw.js`
@@ -4343,6 +5054,7 @@ impl Api {
             ("GET", ["api", "sources", sid]) => Ok(self.get_source(sid)),
             ("GET", ["api", "sources", sid, "chunks"]) => Ok(self.source_chunks(sid, req)),
             ("GET", ["api", "sources", sid, "tables"]) => Ok(self.source_tables(sid, req)),
+            ("GET", ["api", "sources", sid, "guide"]) => Ok(self.source_guide(sid)),
             ("DELETE", ["api", "sources", sid]) => Ok(self.delete_source(sid)),
             ("PATCH", ["api", "sources", sid]) => self.update_source(sid, req),
             ("POST", ["api", "sources", sid, "refresh"]) => self.refresh_source(sid),
@@ -4795,6 +5507,31 @@ impl Api {
                 "tables" => Value::Arr(tables.iter().map(|t| t.json(limit)).collect()),
             })
         })
+    }
+
+    /// Source Guide: an extractive orientation to one source.
+    ///
+    /// Every sentence is quoted from a chunk and carries that chunk's id and locator.
+    /// `generated_by` is always `extractive` — no model is called, so no paraphrase is
+    /// presented as one.
+    fn source_guide(&self, sid: &str) -> Response {
+        let built = self.store.read(|db| {
+            let Some(source) = db.sources.iter().find(|s| s.id == sid) else {
+                return Err(err(404, "not_found", "source not found"));
+            };
+            let chunks: Vec<Chunk> = db.chunks.iter().filter(|c| c.source_id == sid).cloned().collect();
+            let tables: Vec<crate::tables::Table> =
+                db.tables.iter().filter(|t| t.source_id == sid).cloned().collect();
+            match crate::guide::build(source, &chunks, &tables) {
+                Ok(g) => Ok(ok(g.to_json())),
+                Err(e) => Err(err(
+                    409,
+                    "guide_unavailable",
+                    &format!("{} — a guide needs indexed passages to quote", e),
+                )),
+            }
+        });
+        built.unwrap_or_else(|e| e)
     }
 
     fn delete_source(&self, sid: &str) -> Response {
@@ -11426,6 +12163,7 @@ pub mod api;
 pub mod artifacts;
 pub mod domain;
 pub mod grounded;
+pub mod guide;
 pub mod hashes;
 pub mod fetch;
 pub mod http;
@@ -16623,6 +17361,100 @@ fn exported_notebooks_keep_their_tables() {
     assert_eq!(st, 200);
     assert_eq!(tables.get("count").and_then(|c| c.as_f64()), Some(2.0));
 }
+
+/// Source Guide: orientation that quotes the source instead of paraphrasing it.
+#[test]
+fn source_guide_quotes_the_source_and_refuses_when_empty() {
+    let dir = tempdir("guide");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[("title", Value::from("Guide"))])),
+    );
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    // long enough to index as several passages, so the guide must choose between them
+    let markdown = "# Photosynthesis\n\n\
+Photosynthesis converts light energy into chemical energy inside chloroplasts, where the light reactions split water and release oxygen as a by-product.\n\n\
+## Where it happens\n\n\
+Chlorophyll absorbs light most strongly in the blue and red bands and reflects green light, which is why healthy leaves look green to the eye. The Calvin cycle runs in the stroma of the chloroplast and builds glucose from carbon dioxide using the ATP and NADPH produced by the light reactions.\n\n\
+## Limits\n\n\
+Stomata close under drought stress, which limits carbon dioxide uptake and slows the Calvin cycle even when light is plentiful. Temperature also matters: the enzymes of the Calvin cycle lose activity above roughly forty degrees.\n\n\
+## Measurement\n\n\
+Gas exchange measurements record carbon dioxide uptake per leaf area, so a drought experiment reports both stomatal conductance and the assimilation rate for each plant.\n";
+    let (st, src) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Biology")),
+            ("text", Value::from(markdown)),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let sid = src.str_of("source_id").unwrap().to_string();
+
+    let (st, guide) = s.json("GET", &format!("/api/sources/{}/guide", sid), None);
+    assert_eq!(st, 200, "{:?}", guide);
+    assert_eq!(guide.str_of("generated_by"), Some("extractive"));
+    assert!(guide.get("model").map(|m| m.is_null()).unwrap_or(false), "no model may be claimed");
+    assert_eq!(guide.get("deterministic").and_then(|d| d.as_bool()), Some(true));
+
+    // the headline is a verbatim quotation that exists in the stored chunks
+    let (_, chunks_json) = s.json("GET", &format!("/api/sources/{}/chunks", sid), None);
+    let chunks = chunks_json.get("chunks").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    let headline = guide.get("headline").expect("headline");
+    let quoted = headline.str_of("text").unwrap().to_string();
+    assert!(
+        chunks.iter().any(|c| c.str_of("text").map(|t| t.contains(&quoted)).unwrap_or(false)),
+        "headline is not a quote from the source: {}",
+        quoted
+    );
+    assert!(headline.str_of("chunk_id").is_some());
+
+    // every summary line resolves to a real chunk id and carries a locator
+    let summary = guide.get("summary").and_then(|x| x.as_arr()).cloned().unwrap_or_default();
+    assert!(!summary.is_empty(), "{:?}", guide);
+    for line in &summary {
+        let cid = line.str_of("chunk_id").unwrap();
+        assert!(chunks.iter().any(|c| c.str_of("id") == Some(cid)), "unknown chunk {}", cid);
+        assert!(!line.str_of("locator").unwrap_or("").is_empty());
+    }
+    assert!(summary.windows(2).any(|w| w[0].str_of("chunk_id") != w[1].str_of("chunk_id"))
+        || chunks.len() == 1, "the guide should not quote one passage only");
+
+    // structure comes from the parser, topics carry a location
+    let outline: Vec<String> = guide.get("outline").and_then(|o| o.as_arr()).map(|a| a.iter().filter_map(|x| x.str_of("x").map(|s| s.to_string())).collect()).unwrap_or_default();
+    assert!(outline.is_empty() || outline.iter().any(|o| o.contains("Photosynthesis")), "{:?}", outline);
+    let topics = guide.get("topics").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
+    assert!(!topics.is_empty());
+    for t in &topics {
+        assert!(!t.str_of("locator").unwrap_or("").is_empty(), "topic without a location: {:?}", t);
+    }
+    let questions = guide.get("questions").and_then(|q| q.as_arr()).cloned().unwrap_or_default();
+    assert!(!questions.is_empty());
+
+    // unknown source, and a source that never indexed anything
+    let (st, _) = s.json("GET", "/api/sources/src-missing/guide", None);
+    assert_eq!(st, 404);
+    let bad = b"%PDF-1.4 not really a pdf";
+    let (st, _) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=broken.pdf", nb_id),
+        Some(bad),
+        "application/pdf",
+    );
+    assert_eq!(st, 422);
+    let (_, list) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let failed = list
+        .get("sources")
+        .and_then(|x| x.as_arr())
+        .and_then(|a| a.iter().find(|s| s.str_of("status") == Some("failed")).cloned())
+        .expect("failed source recorded");
+    let failed_id = failed.str_of("id").unwrap().to_string();
+    let (st, body) = s.json("GET", &format!("/api/sources/{}/guide", failed_id), None);
+    assert_eq!(st, 409, "{:?}", body);
+    assert_eq!(body.str_of("code"), Some("guide_unavailable"));
+}
 ```
 
 ## `crates/forge-server/Cargo.toml`
@@ -17407,6 +18239,34 @@ the cached value the spreadsheet stored and print the formula beside it.
 **Consequences.** `db.json` grows with the grid (capped at 20,000 rows/sheet). Hidden sheets are
 stored (so a user can inspect them) but excluded from retrieval, aggregation and citations.
 `.xls`/ODS remain unsupported and are rejected at kind detection.
+
+## D16 — The Source Guide quotes; it does not summarise with a model
+
+**Date.** 2026-10-31. **Background.** The reference product shows a source guide/summary when a
+source is opened. Forge has no reachable LLM (no TLS client, no key, no local model), so
+"summarise this source" cannot be done honestly by generation.
+
+**Chosen.** `GET /api/sources/:id/guide` returns a deterministic, **extractive** guide:
+a headline and up to five summary lines, each a sentence copied verbatim out of one chunk with
+that chunk's id and human locator; recurring terms with counts and first locations (two-word
+phrases preferred over their parts, so the guide says "Calvin cycle" once rather than "calvin"
+and "cycle" twice); an outline built only from structure the parser recorded (markdown/HTML
+sections, PPTX slides, XLSX sheets); and suggested questions templated over observed topics and
+real numeric columns. The payload states its own nature: `generated_by: "extractive"`,
+`model: null`, `deterministic: true`.
+
+**Rejected.** (a) Calling a "summary" the first 280 characters of the first chunk (what
+`artifacts::summary` does for its `lead` field) — it is a prefix, not a guide. (b) Writing
+templated prose around extracted sentences ("This source discusses…") — it reads like
+generation and cannot be verified. (c) Hiding the provenance so the guide looks like an AI
+summary — that is precisely the deception §1 forbids.
+
+**Consequences.** A guide cannot tell the user *what the source is about* in the way a model
+could; it can only show what recurs and what the structure is. That limitation is stated in
+`docs/UNKNOWN_AND_LIMITATIONS.md`, in the capability matrix (`SRC-17 partial`), and in the UI
+badge ("extractive · quoted, not generated"). When a provider is configured, a model-written
+guide becomes possible — but it must be a *separate*, clearly labelled field, never a silent
+upgrade of this one.
 ```
 
 ## `docs/FEATURE_PARITY.md`
@@ -20487,7 +21347,7 @@ curl is out of scope for this layer.
 ```markdown
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-31 (spreadsheet tables: real cells, exact references, computed answers).
+Last updated: 2026-10-31 (spreadsheet tables + Source Guide).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -20506,11 +21366,12 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **172 passing, 0 failing** (26 `bininspect` + 130 lib + 11 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **53 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **181 passing, 0 failing** (26 `bininspect` + 138 lib + 12 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **62 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
-| Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 new assertions) |
+| Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
+| Source Guide | per-source orientation: verbatim quoted headline + summary with locators, recurring terms (incl. two-word phrases), real outline (sections/sheets), suggested questions | `guide` (8 tests) + e2e `source_guide_quotes_the_source_and_refuses_when_empty` + UI smoke (9 assertions) |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
@@ -20535,6 +21396,7 @@ tables          22
 notebooklm      15
 fetch           11
 retrieve         9
+guide            8
 grounded         8
 artifacts        7
 security         6
@@ -20551,12 +21413,12 @@ ingest           3   (PDF + dispatch)
 ingest::zip      2
 inflate          2
 --------------------
-lib total      130
+lib total      138
 bininspect      26   (separate crate)
-e2e (HTTP)      11
+e2e (HTTP)      12
 server           5
 ====================
-total          172
+total          181
 ```
 
 ## Not available, with reasons
@@ -20573,6 +21435,7 @@ total          172
 | Sheets beyond 20,000 rows | self-imposed cap (`security::MAX_TABLE_ROWS`) | the grid is marked `truncated`, the reason is reported, and aggregations **refuse** rather than total a partial sheet |
 | `.xls` (BIFF), ODS, Google Sheets | no parser written; binary formats out of scope for now | upload is rejected by kind detection with a clear error, never half-indexed |
 | Data Tables artifact (schema-inferred extraction, charts) | not implemented | reported as `planned`; existing spreadsheets are queried directly instead |
+| Model-written source summaries | no reachable LLM (no TLS client, no key) | the Source Guide is **extractive**: every line is a quotation with its locator, and the payload says `generated_by: extractive`, `model: null` |
 | Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps
@@ -20594,7 +21457,7 @@ total          172
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 172 tests: 130 lib + 11 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 181 tests: 138 lib + 12 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -20605,7 +21468,7 @@ FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
 FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 53 assertions
 ```
 
-## Unit tests (130) — exact names from `cargo test --lib -- --list`
+## Unit tests (138) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -20816,6 +21679,38 @@ citation`, `viewer renders the real grid`, `grid keeps original row numbers`, `g
 cached formula value`, `grid cells expose their A1 reference`, `hidden sheets are labelled
 when shown`.
 
+## Source Guide (8 unit tests + 1 e2e + 9 UI assertions)
+
+`guide` module. Every line of the guide is a **quotation** from an indexed passage with that
+passage's id and locator; nothing is paraphrased and no model is claimed
+(`generated_by: "extractive"`, `model: null`).
+
+* `every_summary_sentence_is_a_verbatim_quote_with_a_real_locator` — each quoted sentence is a
+  substring of its chunk and carries the chunk's own `human()` locator.
+* `summary_prefers_distinct_ideas_over_repeats` — no two summary lines exceed 0.55 Jaccard, and
+  the summary spans more than one passage.
+* `topics_are_content_words_with_locations_and_a_stable_order` — same input → identical topic
+  order; stopwords excluded; `Calvin cycle` surfaces as a **phrase** and its two words are not
+  listed again.
+* `a_single_short_source_says_so_instead_of_padding` — warnings instead of invented content.
+* `a_source_without_passages_refuses` — `Err`, so the API returns `409 guide_unavailable`
+  rather than an empty guide.
+* `outline_uses_real_structure_only` — markdown sections in document order; XLSX sheets with
+  row counts and a hidden marker.
+* `suggested_questions_are_grounded_in_observed_topics_and_columns` — questions come from
+  observed topics and real numeric columns; hidden sheets are never suggested.
+* `the_guide_json_is_complete_and_serialisable`.
+
+Over HTTP: `source_guide_quotes_the_source_and_refuses_when_empty` — `generated_by`,
+`model: null`, `deterministic: true`; the headline is a substring of a stored chunk; every
+summary line resolves to a real chunk id with a locator; topics carry locations; unknown source
+→ `404`; a source whose extraction failed → `409 guide_unavailable`.
+
+UI: `source item offers a guide`, `source guide renders`, `guide says it is quoted, not
+generated`, `guide quotes the source verbatim`, `guide quotes carry a locator`, `guide lists
+recurring terms`, `guide suggests a question`, `clicking a suggestion fills the composer`,
+`guide links quotes to passages`.
+
 ## Binary analysis (31 unit tests + 5 HTTP tests + 6 UI assertions)
 
 Hash vectors (SHA-256/SHA-1 published values), entropy separation, AXML parsing of a real
@@ -20971,6 +21866,24 @@ producers emit is unverified.
 * **Row passages are one row per chunk** for spreadsheets, so a question spanning many rows is
   answered by several citations rather than a summary. That is intentional (one citation per
   row) but differs from prose chunking.
+
+## Source Guide (2026-10-31)
+
+* The guide is **extractive**, not generative: headline and summary lines are quotations. It
+  cannot explain, condense across distant passages, or answer "what is this source arguing?" —
+  it can show what recurs and how the source is structured.
+* Topic ranking is term frequency over stemmed content words plus adjacent two-word phrases.
+  Acronyms and proper nouns are not recognised as entities; a phrase used only once is not
+  promoted; three-word phrases are not detected.
+* Suggested questions are templates ("What does this source say about X?"). They are labelled
+  as suggestions; they are not questions the reference product asked.
+* The outline is only as good as the parser's structure: pasted plain text has no headings, so
+  its outline is empty. XLSX sources show sheets, not cell ranges.
+* **`artifacts::summary`'s `lead` field is a truncation** (first 280 characters of the first
+  chunk). It is not a summary and is not labelled as one; the Source Guide is the honest route.
+* No caching: a guide is recomputed per request. It is deterministic, so two requests return
+  identical content (covered by a test), but a very large source costs a full re-tokenisation
+  each time.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -25210,7 +26123,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-14 | ePub | documented | planned | — | — |
 | SRC-15 | Drive / Docs / Sheets | documented | blocked | — | OAuth + credentials |
 | SRC-16 | GitHub repo/issues | not in reference | planned | — | `api.github.com` reachable |
-| SRC-17 | Source Guide auto-summary | documented | planned | — | — |
+| SRC-17 | Source Guide auto-summary | documented | **partial (honest)** — extractive guide: quoted headline/summary with locators, topics, outline, suggested questions; **no model-written summary** (no reachable LLM) | `guide.rs`, `GET /api/sources/:id/guide` | 8 unit + e2e + 9 UI |
 | CHAT-01 | notebook-scoped grounded chat | documented | done | `grounded.rs` | lib + e2e |
 | CHAT-02 | exact citations + quote preview | documented | done | `Citation` | lib + UI |
 | CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |
@@ -27735,6 +28648,28 @@ async function main() {
   byText(".viewer header button", "✕").click();
   await wait(200);
   check("viewer closes on ✕", !$(".overlay"));
+
+  // --- source guide is quoted, labelled, and usable
+  const guideSource = $$(".source-item").find((el) => /Biology notes/.test(el.textContent));
+  check("source item offers a guide", !!guideSource && [...guideSource.querySelectorAll("button")].some((b) => /guide/i.test(b.textContent)));
+  guideSource.querySelector(".name").click();
+  await wait(700);
+  const guide = $(".overlay .guide");
+  check("source guide renders", !!guide, "no .guide block");
+  check("guide says it is quoted, not generated", /quoted, not generated/.test(guide?.textContent || ""), guide?.textContent?.slice(0, 160));
+  check("guide quotes the source verbatim", /“Photosynthesis converts light energy/.test(guide?.textContent || ""), guide?.textContent?.slice(0, 200));
+  check("guide quotes carry a locator", /paragraph \d+/.test(guide?.textContent || ""));
+  check("guide lists recurring terms", guide?.querySelectorAll(".chips .badge").length > 0);
+  const askBtn = guide?.querySelector(".cites .cite");
+  check("guide suggests a question", !!askBtn, "no suggested question");
+  if (askBtn) {
+    askBtn.click();
+    await wait(100);
+    check("clicking a suggestion fills the composer", /\?/.test($(".composer textarea")?.value || ""), $(".composer textarea")?.value);
+  }
+  check("guide links quotes to passages", !!guide?.querySelector(".guide-quote"));
+  byText(".viewer header button", "✕").click();
+  await wait(200);
 
   // --- study tools
   byText(".tabs button", "Study").click();

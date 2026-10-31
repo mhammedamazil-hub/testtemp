@@ -456,6 +456,7 @@ function renderSources(pane) {
           },
         }),
         h("span", { class: "name", title: s.title, onclick: () => openViewer(s.id) }, s.title),
+        h("button", { class: "ghost", title: "Source guide (quoted, not generated)", onclick: () => openViewer(s.id) }, "guide"),
         h("button", { class: "ghost", title: "Remove source", onclick: async () => {
           if (!confirm(`Remove “${s.title}”?`)) return;
           await api.del(`/sources/${s.id}`);
@@ -901,10 +902,11 @@ function renderMindmap(mm) {
 
 // ---------------------------------------------------------------- source viewer
 async function openViewer(sourceId, highlightChunkId) {
-  const [src, data, tableData] = await Promise.all([
+  const [src, data, tableData, guide] = await Promise.all([
     api.get(`/sources/${sourceId}`),
     api.get(`/sources/${sourceId}/chunks`),
     api.get(`/sources/${sourceId}/tables`).catch(() => ({ tables: [] })),
+    api.get(`/sources/${sourceId}/guide`).catch(() => null),
   ]);
   let chunks = data.chunks || [];
   let page = null;
@@ -912,6 +914,48 @@ async function openViewer(sourceId, highlightChunkId) {
 
   const content = h("div", { class: "content" });
   const pager = h("div", { class: "pager" });
+
+  // The guide quotes the source; it never paraphrases it. Every line links to its passage.
+  function guideBlock(g) {
+    if (!g) return null;
+    const jump = (chunkId) => () => {
+      content.querySelectorAll(".chunk.hit").forEach((el) => el.classList.remove("hit"));
+      const el = content.querySelector("#chunk-" + chunkId);
+      if (el) { el.classList.add("hit"); el.scrollIntoView({ block: "center" }); }
+    };
+    const quote = (s, cls) => h("div", { class: "guide-quote" + (cls ? " " + cls : ""), title: `${s.locator} — click to open the passage`, onclick: jump(s.chunk_id) },
+      "“" + s.text + "”", h("span", { class: "loc" }, " — " + s.locator));
+    const asks = (q) => h("button", { class: "cite", title: "Put this question in the composer", onclick: () => {
+      const ta = document.querySelector(".composer textarea");
+      if (ta) { ta.value = q; ta.focus(); }
+    } }, q);
+    return h("div", { class: "guide" },
+      h("div", { class: "guide-head" },
+        h("strong", {}, "Source guide"),
+        h("span", { class: "badge", title: "No language model was used: these are verbatim quotations" },
+          "extractive · quoted, not generated")),
+      g.headline ? quote(g.headline, "lead") : null,
+      (g.summary || []).length ? h("div", {}, g.summary.map((s) => quote(s))) : null,
+      (g.topics || []).length
+        ? h("div", { class: "chips", style: "margin-top:8px" },
+            h("span", { class: "hint" }, "Recurring terms: "),
+            g.topics.map((t) => h("span", { class: "badge", title: `${t.count} mentions in ${t.chunks} passages · first at ${t.locator}` },
+              `${t.term} · ${t.count}`)))
+        : null,
+      (g.outline || []).length
+        ? h("p", { class: "hint", style: "margin-top:6px" }, "Structure: " + g.outline.join(" · "))
+        : null,
+      (g.questions || []).length
+        ? h("div", { style: "margin-top:8px" },
+            h("div", { class: "hint" }, "Try asking:"),
+            h("div", { class: "cites" }, g.questions.map(asks)))
+        : null,
+      (g.warnings || []).length
+        ? h("p", { class: "hint", style: "color:var(--warn)" }, g.warnings.join(" · "))
+        : null,
+      h("p", { class: "hint" }, `${g.stats.words} words · ${g.stats.chunks} passages` +
+        (g.stats.tables ? ` · ${g.stats.tables} sheet(s), ${g.stats.table_rows} rows` : "")));
+  }
 
   // A cited cell opens on the real grid, so "Sales!C2:C6" is verifiable, not decorative.
   function gridBlock(t) {
@@ -946,8 +990,9 @@ async function openViewer(sourceId, highlightChunkId) {
       h("div", { class: "chunk" + (c.id === highlightChunkId ? " hit" : ""), id: "chunk-" + c.id },
         h("div", { class: "loc" }, c.locator_label),
         h("div", { style: "white-space:pre-wrap" }, c.text))) : [h("p", { class: "empty" }, "No text on this page.")];
-    // tables come first: they are the ground truth the passages were flattened from
-    content.replaceChildren(...tables.map(gridBlock), ...chunksEl);
+    // guide first (what this source is), then the grid (the raw data), then passages
+    const guideEl = guideBlock(guide);
+    content.replaceChildren(...(guideEl ? [guideEl] : []), ...tables.map(gridBlock), ...chunksEl);
     const hit = content.querySelector(".hit");
     if (hit) hit.scrollIntoView({ block: "center" });
   }

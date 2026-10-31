@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 172 tests: 130 lib + 11 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 181 tests: 138 lib + 12 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -16,7 +16,7 @@ FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
 FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 53 assertions
 ```
 
-## Unit tests (130) — exact names from `cargo test --lib -- --list`
+## Unit tests (138) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -226,6 +226,38 @@ says so`, `computed answer names the excluded subtotal row`, `computed answer ca
 citation`, `viewer renders the real grid`, `grid keeps original row numbers`, `grid shows the
 cached formula value`, `grid cells expose their A1 reference`, `hidden sheets are labelled
 when shown`.
+
+## Source Guide (8 unit tests + 1 e2e + 9 UI assertions)
+
+`guide` module. Every line of the guide is a **quotation** from an indexed passage with that
+passage's id and locator; nothing is paraphrased and no model is claimed
+(`generated_by: "extractive"`, `model: null`).
+
+* `every_summary_sentence_is_a_verbatim_quote_with_a_real_locator` — each quoted sentence is a
+  substring of its chunk and carries the chunk's own `human()` locator.
+* `summary_prefers_distinct_ideas_over_repeats` — no two summary lines exceed 0.55 Jaccard, and
+  the summary spans more than one passage.
+* `topics_are_content_words_with_locations_and_a_stable_order` — same input → identical topic
+  order; stopwords excluded; `Calvin cycle` surfaces as a **phrase** and its two words are not
+  listed again.
+* `a_single_short_source_says_so_instead_of_padding` — warnings instead of invented content.
+* `a_source_without_passages_refuses` — `Err`, so the API returns `409 guide_unavailable`
+  rather than an empty guide.
+* `outline_uses_real_structure_only` — markdown sections in document order; XLSX sheets with
+  row counts and a hidden marker.
+* `suggested_questions_are_grounded_in_observed_topics_and_columns` — questions come from
+  observed topics and real numeric columns; hidden sheets are never suggested.
+* `the_guide_json_is_complete_and_serialisable`.
+
+Over HTTP: `source_guide_quotes_the_source_and_refuses_when_empty` — `generated_by`,
+`model: null`, `deterministic: true`; the headline is a substring of a stored chunk; every
+summary line resolves to a real chunk id with a locator; topics carry locations; unknown source
+→ `404`; a source whose extraction failed → `409 guide_unavailable`.
+
+UI: `source item offers a guide`, `source guide renders`, `guide says it is quoted, not
+generated`, `guide quotes the source verbatim`, `guide quotes carry a locator`, `guide lists
+recurring terms`, `guide suggests a question`, `clicking a suggestion fills the composer`,
+`guide links quotes to passages`.
 
 ## Binary analysis (31 unit tests + 5 HTTP tests + 6 UI assertions)
 

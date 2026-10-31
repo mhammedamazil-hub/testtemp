@@ -93,6 +93,28 @@ async function main() {
   await wait(200);
   check("viewer closes on ✕", !$(".overlay"));
 
+  // --- source guide is quoted, labelled, and usable
+  const guideSource = $$(".source-item").find((el) => /Biology notes/.test(el.textContent));
+  check("source item offers a guide", !!guideSource && [...guideSource.querySelectorAll("button")].some((b) => /guide/i.test(b.textContent)));
+  guideSource.querySelector(".name").click();
+  await wait(700);
+  const guide = $(".overlay .guide");
+  check("source guide renders", !!guide, "no .guide block");
+  check("guide says it is quoted, not generated", /quoted, not generated/.test(guide?.textContent || ""), guide?.textContent?.slice(0, 160));
+  check("guide quotes the source verbatim", /“Photosynthesis converts light energy/.test(guide?.textContent || ""), guide?.textContent?.slice(0, 200));
+  check("guide quotes carry a locator", /paragraph \d+/.test(guide?.textContent || ""));
+  check("guide lists recurring terms", guide?.querySelectorAll(".chips .badge").length > 0);
+  const askBtn = guide?.querySelector(".cites .cite");
+  check("guide suggests a question", !!askBtn, "no suggested question");
+  if (askBtn) {
+    askBtn.click();
+    await wait(100);
+    check("clicking a suggestion fills the composer", /\?/.test($(".composer textarea")?.value || ""), $(".composer textarea")?.value);
+  }
+  check("guide links quotes to passages", !!guide?.querySelector(".guide-quote"));
+  byText(".viewer header button", "✕").click();
+  await wait(200);
+
   // --- study tools
   byText(".tabs button", "Study").click();
   await wait(100);

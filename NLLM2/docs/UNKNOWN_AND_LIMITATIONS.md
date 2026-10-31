@@ -131,3 +131,21 @@ producers emit is unverified.
 * **Row passages are one row per chunk** for spreadsheets, so a question spanning many rows is
   answered by several citations rather than a summary. That is intentional (one citation per
   row) but differs from prose chunking.
+
+## Source Guide (2026-10-31)
+
+* The guide is **extractive**, not generative: headline and summary lines are quotations. It
+  cannot explain, condense across distant passages, or answer "what is this source arguing?" —
+  it can show what recurs and how the source is structured.
+* Topic ranking is term frequency over stemmed content words plus adjacent two-word phrases.
+  Acronyms and proper nouns are not recognised as entities; a phrase used only once is not
+  promoted; three-word phrases are not detected.
+* Suggested questions are templates ("What does this source say about X?"). They are labelled
+  as suggestions; they are not questions the reference product asked.
+* The outline is only as good as the parser's structure: pasted plain text has no headings, so
+  its outline is empty. XLSX sources show sheets, not cell ranges.
+* **`artifacts::summary`'s `lead` field is a truncation** (first 280 characters of the first
+  chunk). It is not a summary and is not labelled as one; the Source Guide is the honest route.
+* No caching: a guide is recomputed per request. It is deterministic, so two requests return
+  identical content (covered by a test), but a very large source costs a full re-tokenisation
+  each time.
