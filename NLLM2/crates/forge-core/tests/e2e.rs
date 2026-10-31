@@ -1160,3 +1160,63 @@ fn chat_style_and_length_are_effective_and_validated() {
         .unwrap_or(0);
     assert_eq!(messages, 10, "five accepted asks (2 messages each), rejections store nothing");
 }
+
+/// Media metadata is read from the container, and the response says what was *not* done.
+#[test]
+fn media_metadata_is_read_without_decoding_frames() {
+    let dir = tempdir("media");
+    let s = Server::start(dir.clone());
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sample.mp4");
+    let bytes = std::fs::read(&fixture).expect("sample.mp4 fixture");
+
+    let (st, body) = s.raw(
+        "POST",
+        "/api/media/inspect?name=sample.mp4",
+        Some(&bytes),
+        "application/octet-stream",
+    );
+    assert_eq!(st, 200, "{}", body);
+    let v = json::parse(&body).unwrap();
+    assert_eq!(v.str_of("file"), Some("sample.mp4"));
+    assert_eq!(v.get("bytes").and_then(|b| b.as_f64()), Some(bytes.len() as f64));
+    assert_eq!(v.str_of("sha256").map(|h| h.len()), Some(64));
+
+    let media = v.get("media").expect("media object");
+    assert_eq!(media.str_of("container"), Some("mp4"));
+    let duration = media.get("duration_ms").and_then(|d| d.as_f64()).unwrap_or(0.0);
+    assert!((5_900.0..=6_200.0).contains(&duration), "duration {}", duration);
+    let tracks = media.get("tracks").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
+    let video = tracks.iter().find(|t| t.str_of("kind") == Some("video")).expect("video track");
+    assert_eq!(video.str_of("codec"), Some("avc1"));
+    assert_eq!(video.get("width").and_then(|w| w.as_f64()), Some(320.0));
+    assert_eq!(video.get("height").and_then(|h| h.as_f64()), Some(240.0));
+    assert_eq!(video.get("fps").and_then(|f| f.as_f64()), Some(10.0));
+
+    // the response must not imply anything was watched, read or transcribed
+    let notes = v.get("notes").expect("notes");
+    assert_eq!(notes.get("decoded_frames").and_then(|d| d.as_f64()), Some(0.0));
+    assert_eq!(notes.str_of("transcript"), Some("not produced"));
+    assert_eq!(notes.str_of("captions"), Some("not read"));
+
+    // a container we do not parse is named, not guessed at
+    let (st, body) = s.raw(
+        "POST",
+        "/api/media/inspect?name=clip.webm",
+        Some(&[0x1Au8, 0x45, 0xDF, 0xA3, 0, 0, 0, 0]),
+        "application/octet-stream",
+    );
+    assert_eq!(st, 200);
+    let v = json::parse(&body).unwrap();
+    assert_eq!(v.get("media").and_then(|m| m.str_of("container")), Some("matroska"));
+    assert_eq!(
+        v.get("media").and_then(|m| m.get("tracks")).and_then(|t| t.as_arr()).map(|a| a.len()),
+        Some(0),
+        "no invented streams"
+    );
+
+    // empty body and wrong method are refused
+    let (st, _) = s.raw("POST", "/api/media/inspect", Some(&[]), "application/octet-stream");
+    assert_eq!(st, 400);
+    let (st, _) = s.json("GET", "/api/media/inspect", None);
+    assert_eq!(st, 404, "GET is not routed");
+}

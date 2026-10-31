@@ -123,6 +123,7 @@ impl Api {
             ("DELETE", ["api", "providers", pid]) => Ok(self.delete_provider(pid)),
             ("POST", ["api", "backup"]) => self.create_backup(),
             ("GET", ["api", "backups"]) => Ok(self.list_backups()),
+            ("POST", ["api", "media", "inspect"]) => self.media_inspect(req),
             ("GET", ["api", "notebooklm", "status"]) => Ok(ok(notebooklm::status())),
             ("POST", ["api", "notebooklm", "preview"]) => self.notebooklm_preview(req),
             _ => Err(err(404, "not_found", &format!("no route for {} {}", req.method, req.path))),
@@ -165,12 +166,19 @@ impl Api {
                 "locator" => "cell (A1 range, e.g. Sales!C2:C6)",
                 "note" => "computed over numeric cells only: empty cells and placeholders are excluded (never counted as zero), a column that mixes units is refused, and a cached column total is excluded to avoid double counting",
             },
+            "media" => obj! {
+                "status" => "partial",
+                "endpoint" => "/api/media/inspect",
+                "note" => "ISO base media (MP4/M4A/MOV) container metadata: duration, tracks, codec, size, frame rate, rotation, language, truncation warnings. No frame decoding, no captions, no transcription.",
+            },
             "sources" => obj! {
                 "text" => obj!{ "status" => "supported", "locator" => "paragraph" },
                 "markdown" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "html" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "csv" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "RFC 4180 quoting, delimiter sniffed; the grid is kept for aggregation" },
                 "pdf" => obj!{ "status" => "supported", "locator" => "page", "note" => "text-layer PDFs; no OCR" },
+                "video" => obj!{ "status" => "unsupported", "note" => "no video ingestion: downloading platform video needs an authorized extractor and per-source permission; container metadata can be inspected with POST /api/media/inspect" },
+                "audio" => obj!{ "status" => "unsupported", "note" => "no speech-to-text engine is available offline" },
                 "url" => obj!{
                     "status" => if fetch::transport_available() { "supported" } else { "unsupported" },
                     "locator" => "section+paragraph",
@@ -182,7 +190,8 @@ impl Api {
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
                 "audio" => obj!{ "status" => "unsupported", "reason" => "no ASR engine available offline" },
-                "video" => obj!{ "status" => "unsupported", "reason" => "no ASR/FFmpeg pipeline in this build" },
+                "video" => obj!{ "status" => "unsupported",
+                    "reason" => "container metadata is readable via /api/media/inspect, but video is not a source: no frame decoding, no captions, no transcription, and no authorized extractor for platform video" },
                 "image_ocr" => obj!{ "status" => "unsupported", "reason" => "no OCR engine available" },
             },
             "providers" => self.provider_status(),
@@ -589,6 +598,31 @@ impl Api {
             }
         });
         built.unwrap_or_else(|e| e)
+    }
+
+    /// Container metadata for a media file: duration, tracks, codec, size, frame rate,
+    /// rotation. Pixel decoding, captions and transcription are **not** done here.
+    fn media_inspect(&self, req: &Request) -> Result<Response, Response> {
+        if req.body.is_empty() {
+            return Err(err(400, "empty_body", "send the media file as the request body"));
+        }
+        if req.body.len() > security::MAX_SOURCE_BYTES {
+            return Err(err(413, "too_large", "media file exceeds the size limit"));
+        }
+        let name = req.query_get("name").unwrap_or("").to_string();
+        let info = crate::media::inspect(&req.body);
+        Ok(ok(obj! {
+            "file" => if name.is_empty() { "unnamed" } else { name.as_str() },
+            "bytes" => req.body.len() as u64,
+            "sha256" => hashes::sha256(&req.body),
+            "media" => info.to_json(),
+            "notes" => obj! {
+                "decoded_frames" => 0u64,
+                "captions" => "not read",
+                "transcript" => "not produced",
+                "why" => "this endpoint reads container metadata only; it does not decode pixels, read caption tracks or transcribe audio",
+            },
+        }))
     }
 
     fn delete_source(&self, sid: &str) -> Response {
@@ -1275,26 +1309,6 @@ impl Api {
         let body = parse_body(req)?;
         let kind = body.str_of("kind").unwrap_or("").to_string();
         let topic = body.str_of("topic").unwrap_or("").to_string();
-        // Presentation controls. Both are validated: an unknown value is rejected rather
-        // than silently replaced by the default, so the UI can never claim a style it got.
-        let style_raw = body.str_of("style").unwrap_or("").to_string();
-        let length_raw = body.str_of("length").unwrap_or("").to_string();
-        let Some(style) = grounded::Style::parse(&style_raw) else {
-            return Err(err(
-                422,
-                "bad_style",
-                &format!("unknown style \"{}\" (use evidence, concise or detailed)", style_raw),
-            ));
-        };
-        let Some(length) = grounded::Length::parse(&length_raw) else {
-            return Err(err(
-                422,
-                "bad_length",
-                &format!("unknown length \"{}\" (use brief, standard or thorough)", length_raw),
-            ));
-        };
-        let answer_opts = grounded::AnswerOptions { style, length };
-
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
 
         let (chunks, sources) = self.store.read(|db| {

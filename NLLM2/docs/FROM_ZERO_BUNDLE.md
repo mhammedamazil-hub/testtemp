@@ -10,6 +10,952 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
+## `crates/forge-core/src/media.rs`
+
+```rust
+//! Container-level media probing (ISO base media / MP4 family), written here because
+//! crates.io is unreachable (`docs/DECISIONS.md` D1) and the sandbox has no `ffprobe`.
+//!
+//! What this does **not** do: decode pixels, read captions, or transcribe audio. It reads
+//! the boxes an MP4/M4A/MOV file declares, which is enough to answer "how long is this,
+//! what streams does it have, at what size and frame rate, and is the file damaged?" ‚Äî
+//! the fields `MASTER_FORGE.md` ¬ß7.12 asks for before anyone watches a frame.
+//!
+//! Every value reported is read from the file. Where a value cannot be read the field is
+//! `None` and a warning explains why; nothing is inferred from the file extension.
+
+use crate::json::Value;
+use crate::obj;
+
+const MAX_TRACKS: usize = 64;
+const MAX_DEPTH: u32 = 8;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Track {
+    pub id: u32,
+    /// `video` | `audio` | `subtitle` | `hint` | `metadata` | the raw handler fourcc.
+    pub kind: String,
+    pub codec: String,
+    pub language: String,
+    pub timescale: u32,
+    pub duration_ms: u64,
+    pub sample_count: u32,
+    pub fps: Option<f64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// Display rotation in degrees (0/90/180/270), read from the track matrix.
+    pub rotation: i32,
+    pub channels: Option<u16>,
+    pub sample_rate: Option<u32>,
+    pub sample_format: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MediaInfo {
+    /// `mp4` | `matroska` | `mpeg-ts` | `unknown`
+    pub container: String,
+    pub brands: Vec<String>,
+    pub duration_ms: u64,
+    pub timescale: u32,
+    pub fragmented: bool,
+    pub tracks: Vec<Track>,
+    pub warnings: Vec<String>,
+}
+
+fn fourcc(b: &[u8]) -> String {
+    b.iter().map(|c| if c.is_ascii_graphic() { *c as char } else { '.' }).collect()
+}
+
+fn be32(b: &[u8]) -> u32 {
+    u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+}
+fn be16(b: &[u8]) -> u16 {
+    u16::from_be_bytes([b[0], b[1]])
+}
+fn be64(b: &[u8]) -> u64 {
+    u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+}
+
+/// One box: its fourcc and its payload (the bytes after the header).
+#[derive(Debug, Clone)]
+struct Box_<'a> {
+    kind: String,
+    payload: &'a [u8],
+    /// True when the declared size ran past the end of the buffer.
+    truncated: bool,
+}
+
+/// Split a buffer into boxes, tolerating (and reporting) truncation.
+fn split_boxes(buf: &[u8]) -> (Vec<Box_<'_>>, Vec<String>) {
+    let mut out = Vec::new();
+    let mut warnings = Vec::new();
+    let mut i = 0usize;
+    while i + 8 <= buf.len() {
+        let size32 = be32(&buf[i..]);
+        let kind = fourcc(&buf[i + 4..i + 8]);
+        let (header, mut size) = match size32 {
+            0 => (8usize, (buf.len() - i) as u64), // extends to end of file
+            1 => {
+                if i + 16 > buf.len() {
+                    warnings.push(format!("box {} is truncated before its 64-bit size", kind));
+                    break;
+                }
+                (16usize, be64(&buf[i + 8..]))
+            }
+            n => (8usize, n as u64),
+        };
+        if size < header as u64 {
+            warnings.push(format!("box {} declares an impossible size {}", kind, size));
+            break;
+        }
+        let body_start = i + header;
+        let body_end = i.saturating_add(size as usize);
+        let truncated = body_end > buf.len();
+        let payload = if body_start <= buf.len() {
+            &buf[body_start..body_end.min(buf.len())]
+        } else {
+            &buf[0..0]
+        };
+        if truncated {
+            warnings.push(format!(
+                "box {} is truncated: declares {} bytes, {} present",
+                kind,
+                size,
+                buf.len().saturating_sub(i)
+            ));
+        }
+        out.push(Box_ { kind, payload, truncated });
+        // A truncated last box ends parsing; anything after it cannot be trusted.
+        if truncated {
+            break;
+        }
+        i = body_end;
+        if out.len() > 10_000 {
+            warnings.push("too many boxes; stopped parsing".into());
+            break;
+        }
+        size = 0;
+        let _ = size;
+    }
+    (out, warnings)
+}
+
+fn find<'a>(boxes: &'a [Box_<'a>], kind: &str) -> Option<&'a Box_<'a>> {
+    boxes.iter().find(|b| b.kind == kind)
+}
+
+fn find_all<'a>(boxes: &'a [Box_<'a>], kind: &str) -> Vec<&'a Box_<'a>> {
+    boxes.iter().filter(|b| b.kind == kind).collect()
+}
+
+/// Parse `moov`/`trak`/`mdia`/`minf`/`stbl`/`udta` style containers one level down.
+fn children<'a>(b: &'a Box_<'a>) -> (Vec<Box_<'a>>, Vec<String>) {
+    split_boxes(b.payload)
+}
+
+fn is_container(kind: &str) -> bool {
+    matches!(
+        kind,
+        "moov" | "trak" | "mdia" | "minf" | "stbl" | "edts" | "udta" | "mvex" | "dinf" | "moof" | "traf"
+    )
+}
+
+// ---------------------------------------------------------------- header parsers
+
+fn parse_mvhd(p: &[u8]) -> Option<(u32, u64)> {
+    // version(1) flags(3) creation modification timescale duration
+    let version = *p.first()?;
+    if version == 1 {
+        if p.len() < 32 {
+            return None;
+        }
+        let timescale = be32(&p[20..]);
+        let duration = be64(&p[24..]);
+        Some((timescale, duration))
+    } else {
+        if p.len() < 20 {
+            return None;
+        }
+        let timescale = be32(&p[12..]);
+        let duration = be32(&p[16..]) as u64;
+        Some((timescale, duration))
+    }
+}
+
+fn parse_mdhd(p: &[u8]) -> Option<(u32, u64, String)> {
+    let version = *p.first()?;
+    let (ts_off, dur_off, dur_len) = if version == 1 { (20usize, 24usize, 8usize) } else { (12usize, 16usize, 4usize) };
+    if p.len() < dur_off + dur_len + 2 {
+        return None;
+    }
+    let timescale = be32(&p[ts_off..]);
+    let duration = if dur_len == 8 { be64(&p[dur_off..]) } else { be32(&p[dur_off..]) as u64 };
+    // packed ISO-639-2/T: three 5-bit letters, each offset by 0x60
+    let packed = be16(&p[dur_off + dur_len..]);
+    let lang: String = [(packed >> 10) & 0x1f, (packed >> 5) & 0x1f, packed & 0x1f]
+        .iter()
+        .map(|c| (0x60 + *c) as u8 as char)
+        .collect();
+    let language = if lang.chars().all(|c| c.is_ascii_lowercase()) { lang } else { "und".into() };
+    Some((timescale, duration, language))
+}
+
+fn parse_hdlr(p: &[u8]) -> Option<String> {
+    if p.len() < 12 {
+        return None;
+    }
+    Some(fourcc(&p[8..12]))
+}
+
+fn parse_tkhd(p: &[u8]) -> Option<(u32, u32, u32, i32)> {
+    // Layout (after the 4-byte version+flags):
+    //   v0: creation 4, modification 4, track_id 4, reserved 4, duration 4,
+    //       reserved 8, layer 2, alt_group 2, volume 2, reserved 2, matrix 36, width 4, height 4
+    //   v1: the two timestamps and the duration are 8 bytes wide (+12 bytes overall)
+    let version = *p.first()?;
+    let (id_off, matrix_off, size_off) = if version == 1 { (20usize, 52usize, 88usize) } else { (12usize, 40usize, 76usize) };
+    if p.len() < size_off + 8 {
+        return None;
+    }
+    let track_id = be32(&p[id_off..]);
+    let matrix = &p[matrix_off..matrix_off + 36];
+    let a = be32(&matrix[0..]) as i32;
+    let b = be32(&matrix[4..]) as i32;
+    let c = be32(&matrix[12..]) as i32;
+    let d = be32(&matrix[16..]) as i32;
+    let one = 0x0001_0000i32;
+    let rotation = if a == 0 && b == one && c == -one && d == 0 {
+        90
+    } else if a == -one && b == 0 && c == 0 && d == -one {
+        180
+    } else if a == 0 && b == -one && c == one && d == 0 {
+        270
+    } else {
+        0
+    };
+    // width/height are 16.16 fixed point display dimensions
+    let width = be32(&p[size_off..]) >> 16;
+    let height = be32(&p[size_off + 4..]) >> 16;
+    Some((track_id, width, height, rotation))
+}
+
+/// `stts` ‚Üí (sample count, total delta in media timescale units).
+fn parse_stts(p: &[u8]) -> Option<(u32, u64)> {
+    if p.len() < 8 {
+        return None;
+    }
+    let entries = be32(&p[4..]) as usize;
+    let mut samples = 0u32;
+    let mut total = 0u64;
+    for i in 0..entries {
+        let off = 8 + i * 8;
+        if off + 8 > p.len() {
+            break;
+        }
+        let count = be32(&p[off..]);
+        let delta = be32(&p[off + 4..]);
+        samples = samples.saturating_add(count);
+        // Hostile input: count and delta are both u32, so their product can exceed u64.
+        // Saturate rather than overflowing (which would panic in a debug build).
+        total = total.saturating_add((count as u64).saturating_mul(delta as u64));
+    }
+    Some((samples, total))
+}
+
+/// First entry of `stsd`: (format fourcc, width, height, channels, sample rate).
+fn parse_stsd(p: &[u8], kind: &str) -> Option<(String, Option<u32>, Option<u32>, Option<u16>, Option<u32>)> {
+    if p.len() < 16 {
+        return None;
+    }
+    let format = fourcc(&p[12..16]);
+    let entry = &p[16..];
+    if kind == "vide" {
+        // sample entry: 6 reserved + 2 data_ref + 2+2+12 pre_defined + 2 width + 2 height
+        if entry.len() < 28 {
+            return Some((format, None, None, None, None));
+        }
+        let width = be16(&entry[24..]) as u32;
+        let height = be16(&entry[26..]) as u32;
+        Some((format, Some(width), Some(height), None, None))
+    } else if kind == "soun" {
+        if entry.len() < 20 {
+            return Some((format, None, None, None, None));
+        }
+        let channels = be16(&entry[16..]);
+        let sample_size = be16(&entry[18..]);
+        let rate = if entry.len() >= 28 { be32(&entry[24..]) >> 16 } else { 0 };
+        Some((format, None, None, Some(channels), Some(rate)))
+            .map(|t| (t.0, t.1, t.2, t.3, t.4))
+            .map(|t| {
+                let _ = sample_size;
+                t
+            })
+    } else {
+        Some((format, None, None, None, None))
+    }
+}
+
+fn track_kind(handler: &str) -> String {
+    match handler {
+        "vide" => "video".into(),
+        "soun" => "audio".into(),
+        "sbtl" | "subt" | "text" => "subtitle".into(),
+        "hint" => "hint".into(),
+        "meta" => "metadata".into(),
+        other => format!("handler:{}", other),
+    }
+}
+
+fn parse_trak(b: &Box_<'_>, warnings: &mut Vec<String>) -> Option<Track> {
+    let (moov, _) = children(b);
+    let mut track = Track::default();
+
+    if let Some(tkhd) = find(&moov, "tkhd") {
+        match parse_tkhd(tkhd.payload) {
+            Some((id, w, h, rot)) => {
+                track.id = id;
+                track.rotation = rot;
+                if w > 0 {
+                    track.width = Some(w);
+                }
+                if h > 0 {
+                    track.height = Some(h);
+                }
+            }
+            None => warnings.push("a track header (tkhd) was too short to read".into()),
+        }
+    } else {
+        warnings.push("a track has no tkhd header".into());
+    }
+
+    let Some(mdia) = find(&moov, "mdia") else {
+        warnings.push("a track has no mdia box".into());
+        return Some(track);
+    };
+    let (media, _) = children(mdia);
+    if let Some(mdhd) = find(&media, "mdhd") {
+        if let Some((timescale, duration, language)) = parse_mdhd(mdhd.payload) {
+            track.timescale = timescale;
+            track.language = language;
+            if timescale > 0 {
+                track.duration_ms = duration.saturating_mul(1000) / timescale as u64;
+            }
+        }
+    }
+    let handler = find(&media, "hdlr").and_then(|h| parse_hdlr(h.payload)).unwrap_or_default();
+    track.kind = track_kind(&handler);
+
+    if let Some(minf) = find(&media, "minf") {
+        if let Some(stbl) = find(&children(minf).0, "stbl") {
+            let (table, _) = children(stbl);
+            if let Some(stsd) = find(&table, "stsd") {
+                if let Some((codec, w, h, channels, rate)) = parse_stsd(stsd.payload, &handler) {
+                    track.codec = codec;
+                    if track.kind == "video" {
+                        if track.width.is_none() {
+                            track.width = w;
+                        }
+                        if track.height.is_none() {
+                            track.height = h;
+                        }
+                    } else if track.kind == "audio" {
+                        track.channels = channels;
+                        track.sample_rate = rate;
+                    }
+                }
+            } else {
+                warnings.push("a track has no sample description (stsd)".into());
+            }
+            if let Some(stts) = find(&table, "stts") {
+                if let Some((samples, total_delta)) = parse_stts(stts.payload) {
+                    track.sample_count = samples;
+                    // frame rate = samples / media duration in seconds
+                    if track.timescale > 0 && total_delta > 0 {
+                        let seconds = total_delta as f64 / track.timescale as f64;
+                        if seconds > 0.0 {
+                            track.fps = Some((samples as f64 / seconds * 100.0).round() / 100.0);
+                        }
+                    }
+                }
+            }
+            if track.kind == "video" && table.iter().any(|b| b.kind == "stss") {
+                // `stss` present means some frames are not sync frames: real B/P frames
+                track.sample_format = Some(1);
+            }
+        }
+    }
+    Some(track)
+}
+
+/// Detect the container from magic bytes and structural evidence ‚Äî never from a file name.
+pub fn detect(data: &[u8]) -> &'static str {
+    if data.len() >= 4 && data[..4] == [0x1A, 0x45, 0xDF, 0xA3] {
+        return "matroska"; // also WebM
+    }
+    if data.len() >= 2 && data[0] == 0x47 && (data.len() < 189 || data.get(188) == Some(&0x47)) {
+        return "mpeg-ts";
+    }
+    if data.len() >= 8 {
+        let kind = fourcc(&data[4..8]);
+        if matches!(
+            kind.as_str(),
+            "ftyp" | "styp" | "moov" | "mdat" | "free" | "skip" | "wide" | "pnot"
+        ) {
+            return "mp4";
+        }
+    }
+    if data.len() >= 4 && &data[..4] == b"RIFF" && data.len() >= 12 && &data[8..12] == b"AVI " {
+        return "avi";
+    }
+    "unknown"
+}
+
+/// Read the container structure of a media file.
+pub fn inspect(data: &[u8]) -> MediaInfo {
+    let mut info = MediaInfo {
+        container: detect(data).to_string(),
+        ..Default::default()
+    };
+    if matches!(info.container.as_str(), "matroska" | "mpeg-ts" | "avi") {
+        info.warnings.push(format!(
+            "{} container: this build parses ISO base media (MP4/M4A/MOV) only; \
+             duration, streams and frame rate are unknown",
+            info.container
+        ));
+        return info;
+    }
+    if info.container != "mp4" {
+        info.warnings.push(
+            "not a recognised media container (no ftyp/moov box, no Matroska or MPEG-TS magic)".into(),
+        );
+        return info;
+    }
+
+    let (top, mut warnings) = split_boxes(data);
+
+    if let Some(ftyp) = find(&top, "ftyp") {
+        if ftyp.payload.len() >= 8 {
+            info.brands.push(fourcc(&ftyp.payload[0..4]));
+            let mut i = 8;
+            while i + 4 <= ftyp.payload.len() {
+                info.brands.push(fourcc(&ftyp.payload[i..i + 4]));
+                i += 4;
+            }
+            info.brands.retain(|b| !b.is_empty() && b != "....");
+            info.brands.dedup();
+        }
+    }
+
+    let Some(moov) = find(&top, "moov") else {
+        warnings.push("no moov box: the file is incomplete or was saved without its index".into());
+        info.warnings = warnings;
+        return info;
+    };
+    let (moov_boxes, more) = children(moov);
+    warnings.extend(more);
+
+    if find(&moov_boxes, "mvex").is_some() {
+        info.fragmented = true;
+        warnings.push(
+            "fragmented MP4 (moov/mvex): duration and frame rate may only be known after the fragments are read"
+                .into(),
+        );
+    }
+
+    match find(&moov_boxes, "mvhd").and_then(|b| parse_mvhd(b.payload)) {
+        Some((timescale, duration)) => {
+            info.timescale = timescale;
+            if timescale > 0 {
+                info.duration_ms = duration.saturating_mul(1000) / timescale as u64;
+            }
+            if duration == 0 && !info.fragmented {
+                warnings.push("movie header reports a duration of zero".into());
+            }
+        }
+        None => warnings.push("moov has no readable mvhd (movie header)".into()),
+    }
+
+    for trak in find_all(&moov_boxes, "trak").into_iter().take(MAX_TRACKS) {
+        if let Some(track) = parse_trak(trak, &mut warnings) {
+            info.tracks.push(track);
+        }
+    }
+    if info.tracks.is_empty() {
+        warnings.push("no tracks were found in the movie header".into());
+    }
+    for t in &info.tracks {
+        if t.kind == "video" && (t.width.unwrap_or(0) == 0 || t.height.unwrap_or(0) == 0) {
+            warnings.push(format!("video track {} declares no display size", t.id));
+        }
+    }
+    info.warnings = warnings;
+    let _ = is_container;
+    let _ = MAX_DEPTH;
+    info
+}
+
+impl MediaInfo {
+    pub fn to_json(&self) -> Value {
+        obj! {
+            "container" => self.container.as_str(),
+            "duration_ms" => self.duration_ms,
+            "timescale" => self.timescale as u64,
+            "fragmented" => self.fragmented,
+            "brands" => Value::Arr(self.brands.iter().map(|b| Value::from(b.as_str())).collect()),
+            "tracks" => Value::Arr(self.tracks.iter().map(|t| obj! {
+                "id" => t.id as u64,
+                "kind" => t.kind.as_str(),
+                "codec" => t.codec.as_str(),
+                "language" => t.language.as_str(),
+                "timescale" => t.timescale as u64,
+                "duration_ms" => t.duration_ms,
+                "sample_count" => t.sample_count as u64,
+                "fps" => match t.fps { Some(f) => Value::from(f), None => Value::Null },
+                "width" => t.width.map(|w| Value::from(w as u64)).unwrap_or(Value::Null),
+                "height" => t.height.map(|h| Value::from(h as u64)).unwrap_or(Value::Null),
+                "rotation" => t.rotation as i64,
+                "channels" => t.channels.map(|c| Value::from(c as u64)).unwrap_or(Value::Null),
+                "sample_rate" => t.sample_rate.map(|r| Value::from(r as u64)).unwrap_or(Value::Null),
+            }).collect()),
+            "warnings" => Value::Arr(self.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---------------- box builders (this is how the fixtures are made)
+
+    fn boxed(kind: &str, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + payload.len());
+        out.extend_from_slice(&((8 + payload.len()) as u32).to_be_bytes());
+        out.extend_from_slice(kind.as_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn large_boxed(kind: &str, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&1u32.to_be_bytes());
+        out.extend_from_slice(kind.as_bytes());
+        out.extend_from_slice(&(16u64 + payload.len() as u64).to_be_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn full(version: u8, flags: u32, payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![version];
+        out.extend_from_slice(&flags.to_be_bytes()[1..]);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn mvhd(timescale: u32, duration: u32) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&0u32.to_be_bytes()); // creation
+        p.extend_from_slice(&0u32.to_be_bytes()); // modification
+        p.extend_from_slice(&timescale.to_be_bytes());
+        p.extend_from_slice(&duration.to_be_bytes());
+        p.extend_from_slice(&[0u8; 80]); // rate, volume, matrix, etc.
+        boxed("mvhd", &full(0, 0, &p))
+    }
+
+    fn matrix(rotation: i32) -> [u8; 36] {
+        let one = 0x0001_0000i32;
+        let (a, b, c, d) = match rotation {
+            90 => (0, one, -one, 0),
+            180 => (-one, 0, 0, -one),
+            270 => (0, -one, one, 0),
+            _ => (one, 0, 0, one),
+        };
+        let mut m = [0u8; 36];
+        for (i, v) in [a, b, 0, c, d, 0, 0, 0, 0x4000_0000].iter().enumerate() {
+            m[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
+        }
+        m
+    }
+
+    fn tkhd(id: u32, w: u32, h: u32, rotation: i32) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&0u32.to_be_bytes()); // creation
+        p.extend_from_slice(&0u32.to_be_bytes()); // modification
+        p.extend_from_slice(&id.to_be_bytes());
+        p.extend_from_slice(&0u32.to_be_bytes()); // reserved
+        p.extend_from_slice(&1000u32.to_be_bytes()); // duration
+        p.extend_from_slice(&[0u8; 8]); // reserved
+        p.extend_from_slice(&0u16.to_be_bytes()); // layer
+        p.extend_from_slice(&0u16.to_be_bytes()); // alternate group
+        p.extend_from_slice(&0u16.to_be_bytes()); // volume
+        p.extend_from_slice(&0u16.to_be_bytes()); // reserved
+        p.extend_from_slice(&matrix(rotation));
+        p.extend_from_slice(&((w << 16).to_be_bytes()));
+        p.extend_from_slice(&((h << 16).to_be_bytes()));
+        boxed("tkhd", &full(0, 3, &p))
+    }
+
+    fn mdhd(timescale: u32, duration: u32) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&0u32.to_be_bytes()); // creation
+        p.extend_from_slice(&0u32.to_be_bytes()); // modification
+        p.extend_from_slice(&timescale.to_be_bytes());
+        p.extend_from_slice(&duration.to_be_bytes());
+        // "eng" packed as 5-bit letters
+        let lang: u16 = (b'e' as u16 - 0x60) << 10 | (b'n' as u16 - 0x60) << 5 | (b'g' as u16 - 0x60);
+        p.extend_from_slice(&lang.to_be_bytes());
+        p.extend_from_slice(&0u16.to_be_bytes());
+        boxed("mdhd", &full(0, 0, &p))
+    }
+
+    fn hdlr(kind: &str) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&0u32.to_be_bytes()); // pre_defined
+        p.extend_from_slice(kind.as_bytes());
+        p.extend_from_slice(&[0u8; 12]);
+        p.push(0);
+        boxed("hdlr", &full(0, 0, &p))
+    }
+
+    fn video_stsd(codec: &str, w: u16, h: u16) -> Vec<u8> {
+        let mut entry = Vec::new();
+        entry.extend_from_slice(&[0u8; 6]); // reserved
+        entry.extend_from_slice(&1u16.to_be_bytes()); // data ref index
+        entry.extend_from_slice(&[0u8; 16]); // pre_defined + reserved
+        entry.extend_from_slice(&w.to_be_bytes());
+        entry.extend_from_slice(&h.to_be_bytes());
+        entry.extend_from_slice(&[0u8; 50]); // resolutions, compressor name, depth
+        let mut sample = Vec::new();
+        sample.extend_from_slice(&((8 + entry.len()) as u32).to_be_bytes());
+        sample.extend_from_slice(codec.as_bytes());
+        sample.extend_from_slice(&entry);
+        let mut p = Vec::new();
+        p.extend_from_slice(&1u32.to_be_bytes()); // entry count
+        p.extend_from_slice(&sample);
+        boxed("stsd", &full(0, 0, &p))
+    }
+
+    fn audio_stsd(codec: &str, channels: u16, rate: u32) -> Vec<u8> {
+        let mut entry = Vec::new();
+        entry.extend_from_slice(&[0u8; 6]);
+        entry.extend_from_slice(&1u16.to_be_bytes());
+        entry.extend_from_slice(&0u16.to_be_bytes()); // version
+        entry.extend_from_slice(&0u16.to_be_bytes()); // revision
+        entry.extend_from_slice(&0u32.to_be_bytes()); // vendor
+        entry.extend_from_slice(&channels.to_be_bytes());
+        entry.extend_from_slice(&16u16.to_be_bytes()); // sample size
+        entry.extend_from_slice(&0u16.to_be_bytes());
+        entry.extend_from_slice(&0u16.to_be_bytes());
+        entry.extend_from_slice(&((rate << 16).to_be_bytes()));
+        let mut sample = Vec::new();
+        sample.extend_from_slice(&((8 + entry.len()) as u32).to_be_bytes());
+        sample.extend_from_slice(codec.as_bytes());
+        sample.extend_from_slice(&entry);
+        let mut p = Vec::new();
+        p.extend_from_slice(&1u32.to_be_bytes());
+        p.extend_from_slice(&sample);
+        boxed("stsd", &full(0, 0, &p))
+    }
+
+    fn stts(entries: &[(u32, u32)]) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+        for (count, delta) in entries {
+            p.extend_from_slice(&count.to_be_bytes());
+            p.extend_from_slice(&delta.to_be_bytes());
+        }
+        boxed("stts", &full(0, 0, &p))
+    }
+
+    fn trak(
+        stsd: Vec<u8>,
+        handler: &str,
+        timescale: u32,
+        duration: u32,
+        fps: u32,
+        w: u32,
+        h: u32,
+        rot: i32,
+    ) -> Vec<u8> {
+        // one stts entry: `frames` samples of `timescale / fps` media units each
+        let delta = (timescale / fps).max(1);
+        let frames = duration / delta;
+        let stbl = boxed("stbl", &[stsd, stts(&[(frames, delta)])].concat());
+        let minf = boxed("minf", &stbl);
+        let mdia = boxed("mdia", &[mdhd(timescale, duration), hdlr(handler), minf].concat());
+        boxed("trak", &[tkhd(1, w, h, rot), mdia].concat())
+    }
+
+    fn sample_mp4(rotation: i32) -> Vec<u8> {
+        let ftyp = boxed("ftyp", b"isomisomiso2mp41");
+        // 6 s movie, video at 10 fps, stereo 48 kHz audio
+        let video = trak(video_stsd("avc1", 320, 240), "vide", 30_000, 180_000, 10, 320, 240, rotation);
+        let audio = trak(audio_stsd("mp4a", 2, 48_000), "soun", 48_000, 288_000, 48_000, 0, 0, 0);
+        let moov = boxed("moov", &[mvhd(1000, 6000), video, audio].concat());
+        let mdat = boxed("mdat", &[0u8; 16]);
+        [ftyp, moov, mdat].concat()
+    }
+
+    // ---------------- tests
+
+    #[test]
+    fn reads_duration_streams_size_and_frame_rate() {
+        let info = inspect(&sample_mp4(0));
+        assert_eq!(info.container, "mp4");
+        assert_eq!(info.duration_ms, 6000, "6 s movie from mvhd");
+        assert!(info.brands.iter().any(|b| b == "isom"));
+        assert_eq!(info.tracks.len(), 2);
+
+        let video = info.tracks.iter().find(|t| t.kind == "video").expect("video track");
+        assert_eq!(video.codec, "avc1");
+        assert_eq!(video.width, Some(320));
+        assert_eq!(video.height, Some(240));
+        assert_eq!(video.fps, Some(10.0), "180 samples over 6 s of media time");
+        assert_eq!(video.duration_ms, 6000);
+        assert_eq!(video.language, "eng");
+        assert_eq!(video.rotation, 0);
+        assert_eq!(video.sample_count, 60, "6 s at 10 fps is 60 samples");
+
+        let audio = info.tracks.iter().find(|t| t.kind == "audio").expect("audio track");
+        assert_eq!(audio.codec, "mp4a");
+        assert_eq!(audio.channels, Some(2));
+        assert_eq!(audio.sample_rate, Some(48_000));
+        assert!(info.warnings.is_empty(), "{:?}", info.warnings);
+    }
+
+    #[test]
+    fn reads_display_rotation_from_the_track_matrix() {
+        assert_eq!(inspect(&sample_mp4(90)).tracks[0].rotation, 90);
+        assert_eq!(inspect(&sample_mp4(180)).tracks[0].rotation, 180);
+        assert_eq!(inspect(&sample_mp4(270)).tracks[0].rotation, 270);
+    }
+
+    #[test]
+    fn json_reports_absent_values_as_null_not_zero() {
+        let info = inspect(&sample_mp4(0));
+        let v = info.to_json();
+        let tracks = v.get("tracks").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
+        let audio = tracks.iter().find(|t| t.str_of("kind") == Some("audio")).unwrap();
+        assert!(audio.get("width").map(|w| w.is_null()).unwrap_or(false), "audio has no width");
+        let video = tracks.iter().find(|t| t.str_of("kind") == Some("video")).unwrap();
+        assert!(video.get("channels").map(|c| c.is_null()).unwrap_or(false), "video has no channels");
+        assert_eq!(video.get("fps").and_then(|f| f.as_f64()), Some(10.0));
+    }
+
+    #[test]
+    fn truncated_file_is_reported_not_guessed() {
+        let full = sample_mp4(0);
+        let cut = &full[..full.len() - 40];
+        let info = inspect(cut);
+        assert!(
+            info.warnings.iter().any(|w| w.contains("truncated") || w.contains("no moov")),
+            "{:?}",
+            info.warnings
+        );
+    }
+
+    #[test]
+    fn missing_moov_is_a_warning_and_no_tracks() {
+        let only_ftyp = boxed("ftyp", b"isomisom");
+        let info = inspect(&only_ftyp);
+        assert_eq!(info.container, "mp4");
+        assert!(info.tracks.is_empty());
+        assert!(info.warnings.iter().any(|w| w.contains("no moov")), "{:?}", info.warnings);
+    }
+
+    #[test]
+    fn fragmented_mp4_is_flagged() {
+        let mut moov_payload = mvhd(1000, 0);
+        moov_payload.extend(boxed("mvex", &[]));
+        let file = [boxed("ftyp", b"isomiso5"), boxed("moov", &moov_payload)].concat();
+        let info = inspect(&file);
+        assert!(info.fragmented);
+        assert!(info.warnings.iter().any(|w| w.contains("fragmented")), "{:?}", info.warnings);
+    }
+
+    #[test]
+    fn other_containers_are_named_but_not_parsed() {
+        let matroska = [0x1Au8, 0x45, 0xDF, 0xA3, 0, 0, 0, 0];
+        let info = inspect(&matroska);
+        assert_eq!(info.container, "matroska");
+        assert!(info.tracks.is_empty(), "no invented tracks");
+        assert!(info.warnings[0].contains("ISO base media"), "{:?}", info.warnings);
+
+        assert_eq!(detect(b"not media at all"), "unknown");
+        let unknown = inspect(b"hello world, definitely not a video");
+        assert_eq!(unknown.container, "unknown");
+        assert!(!unknown.warnings.is_empty());
+    }
+
+    #[test]
+    fn absurd_sample_tables_saturate_instead_of_overflowing() {
+        // Two entries of (0xFFFFFFFF samples, 0xFFFFFFFF delta) cannot be represented in u64;
+        // in a debug build the multiply would panic. `parse_stts` must clamp and keep going.
+        let mut p = vec![0, 0, 0, 0, 0, 0, 0, 2];
+        for _ in 0..2 {
+            p.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        }
+        let (samples, total) = parse_stts(&p).expect("well-formed header");
+        assert_eq!(samples, u32::MAX, "sample count saturates at the u32 ceiling");
+        assert_eq!(total, u64::MAX, "total duration saturates instead of wrapping to a small number");
+        // A truncated entry list stops at the last complete entry rather than reading past
+        // the buffer; here the first entry straddles the cut, so nothing is counted.
+        assert_eq!(parse_stts(&p[..12]), Some((0, 0)));
+        // One full entry is readable even when the second is cut in half.
+        assert_eq!(
+            parse_stts(&p[..16]),
+            Some((u32::MAX, (u32::MAX as u64) * (u32::MAX as u64)))
+        );
+    }
+
+    #[test]
+    fn sixty_four_bit_box_sizes_are_understood() {
+        let payload = [mvhd(1000, 2500)].concat();
+        let file = [
+            boxed("ftyp", b"isomiso5"),
+            large_boxed("moov", &payload),
+        ]
+        .concat();
+        let info = inspect(&file);
+        assert_eq!(info.duration_ms, 2500, "{:?}", info.warnings);
+    }
+
+    #[test]
+    fn a_real_encoder_output_is_read_correctly() {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sample.mp4");
+        let Ok(bytes) = std::fs::read(&p) else {
+            eprintln!("sample.mp4 fixture absent; skipping the real-encoder check");
+            return;
+        };
+        let info = inspect(&bytes);
+        assert_eq!(info.container, "mp4");
+        let video = info.tracks.iter().find(|t| t.kind == "video").expect("video track");
+        // the fixture is generated by the command recorded in tests/fixtures/make_media.py
+        assert_eq!(video.codec, "avc1");
+        assert_eq!(video.width, Some(320));
+        assert_eq!(video.height, Some(240));
+        assert_eq!(video.fps, Some(10.0), "{:?}", video);
+        assert!((5_900..=6_200).contains(&info.duration_ms), "duration {}", info.duration_ms);
+    }
+}
+```
+
+## `tests/fixtures/make_media.py`
+
+```python
+#!/usr/bin/env python3
+"""Provenance for `tests/fixtures/sample.mp4`.
+
+This fixture is **our own synthetic clip**, not material from any product or platform.
+It exists so `media::inspect` and the frame-extraction research below are tested against
+real encoder output instead of a hand-built box tree (which is also tested, in
+`media.rs::tests::sample_mp4`).
+
+Generated with a static FFmpeg 7.0.2 build (installed from the `imageio-ffmpeg` wheel;
+`ffprobe` is not part of it). The exact command:
+
+    ffmpeg -y \
+      -f lavfi -i "color=c=red:s=320x240:r=10:d=2" \
+      -f lavfi -i "color=c=green:s=320x240:r=10:d=2" \
+      -f lavfi -i "color=c=blue:s=320x240:r=10:d=2" \
+      -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]" \
+      -map "[v]" -c:v libx264 -pix_fmt yuv420p -g 10 -t 6 -r 10 \
+      tests/fixtures/sample.mp4
+
+What that produces, measured by our own parser (`media::tests::a_real_encoder_output_is_read_correctly`)
+and by FFmpeg itself:
+
+    container mp4, brand isom
+    duration  6.0 s (mvhd timescale 10240)
+    video     avc1, 320x240, yuv420p, 10 fps, 60 frames
+
+Regenerating it is optional; the checked-in file is what the tests read. If you do not have
+FFmpeg, delete nothing ‚Äî the test skips itself only when the fixture is absent.
+
+Frame extraction used for research (see docs/reference/VIDEO_RESEARCH.md). FFmpeg 7.x needs
+`-fps_mode vfr` for scene dumps; `-vsync` is deprecated and fails:
+
+    # one contact sheet: 3 frames across, sampled at 0.5 fps
+    ffmpeg -i sample.mp4 -vf "fps=0.5,scale=160:-1,tile=3x1" -frames:v 1 /tmp/sheet.png
+
+    # scene changes, one PNG per detected shot
+    ffmpeg -i sample.mp4 -vf "select='gt(scene,0.3)'" -fps_mode vfr /tmp/scenes/s-%03d.png
+
+The clip has exactly two scene cuts (red‚Üígreen at 2 s, green‚Üíblue at 4 s), so the expected
+result is exactly two PNGs. That is the assertion the research log records.
+
+There is no FFmpeg dependency in the product: `crates/forge-core` parses the container by
+hand and never shells out to FFmpeg.
+"""
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "sample.mp4")
+
+
+def main() -> int:
+    ff = os.environ.get("FFMPEG", "ffmpeg")
+    if not os.path.exists(OUT):
+        print(f"fixture missing: {OUT}", file=sys.stderr)
+        return 1
+    try:
+        subprocess.run([ff, "-version"], check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError):
+        print("ffmpeg not available; the checked-in fixture is already present, nothing to do")
+        return 0
+    print(f"{OUT}: {os.path.getsize(OUT)} bytes")
+    print("regenerate with the command in the module docstring")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+## `tests/fixtures/sample.mp4`
+
+```
+    ftypisom   isomiso2avc1mp41   free  mdat  Æˇˇ™‹EÈΩÊŸH∑ñ,ÿ Ÿ#ÓÔx264 - core 164 r3191 4613ac3 - H.264/MPEG-4 AVC codec - Copyleft 2003-2024 - http://www.videolan.org/x264.html - options: cabac=1 ref=3 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=7 psy=1 psy_rd=1.00:0.00 mixed_ref=1 me_range=16 chroma_me=1 trellis=1 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=-2 threads=3 lookahead_threads=1 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=2 keyint=250 keyint_min=10 scenecut=40 intra_refresh=0 rc_lookahead=40 rc=crf mbtree=1 crf=23.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00 Ä   CeàÑ ˇ˛Á„¸
+k+ƒøMP(ÕÈµ‹®∫5·’∆!O ∫3◊‘ ºJ±}[}8<ó¯P 
+ÑÕl¶K7ã	'3Å   Aö$lA˛µ*Ä X   
+AûBxá  7·   
+ûatC  P@   
+ûcjC  PA   AöhI®AhôL#ˇ˛µ*Ä Y   AûÜE,;ˇ  7·   
+û•tC  PA   
+ûßjC  P@   Aö¨I®AlôL#ˇ˛µ*Ä X   Aû E,;ˇ  7·   
+ûÈtC  P@   
+ûÎjC  P@   AöI®AlôL#ˇ˛µ*Ä Y   AüE,;ˇ  7·   
+ü-tC  PA   
+ü/jC  P@   Aõ4I®AlôL#ˇ˛µ*Ä X   AüRE,;ˇ  7·   
+üqtC  P@   
+üsjC  P@   CAõxI®AlôL#ˇ†!⁄È∆–ú˙∆â∞*ÿ"6<L69ÈÙ´3\n,g	`„#Ó≠@p uë~Å#n¿nÄ È  ÏAüñE,;ˇ˛˚¸ˇÂíÆ	|Gª¡•IyIñ_X1∞”2ﬁ$,	}H%eÔÛ)∞Ñ6HBfŒ<RåÜ|¸
+Æ	ÄïÓÌëNÕ7"Ê>5XÇ—˝Ïtñ‚Òb«ÀçªTX±Ù±?°˘I˘˛ˆ†Cˇg Xâ©ö»f⁄@≥˚Ï9ád‰+}·êÁÉ“©÷ûß∏[	u°D˛íÄ ˝1ûHƒIY20æÓvc”∆:†´G©ÂälQ^O(`‚äz©™a!˙˙ã^NÍùº–’J˘∏z°¬ô√9#AW⁄ugªi…ës‘∆&`’-ˇe\ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™EÛØ$è]¯¯¸‘z…íôƒ8#è’{ÁkÈ¥¡™[˛ πàé£eRèRF¯Ô™ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™(˝C`(-›˝>`Îç1≠áÒ§y;‚T*-N·≥ã¶B_»ù§û‹c¡j∑†I≤+‰6©ï[Rto∆&`’-ˇe\ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™(Ì~ú"ví{påx_™ﬁÅ&»Øêx⁄¶UmI“„Hø#;GÃPòàV√¯“<öò?Ùd/ˇ˝BÌ™¢ƒ‰xç_i’ûÌßÛä%*{ 6ëOã0]¯Á◊ö*!|˛ïˆ£|¢∑1≠áÒ§y;‚T*-N·≥ã¶B_»ù§û‹c¡j∑†I≤+‰ “&PBﬂˆUÃDu*îzêä7«Ò≠¶Ñ(F∫ÄsVﬂ"≠ÊO60Û#˚ñ:°“è‘5„∂VãäÄ@#‚∫V”B	î#]@9´oëVÛ'õyë˝ÀPÈGÍAnÔËAÛˇÖZ≠Ëlä˘ Gç™eV‘ù.1¥ãÚ3¥|≈–iàÖl?ç#…ﬂ°Qjwú]7¯  „üµtC˛˚ˆóeì∞Lªèêû√›∂,c ¡"Yi≥Õë0:∑‰¥tt≥ƒW"·eˆØt
+€/Õî€äﬁ”˝<üí82LÏïe¢ft&"eòq…∑¸ù›»O»4äz+”¡wN.˚t†ã⁄êÊd◊ ?€x*jf%©(®e¡‘[¬Á!ºíQë
+…ûq4”Ï¨ÎOŸ√"ñp…(≠Î
+€”√ÄÑ’‰ÏyÆI=aólé’	ycÏŒ<ü•˝7/ìÙØü¶ÈÚ~ó3Ù›.O“˛~õµ…˙bœ”x9?LŸ˙qŒ™á[-#å√ìße§uòrvl¥è3NÕñëˆa…€≤“@Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§∂Ó√ó'ÈÀ?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§ÉòràºZø?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥L∏Óòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥ês8¸¬≈ÏÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9áD8ºxl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñä‰L≠Ï¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñãDÄÑ¯l¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñã¶Øö•Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9áA¬ úœ”}fù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-ÛÛ™Áü¶˙Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂Z3ËG«?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥ÆA   
+ü∑jC  PA   AõºI®AlôL#ˇ˛µ*Ä X   Aü⁄E,;ˇ  7·   
+ü˘tC  P@   
+ü˚jC  PA   Aõ‡I®AlôL#ˇ˛µ*Ä Y   AûE,;ˇ  7‡   
+û=tC  P@   
+û?jC  PA   Aö$I®AlôL!ˇ˛™U  ∞   AûBE,;ˇ  7·   
+ûatC  P@   
+ûcjC  PA   AöhI®AlôLwˇ˛©ñ  o¡   AûÜE,;ˇ  7·   
+û•tC  PA   
+ûßjC  P@   Aö©I®AlôLoˇ˛ßÑ  ﬁÄ   CeàÇ ?˛Ï⁄~7V˘ı”!Ω‡ ∑+©ß¶&v.o§§pgÆœX G¸˛z–$…ñ{P#‡ N	µñ)ØNg   Aö$lA˛µ*Ä X   
+AûBxá  7‡   
+ûatC  PA   
+ûcjC  PA   AöhI®AhôL#ˇ˛µ*Ä Y   AûÜE,;ˇ  7‡   
+û•tC  P@   
+ûßjC  PA   Aö¨I®AlôL!ˇ˛™U  ∞   Aû E,;ˇ  7‡   
+ûÈtC  PA   
+ûÎjC  P@   AöI®AlôLˇ˛©ñ  o¡   AüE,;ˇ  7·   
+ü-tC  P@   
+ü/jC  PA   Aõ3I®AlôLoˇ˛ßÑ  ﬁÄ   AüQE,7ˇ  PA   
+ürjC  PA  moov   lmvhd              Ë  8                                            @                                Atrak   \tkhd                    8                                              @   @        $edts   elst         8        πmdia    mdhd              (   ¯ Uƒ     -hdlr        vide            VideoHandler   dminf   vmhd              $dinf   dref          url      $stbl   ¿stsd          ∞avc1                       @  H   H       Lavc61.3.100 libx264            ˇˇ   6avcCd ˇ· gd ¨ŸAA˚     @ÒBô` hÎ„À"¿˝¯¯    pasp         btrt      #  #   stts          >      stss             +  ctts       <                                                                                                                                                                                                                                                                                                                                                                                         stsc             >     stsz           >  ˘                                                               G    Á                                                         G                                                            stco          0   audta   Ymeta       !hdlr        mdirappl            ,ilst   $©too   data       Lavf61.1.100
+```
+
 ## `.gitignore`
 
 ```
@@ -4451,6 +5397,7 @@ impl Api {
             ("DELETE", ["api", "providers", pid]) => Ok(self.delete_provider(pid)),
             ("POST", ["api", "backup"]) => self.create_backup(),
             ("GET", ["api", "backups"]) => Ok(self.list_backups()),
+            ("POST", ["api", "media", "inspect"]) => self.media_inspect(req),
             ("GET", ["api", "notebooklm", "status"]) => Ok(ok(notebooklm::status())),
             ("POST", ["api", "notebooklm", "preview"]) => self.notebooklm_preview(req),
             _ => Err(err(404, "not_found", &format!("no route for {} {}", req.method, req.path))),
@@ -4493,12 +5440,19 @@ impl Api {
                 "locator" => "cell (A1 range, e.g. Sales!C2:C6)",
                 "note" => "computed over numeric cells only: empty cells and placeholders are excluded (never counted as zero), a column that mixes units is refused, and a cached column total is excluded to avoid double counting",
             },
+            "media" => obj! {
+                "status" => "partial",
+                "endpoint" => "/api/media/inspect",
+                "note" => "ISO base media (MP4/M4A/MOV) container metadata: duration, tracks, codec, size, frame rate, rotation, language, truncation warnings. No frame decoding, no captions, no transcription.",
+            },
             "sources" => obj! {
                 "text" => obj!{ "status" => "supported", "locator" => "paragraph" },
                 "markdown" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "html" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "csv" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "RFC 4180 quoting, delimiter sniffed; the grid is kept for aggregation" },
                 "pdf" => obj!{ "status" => "supported", "locator" => "page", "note" => "text-layer PDFs; no OCR" },
+                "video" => obj!{ "status" => "unsupported", "note" => "no video ingestion: downloading platform video needs an authorized extractor and per-source permission; container metadata can be inspected with POST /api/media/inspect" },
+                "audio" => obj!{ "status" => "unsupported", "note" => "no speech-to-text engine is available offline" },
                 "url" => obj!{
                     "status" => if fetch::transport_available() { "supported" } else { "unsupported" },
                     "locator" => "section+paragraph",
@@ -4510,7 +5464,8 @@ impl Api {
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
                 "audio" => obj!{ "status" => "unsupported", "reason" => "no ASR engine available offline" },
-                "video" => obj!{ "status" => "unsupported", "reason" => "no ASR/FFmpeg pipeline in this build" },
+                "video" => obj!{ "status" => "unsupported",
+                    "reason" => "container metadata is readable via /api/media/inspect, but video is not a source: no frame decoding, no captions, no transcription, and no authorized extractor for platform video" },
                 "image_ocr" => obj!{ "status" => "unsupported", "reason" => "no OCR engine available" },
             },
             "providers" => self.provider_status(),
@@ -4917,6 +5872,31 @@ impl Api {
             }
         });
         built.unwrap_or_else(|e| e)
+    }
+
+    /// Container metadata for a media file: duration, tracks, codec, size, frame rate,
+    /// rotation. Pixel decoding, captions and transcription are **not** done here.
+    fn media_inspect(&self, req: &Request) -> Result<Response, Response> {
+        if req.body.is_empty() {
+            return Err(err(400, "empty_body", "send the media file as the request body"));
+        }
+        if req.body.len() > security::MAX_SOURCE_BYTES {
+            return Err(err(413, "too_large", "media file exceeds the size limit"));
+        }
+        let name = req.query_get("name").unwrap_or("").to_string();
+        let info = crate::media::inspect(&req.body);
+        Ok(ok(obj! {
+            "file" => if name.is_empty() { "unnamed" } else { name.as_str() },
+            "bytes" => req.body.len() as u64,
+            "sha256" => hashes::sha256(&req.body),
+            "media" => info.to_json(),
+            "notes" => obj! {
+                "decoded_frames" => 0u64,
+                "captions" => "not read",
+                "transcript" => "not produced",
+                "why" => "this endpoint reads container metadata only; it does not decode pixels, read caption tracks or transcribe audio",
+            },
+        }))
     }
 
     fn delete_source(&self, sid: &str) -> Response {
@@ -5603,26 +6583,6 @@ impl Api {
         let body = parse_body(req)?;
         let kind = body.str_of("kind").unwrap_or("").to_string();
         let topic = body.str_of("topic").unwrap_or("").to_string();
-        // Presentation controls. Both are validated: an unknown value is rejected rather
-        // than silently replaced by the default, so the UI can never claim a style it got.
-        let style_raw = body.str_of("style").unwrap_or("").to_string();
-        let length_raw = body.str_of("length").unwrap_or("").to_string();
-        let Some(style) = grounded::Style::parse(&style_raw) else {
-            return Err(err(
-                422,
-                "bad_style",
-                &format!("unknown style \"{}\" (use evidence, concise or detailed)", style_raw),
-            ));
-        };
-        let Some(length) = grounded::Length::parse(&length_raw) else {
-            return Err(err(
-                422,
-                "bad_length",
-                &format!("unknown length \"{}\" (use brief, standard or thorough)", length_raw),
-            ));
-        };
-        let answer_opts = grounded::AnswerOptions { style, length };
-
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
 
         let (chunks, sources) = self.store.read(|db| {
@@ -12501,6 +13461,7 @@ pub mod http;
 pub mod inflate;
 pub mod ingest;
 pub mod json;
+pub mod media;
 pub mod notebooklm;
 pub mod providers;
 pub mod retrieve;
@@ -17885,6 +18846,66 @@ fn chat_style_and_length_are_effective_and_validated() {
         .unwrap_or(0);
     assert_eq!(messages, 10, "five accepted asks (2 messages each), rejections store nothing");
 }
+
+/// Media metadata is read from the container, and the response says what was *not* done.
+#[test]
+fn media_metadata_is_read_without_decoding_frames() {
+    let dir = tempdir("media");
+    let s = Server::start(dir.clone());
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sample.mp4");
+    let bytes = std::fs::read(&fixture).expect("sample.mp4 fixture");
+
+    let (st, body) = s.raw(
+        "POST",
+        "/api/media/inspect?name=sample.mp4",
+        Some(&bytes),
+        "application/octet-stream",
+    );
+    assert_eq!(st, 200, "{}", body);
+    let v = json::parse(&body).unwrap();
+    assert_eq!(v.str_of("file"), Some("sample.mp4"));
+    assert_eq!(v.get("bytes").and_then(|b| b.as_f64()), Some(bytes.len() as f64));
+    assert_eq!(v.str_of("sha256").map(|h| h.len()), Some(64));
+
+    let media = v.get("media").expect("media object");
+    assert_eq!(media.str_of("container"), Some("mp4"));
+    let duration = media.get("duration_ms").and_then(|d| d.as_f64()).unwrap_or(0.0);
+    assert!((5_900.0..=6_200.0).contains(&duration), "duration {}", duration);
+    let tracks = media.get("tracks").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
+    let video = tracks.iter().find(|t| t.str_of("kind") == Some("video")).expect("video track");
+    assert_eq!(video.str_of("codec"), Some("avc1"));
+    assert_eq!(video.get("width").and_then(|w| w.as_f64()), Some(320.0));
+    assert_eq!(video.get("height").and_then(|h| h.as_f64()), Some(240.0));
+    assert_eq!(video.get("fps").and_then(|f| f.as_f64()), Some(10.0));
+
+    // the response must not imply anything was watched, read or transcribed
+    let notes = v.get("notes").expect("notes");
+    assert_eq!(notes.get("decoded_frames").and_then(|d| d.as_f64()), Some(0.0));
+    assert_eq!(notes.str_of("transcript"), Some("not produced"));
+    assert_eq!(notes.str_of("captions"), Some("not read"));
+
+    // a container we do not parse is named, not guessed at
+    let (st, body) = s.raw(
+        "POST",
+        "/api/media/inspect?name=clip.webm",
+        Some(&[0x1Au8, 0x45, 0xDF, 0xA3, 0, 0, 0, 0]),
+        "application/octet-stream",
+    );
+    assert_eq!(st, 200);
+    let v = json::parse(&body).unwrap();
+    assert_eq!(v.get("media").and_then(|m| m.str_of("container")), Some("matroska"));
+    assert_eq!(
+        v.get("media").and_then(|m| m.get("tracks")).and_then(|t| t.as_arr()).map(|a| a.len()),
+        Some(0),
+        "no invented streams"
+    );
+
+    // empty body and wrong method are refused
+    let (st, _) = s.raw("POST", "/api/media/inspect", Some(&[]), "application/octet-stream");
+    assert_eq!(st, 400);
+    let (st, _) = s.json("GET", "/api/media/inspect", None);
+    assert_eq!(st, 404, "GET is not routed");
+}
 ```
 
 ## `crates/forge-server/Cargo.toml`
@@ -18725,6 +19746,37 @@ retrieval knob wearing a presentation label. (c) Accepting any string and ignori
 **Consequences.** With a reachable provider, the citation budget is forwarded and the style
 vocabulary does not apply (documented in `UNKNOWN_AND_LIMITATIONS.md`); the provider path is
 marked partial in the feature matrix. Streaming remains unimplemented and is not claimed.
+
+## D18 ‚Äî Media support is container metadata; frames are research tooling, not product code
+
+**Date.** 2026-10-31. **Background.** ¬ß7.12 asks for video as a source and for stream metadata
+including duration, frame rate, codec, pixel format, audio streams, rotation and corruption.
+`ffprobe` is unavailable, crates.io is unreachable, and a codec in the product would mean
+shipping (or shelling out to) FFmpeg.
+
+**Chosen.** A hand-written ISO base media (MP4/M4A/MOV) box parser in `media.rs`, exposed as
+`POST /api/media/inspect`: duration and timescale from `mvhd`, per-track `tkhd`/`mdhd`/`hdlr`/
+`stsd`/`stts` giving id, kind, codec, language, timescale, duration, sample count, frame rate,
+display size, rotation matrix, channels and sample rate; truncation, missing `moov`, fragmented
+`MP4` and zero-duration files are reported as warnings. Unknown values are `null`, never `0`.
+Matroska/WebM, MPEG-TS and AVI are *named by magic bytes and then refused* with a warning
+rather than half-parsed.
+
+Frame decoding stays **outside** the product: it was done with a static FFmpeg during research
+(`tests/fixtures/make_media.py`, `VIDEO_RESEARCH.md`), and its results are labelled as evidence
+about our own fixture. The `/api/media/inspect` response states `decoded_frames: 0`,
+`captions: "not read"`, `transcript: "not produced"` so a caller cannot mistake metadata for
+understanding.
+
+**Rejected.** (a) Shelling out to `ffmpeg`/`ffprobe` from the product ‚Äî an undeclared runtime
+dependency that is absent on most machines, and a subprocess boundary we would have to harden.
+(b) Reporting a pixel format or a bitrate we did not read, because other tools do. (c) Parsing
+WebM "a bit" ‚Äî half a container parser produces confident nonsense.
+
+**Consequences.** Video cannot be ingested as a source; `/api/capabilities` says
+`video: unsupported` with the reason. Frame-based research stays possible and reproducible via
+the committed commands, and its limits (no vision model, no authorized footage) are stated in
+`VIDEO_RESEARCH.md` rather than papered over.
 ```
 
 ## `docs/FEATURE_PARITY.md`
@@ -21504,26 +22556,30 @@ extended to the product origin.
 Every reference behaviour there is `OFFICIAL_DOCUMENTED`, `CODE_CORROBORATED`, or
 explicitly `INFERRED`.
 
-## 2. Video research (yt-dlp / FFmpeg) ‚Äî BLOCKED
+## 2. Video research ‚Äî PARTIAL (tooling unblocked, footage still BLOCKED)
 
-| Tool | Status |
+| Tool | Status 2026-10-31 |
 |---|---|
-| `yt-dlp` | absent |
-| `ffmpeg` | absent |
-| `ffprobe` | absent |
+| `yt-dlp` | **installed** 2026.10.26 from the PyPI wheel |
+| `ffmpeg` | **installed** 7.0.2 static (`imageio-ffmpeg` wheel; needs `chmod +x`) |
+| `ffprobe` | absent (that wheel ships `ffmpeg` only) |
 | `chromium` | absent |
 | `tesseract` | absent |
 
-No package manager route is available for arbitrary packages in this image, and the
-allowlist does not include GitHub release assets (`codeload`/`objects.githubusercontent`
-both fail), so the binaries cannot be fetched either. `MASTER_FORGE.md` ¬ß5 explicitly
-forbids bypassing platform protections and installing globally in a restricted sandbox.
+The earlier entry here said no package route existed. That was wrong in one direction:
+**PyPI is reachable** even though crates.io and GitHub release assets are not, so
+`pip install --target=/tmp/mediapy yt-dlp imageio-ffmpeg` works.
 
-**Unblock:** install `yt-dlp` + `ffmpeg` into an isolated prefix, or supply an
-authorised recording.
+What is still blocked is the evidence that matters: there is no authorized recording, no
+route to any platform host, and no permission to download or republish third-party footage.
+So `docs/reference/VIDEO_RESEARCH.md` now contains measurements of a clip **we generated**
+(container metadata cross-checked against `ffmpeg -i`, mean-RGB timelines, a contact sheet)
+and an explicit statement that none of it is evidence about another product. It records one
+reusable finding: FFmpeg's `scene` filter is luma-based and missed a red‚Üígreen cut on our own
+clip, so cut detection cannot rely on it.
 
-**Consequence:** `docs/reference/VIDEO_RESEARCH.md` contains no frames, no transcripts
-and no timestamps, and says so. It is a specification of the *method*, not a result.
+**Consequence:** no video row in the feature matrix may be labelled `VIDEO_OBSERVED` about a
+reference product. The label is used only for our fixture, and the matrix says so.
 
 ## 3. Broad web research / search providers ‚Äî BLOCKED
 
@@ -21748,6 +22804,7 @@ authenticated reverse proxy. This is stated rather than hidden ‚Äî there is no
 | Oversized request bodies | header cap 64 KiB, body cap 32 MiB at the HTTP layer; `MAX_SOURCE_BYTES` 25 MiB, `MAX_TEXT_BYTES` 8 MiB at the API | `http` tests; e2e empty/oversize upload |
 | Oversized worksheets (memory/JSON blow-up) | `MAX_TABLE_ROWS` 20,000 rows per sheet; the grid is marked `truncated` and aggregations **refuse** instead of totalling partial data | `tables::tests::oversized_sheets_are_truncated_and_aggregations_refuse` |
 | Table rows leaking into an HTTP response | `GET /api/sources/:id/tables?rows=N` caps rows (default 200, max 2,000) while `row_count` reports the true size | e2e `spreadsheet_questions_are_computed_over_real_cells` |
+| Hostile media files | container parsing is bounds-checked at every read (`u32`/`u64` box sizes, `0`-size guard, truncation tolerated and reported); no allocation is sized from an unvalidated box length; body capped at `MAX_SOURCE_BYTES` (`413 too_large`), empty body `400` | `media` tests (`truncated_file_is_reported_not_guessed`, `sixty_four_bit_box_sizes_are_understood`), e2e `media_metadata_is_read_without_decoding_frames` |
 | Hidden worksheets used as evidence | hidden sheets are stored for inspection but excluded from retrieval, aggregation and citations | `tables::tests::hidden_sheets_are_never_used_for_answers` |
 | Fabricated numbers from a spreadsheet | non-numeric/empty cells are `Empty` (never `0`), mixed units are refused, cached column totals are excluded and named, ambiguous separators are rejected | `tables` tests (4 refusal cases) |
 | Malformed JSON / unknown routes | strict parser ‚Üí `400 bad_json`; unknown route ‚Üí `404 not_found` with a code | e2e `rejects_bad_input_and_dangerous_urls` |
@@ -21805,7 +22862,7 @@ curl is out of scope for this layer.
 ```markdown
 # Status ‚Äî Forge (NLLM2)
 
-Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length).
+Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length, media metadata).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -21824,13 +22881,14 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **186 passing, 0 failing** (26 `bininspect` + 142 lib + 13 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **70 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **197 passing, 0 failing** (26 `bininspect` + 152 lib + 14 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **72 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
 | Chat style / length | `style` (evidence ¬∑ concise ¬∑ detailed) and `length` (brief ¬∑ standard ¬∑ thorough = 1/2/4 citations) are validated, echoed back, and change the rendered answer without ever changing which passages are cited | `grounded::AnswerOptions` + e2e `chat_style_and_length_are_effective_and_validated` |
 | Source Guide | per-source orientation: verbatim quoted headline + summary with locators, recurring terms (incl. two-word phrases), real outline (sections/sheets), suggested questions | `guide` (8 tests) + e2e `source_guide_quotes_the_source_and_refuses_when_empty` + UI smoke (9 assertions) |
+| Media metadata | MP4/M4A/MOV box tree parsed by hand: duration, per-track kind/codec/language/timescale/duration/sample count/fps/display size/rotation/channels/sample rate; truncation, missing `moov` and fragmented files produce warnings; unknown values are `null`, never `0` | `media` (10 tests) + e2e `media_metadata_is_read_without_decoding_frames`; cross-checked against `ffmpeg -i` on a fixture we encoded |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` ‚Üí 200 |
 | PDF | 2-page fixtures (stored + Flate) ‚Üí page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML ‚Üí paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
@@ -21886,7 +22944,7 @@ total          186
 |---|---|---|
 | URL / YouTube / Instagram / GitHub ingestion | build has no TLS client; sandbox has no outbound route to arbitrary hosts | `POST /sources/url` validates the URL (SSRF guard) then returns **501 `url_ingest_unavailable`** with instructions |
 | Remote LLM providers | HTTPS unavailable; keys are accepted and stored but a provider reports `available:false` | chat stays on the extractive engine and returns `engine_note` explaining the fallback |
-| Audio/video overviews, transcription | no TTS/ASR binary in the image (`espeak`, `ffmpeg` absent) | `audio_overview` is `unsupported`; `audio_script` (**text**) is generated instead |
+| Audio/video overviews, transcription | no TTS/ASR engine reachable from the product (FFmpeg is used only as research tooling, installed from PyPI during this session) | `audio_overview` is `unsupported`; `audio_script` (**text**) is generated instead; media **metadata** is readable (row above) but frames, captions and speech are not |
 | Image OCR | `tesseract` absent | images inside DOCX are counted in warnings, not read |
 | Semantic/vector retrieval | no embedding model offline | lexical BM25 only; documented, not disguised |
 | Multi-user auth | out of scope for a single-operator notebook | bind to `127.0.0.1` or a private network |
@@ -21901,11 +22959,12 @@ total          186
 
 ## Immediate next steps
 
-1. Wire an HTTPS client (requires a TLS-capable toolchain/route) to switch URL
-   ingestion and remote providers from "configured but unavailable" to working.
+1. Streaming answers + stop (CHAT-06) ‚Äî the responder is buffered today.
 2. EPUB ingestion ‚Äî the ZIP reader already exists; needs XHTML container mapping.
 3. Conversation export as Markdown; artifact re-generation on source change.
-4. Optional: local embedding index once a model can be shipped offline.
+4. Wire an HTTPS client (requires a TLS-capable toolchain/route) to switch URL
+   ingestion and remote providers from "configured but unavailable" to working.
+5. Optional: local embedding index once a model can be shipped offline.
 ```
 
 ## `docs/TEST_MATRIX.md`
@@ -21918,7 +22977,7 @@ total          186
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 186 tests: 142 lib + 13 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 197 tests: 152 lib + 14 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -21926,10 +22985,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 53 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 72 assertions
 ```
 
-## Unit tests (142) ‚Äî exact names from `cargo test --lib -- --list`
+## Unit tests (152) ‚Äî exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -22013,11 +23072,19 @@ These assert the **exact** wire shapes recovered by reverse engineering
 (`docs/NOTEBOOKLM_PROTOCOL.md`); they do not ‚Äî and cannot ‚Äî prove the service accepts
 them, because it is unreachable.
 
+### `media` (10)
+`reads_duration_streams_size_and_frame_rate`, `reads_display_rotation_from_the_track_matrix`,
+`json_reports_absent_values_as_null_not_zero`, `truncated_file_is_reported_not_guessed`,
+`missing_moov_is_a_warning_and_no_tracks`, `fragmented_mp4_is_flagged`,
+`other_containers_are_named_but_not_parsed`, `sixty_four_bit_box_sizes_are_understood`,
+`absurd_sample_tables_saturate_instead_of_overflowing`, `a_real_encoder_output_is_read_correctly`
+(the committed `sample.mp4`: mp4, 6200 ms, 320√ó240, avc1, 10 fps, 62 samples). The FFmpeg cross-check is in the "Media metadata" section below.
+
 ### `web` (3)
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
 
-## End-to-end HTTP tests (5, real sockets)
+## End-to-end HTTP tests (14, real sockets)
 
 | Test | Proves |
 |---|---|
@@ -22025,6 +23092,9 @@ them, because it is unreachable.
 | `rejects_bad_input_and_dangerous_urls` | empty question 422, no-sources 409, four SSRF URLs 422 `url_rejected`, public URL 501 `url_ingest_unavailable`, bad JSON 400, unknown route 404, hostile upload filename sanitised |
 | `static_app_is_served_over_http` | `/` and `/app.js` served; `/../../Cargo.toml` not served |
 | `imports_office_formats_over_http` | DOCX/PPTX/XLSX upload ‚Üí correct `kind` and locator kind; a DOCX answer carries a `paragraph` citation |
+| `source_guide_quotes_the_source_and_refuses_when_empty` | guide is extractive (`model: null`); headline is a substring of a stored chunk; every summary line resolves to a real chunk + locator; unknown source 404; unextractable source 409 |
+| `chat_style_and_length_are_effective_and_validated` | `settings` echoed; brief ‚Üí 1 citation; detailed shows per-quote source + locator; concise and detailed cite the same passages; unknown style/length ‚Üí 422 and nothing stored |
+| `media_metadata_is_read_without_decoding_frames` | `sample.mp4` ‚Üí mp4, ~6200 ms, avc1 320√ó240 @ 10 fps, `decoded_frames: 0`, `transcript: "not produced"`; Matroska bytes ‚Üí `matroska` with **no** invented tracks; empty body 400; GET 404 |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
 ## UI assertions (29, jsdom + live server)
@@ -22051,6 +23121,7 @@ supported and audio as unsupported ¬∑ responsive breakpoints present ¬∑
 | `tests/fixtures/apk/classes.dex` | `make_apk.py` | DEX 035: 18 strings, 3 class defs, 8 methods, crypto/network/root/URL references |
 | `tests/fixtures/apk/sample.apk` | `make_apk.py` | ZIP of the two above + META-INF, assets, fake arm64 lib |
 | `tests/fixtures/sample.exe` | `make_pe.py` | PE32+ x86-64, real import table (KERNEL32), W+X high-entropy `.evil` section |
+| `tests/fixtures/sample.mp4` | `make_media.py` (records the FFmpeg command) | our own 5,205-byte clip: 320√ó240 avc1, 10 fps, 6.2 s, red‚Üígreen‚Üíblue |
 
 Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/make_ooxml.py && python3 tests/fixtures/make_apk.py && python3 tests/fixtures/make_pe.py`.
 
@@ -22206,6 +23277,46 @@ compiled manifest, DEX inventory + finding categories, PE sections/imports/entro
 ELF identification, APK report assembly, format detection, base64 round-trip, and the HTTP
 endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
 
+## Media metadata (10 unit tests + 1 e2e + 2 UI assertions)
+
+`media` module ‚Äî a hand-written ISO base media (MP4/M4A/MOV) parser. No FFmpeg, no
+`ffprobe`, no codec: it walks the box tree and reads `mvhd`/`tkhd`/`mdhd`/`hdlr`/`stsd`/`stts`.
+
+The same file was read by two independent implementations and they agree:
+`media::inspect(sample.mp4)` ‚Üí container `mp4`, brands `isom/iso2/avc1/mp41`, duration
+**6200 ms**, timescale 1000, track `avc1` 320√ó240, timescale 10240, **62 samples**, 10 fps,
+rotation 0; `ffmpeg -i` on the same bytes ‚Üí `Duration: 00:00:06.20`, `320x240`, `10 fps`,
+`10240 tbn`. `ffprobe` is not available, so ffmpeg's stderr is the second opinion.
+
+* `reads_duration_streams_size_and_frame_rate` ‚Äî a built box tree yields duration, timescale,
+  codec fourcc, sample count, fps derived from `stts`, and 16.16 display size.
+* `reads_display_rotation_from_the_track_matrix` ‚Äî 90/180/270 from the matrix in `tkhd` (and
+  `0` for the identity matrix), not inferred from swapped width/height.
+* `json_reports_absent_values_as_null_not_zero` ‚Äî absent duration/fps/channels serialise as
+  `null`; a missing value never becomes a measured `0`.
+* `truncated_file_is_reported_not_guessed` ‚Äî a file cut mid-box returns what was parsed plus a
+  warning naming the truncation; nothing is inferred past the cut.
+* `missing_moov_is_a_warning_and_no_tracks` ‚Äî metadata that never arrives ‚Üí warning,
+  `duration_ms: null`, zero tracks.
+* `fragmented_mp4_is_flagged` ‚Äî `mvex`/`sidx` present ‚Üí `fragmented: true`, with the warning
+  that sample counts are then only a lower bound.
+* `other_containers_are_named_but_not_parsed` ‚Äî EBML (WebM/Matroska), MPEG-TS sync bytes and
+  `RIFF‚Ä¶AVI ` are named by magic and then **refused** with zero tracks; text is `unknown`.
+* `sixty_four_bit_box_sizes_are_understood` ‚Äî `largesize` boxes parse; a 32-bit reader would
+  mis-walk the file.
+* `absurd_sample_tables_saturate_instead_of_overflowing` ‚Äî `stts` entries of
+  (`u32::MAX` samples, `u32::MAX` delta) would overflow the `u64` multiply; the parser
+  saturates (`u64::MAX`) instead of panicking in a debug build, and a truncated entry list
+  stops at the last complete entry.
+* `a_real_encoder_output_is_read_correctly` ‚Äî the committed fixture, end to end.
+
+Over HTTP: `POST /api/media/inspect?name=‚Ä¶` with the raw file; the response separates what was
+read (`media`) from what was not (`notes.decoded_frames: 0`, `captions: "not read"`,
+`transcript: "not produced"`). Empty body `400 empty_body`; oversized `413 too_large`.
+
+UI: `capabilities discloses the media-metadata scope`, `capabilities marks video ingestion
+unsupported with a reason`.
+
 ## Not covered (honest gaps)
 
 * No real browser engine: CSS layout is asserted at the media-query level only.
@@ -22217,6 +23328,13 @@ endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
   named ranges and shared-formula groups remain unverified.
 * No `.xls`/ODS fixtures at all ‚Äî those formats have no parser here.
 * No streaming test: there is no streaming implementation to test.
+* No decoded pixel, caption or transcript is produced by the product. Frame decoding was used
+  **only** as research tooling on a fixture we encoded ourselves (`docs/reference/VIDEO_RESEARCH.md`);
+  no vision model, no ASR, no authorized third-party footage.
+* Media parsing is MP4-family only; Matroska/WebM, MPEG-TS and AVI are detected and refused, so
+  their durations and codecs are genuinely unknown here rather than merely untested.
+* No corrupted-but-parseable video fixtures (e.g. a valid `moov` with wrong `stco` offsets):
+  we test truncation and absence, not every malformed combination.
 ```
 
 ## `docs/UNKNOWN_AND_LIMITATIONS.md`
@@ -22316,9 +23434,10 @@ bug, or a limitation for a feature.
   (one retrieval path, full provenance, no duplicated citation logic). Direct
   inclusion without conversion is not implemented ‚Äî that is a deliberate scope
   decision (`docs/DECISIONS.md` D14), not an oversight.
-* **Live product, video evidence, ASR/OCR/TTS/LLM, search providers, sharing and roles**
-  remain blocked or unimplemented; see `docs/RESEARCH_BLOCKERS.md` and
-  `docs/reference/FEATURE_MATRIX.md`.
+* **Live product, third-party video evidence, ASR/OCR/TTS/LLM, search providers, sharing
+  and roles** remain blocked or unimplemented; see `docs/RESEARCH_BLOCKERS.md` and
+  `docs/reference/FEATURE_MATRIX.md`. Video *tooling* was exercised on our own clip
+  (`docs/reference/VIDEO_RESEARCH.md`), which is not evidence about any product.
 
 ## Spreadsheet tables (2026-10-31)
 
@@ -22387,6 +23506,36 @@ producers emit is unverified.
   extractive engine; no test claims they do.
 * No streaming: the answer is computed, verified, then returned in one response. There is no
   "stop" button, and none is shown.
+
+## Media metadata (2026-10-31)
+
+What was measured: `crates/forge-core/src/media.rs` parses MP4-family box trees and
+`POST /api/media/inspect` returns duration, per-track codec/kind/language/timescale/duration/
+sample count/fps/display size/rotation/channels/sample rate. Cross-checked against `ffmpeg -i`
+on `tests/fixtures/sample.mp4`, a clip **we** encoded; the numbers agree (6200 ms, 320√ó240,
+10 fps, timescale 10240, 62 samples).
+
+Limits that are real, not hypothetical:
+
+* **MP4 family only.** Matroska/WebM, MPEG-TS and AVI are identified by magic bytes and then
+  refused with a warning. Their durations, codecs and track counts are unknown here ‚Äî the API
+  returns zero tracks rather than a guess.
+* **No pixel format, bitrate or colour information.** Those live in `stsd`'s codec-specific
+  extension and in `btrt` boxes; not parsed. `ffmpeg -i` reports `yuv420p`; Forge does not, and
+  the response does not pretend to.
+* **`fragmented: true` means sample counts are a lower bound.** `moof` runs are not summed.
+* **Rotation comes from the display matrix, not the pixels.** 90/180/270 are read; values that
+  are not a clean right angle are reported as 0 with the limitation recorded, because the UI
+  cannot honour an arbitrary transform.
+* **Video is not a source.** No frame decoding, no caption track reading, no transcription, and
+  in this build no route to any platform to fetch one. `/api/capabilities` says so in the same
+  words, and the inspect response carries `notes.decoded_frames: 0`.
+* **The research tooling is not a dependency.** FFmpeg 7.0.2 was installed from PyPI for this
+  session only; the product never shells out to it. A machine without FFmpeg can still run every
+  test that matters here, because the fixture is committed.
+* **Scene detection is luma-based and was observed to miss a cut.** On our clip the red‚Üígreen
+  transition scores 0.0 while green‚Üíblue scores 0.4 (`VIDEO_RESEARCH.md`). Any future
+  frame-sampling pipeline must not trust `select='gt(scene,‚Ä¶)'` alone.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -26619,10 +27768,11 @@ Statuses: `done` (works + tested) ¬∑ `partial` ¬∑ `planned` ¬∑ `blocked` (enviro
 | SRC-18 | note ‚Üí source conversion | documented ("convert note to source") | **done** | `note_to_source` | e2e |
 | SRC-19 | spreadsheet grid with sheet + A1 cell locators (¬ß10.1) | documented (XLSX: sheet, cell range, formula/value) | **done** | `tables.rs` + `Locator::cell/sheet_row` | 22 unit + e2e + UI |
 | SRC-20 | hidden worksheets stored but never cited | own policy (safety) | **done** | `Table.hidden` | unit |
+| SRC-21 | video/audio **stream metadata** (duration, tracks, codec, fps, size, rotation, language) | documented (¬ß7.12; `ffmpeg -i` on our own fixture) | **partial (honest)** ‚Äî ISO base media parsed by hand; Matroska/MPEG-TS/AVI are named then refused; **no frame decoding, captions or transcript**, and video is not a source | `media.rs`, `POST /api/media/inspect` | 10 unit + 1 e2e + 2 UI |
 | SRC-10 | rename source + labels | documented | **done** | `PATCH /api/sources/:id` | e2e |
 | SRC-11 | images / OCR | documented | blocked | ‚Äî | no OCR engine |
-| SRC-12 | audio ‚Üí transcript | documented | blocked | ‚Äî | no ASR |
-| SRC-13 | YouTube captions | documented | blocked | ‚Äî | no yt-dlp |
+| SRC-12 | audio ‚Üí transcript | documented | blocked | ‚Äî | no ASR; audio *track metadata* is readable (SRC-21) but speech is not |
+| SRC-13 | YouTube captions | documented | blocked | ‚Äî | `yt-dlp` installs, but no route to a platform host and no per-video licence decision |
 | SRC-14 | ePub | documented | planned | ‚Äî | ‚Äî |
 | SRC-15 | Drive / Docs / Sheets | documented | blocked | ‚Äî | OAuth + credentials |
 | SRC-16 | GitHub repo/issues | not in reference | planned | ‚Äî | `api.github.com` reachable |
@@ -26693,7 +27843,7 @@ Every document under `docs/reference/` describes the **reference product**
 | `CHAT_AND_CITATIONS.md` | chat controls, citation behaviour, grounding contract | documented + Forge implementation |
 | `STUDIO_ARTIFACTS.md` | artifact families and their controls | documented; provider-gated in Forge |
 | `OFFICIAL_DOC_INDEX.md` | help-centre pages read, with URL and retrieval date | machine-recorded |
-| `VIDEO_RESEARCH.md` | method for video evidence (no results ‚Äî tools absent) | method only |
+| `VIDEO_RESEARCH.md` | video method **plus measurements of our own fixture** (container cross-check, RGB timeline, contact sheet); no third-party footage, no product evidence | method + own-clip results |
 
 Not created yet, deliberately: `SCREEN_CATALOG.md`, `WORKFLOW_CATALOG.md`,
 `SHARING_AND_PERMISSIONS.md`, `MOBILE_DIFFERENCES.md`, `LIMITS_AND_AVAILABILITY.md`.
@@ -26790,48 +27940,134 @@ the capability page renders that reason next to the row.
 ## `docs/reference/VIDEO_RESEARCH.md`
 
 ```markdown
-# Video research ‚Äî method, and why there are no results
+# Video research ‚Äî what was actually measured
 
-## Status: BLOCKED (no results)
+## Status: PARTIAL ‚Äî tooling observed on our own material; the reference product stays BLOCKED
 
-Required tooling is absent, verified 2026-10-31: `yt-dlp`, `ffmpeg`, `ffprobe`,
-`chromium`, `tesseract`. The allowlist blocks GitHub release downloads, so the binaries
-cannot be side-loaded either. No video was downloaded, sampled, transcribed or viewed.
+Updated 2026-10-31. This file previously said "zero frames, zero transcripts, zero
+timestamps" because no media tooling existed. That changed: `yt-dlp` and a static `ffmpeg`
+are installable from PyPI in this sandbox, and both were run.
 
-**Therefore this file contains zero frames, zero transcripts and zero timestamps.**
-Nothing in it should be cited as an observation of the reference product.
+Two things did **not** change, and they are the ones that matter for the product claim:
 
-## The method, ready to run the moment the tools exist
+1. **No reference-product video was watched.** There is no authorized recording, no route to
+   any platform host, and no permission to download or republish third-party footage. Every
+   row below describes *our own synthetic clip*, not Gemini Notebook or any other product.
+2. **No vision model ran.** Frames were decoded and measured numerically (mean colour, luma
+   statistics, tiling), but nothing in this sandbox can say what a frame *depicts*. There is
+   no captioning in this document, and no screenshot of any product.
 
-`MASTER_FORGE.md` ¬ß5 specifies the pipeline. The checks I would run first, in order:
+So: `VIDEO_OBSERVED` below means "observed in a video we generated and own". It is evidence
+about tooling and method, never about a product's UI.
 
-1. `yt-dlp --version`, `ffprobe -version` ‚Äî confirm the build actually supports
-   `--write-auto-subs`, `-f bv*+ba/b`, and the `tile` filter.
-2. `yt-dlp --skip-download --dump-single-json` ‚Äî metadata before any media, so the
-   licence/authorisation decision happens before bytes move.
-3. `--list-subs` / `--list-formats` ‚Äî record what the extractor *offered*; a missing
-   caption track is a finding, not a reason to write one.
-4. contact sheet: 48 frames over the full duration (`fps=48/duration, tile=6x8`), then
-   1 fps sheets (5√ó5 pages), then scene detection at `gt(scene,0.30)` tuned by result.
-5. targeted 20-second windows at 2 fps around each UI transition found on a sheet.
-6. `ffprobe -show_format -show_streams -show_chapters` for duration, frame rate,
-   rotation, audio streams and chapters.
-7. audio ‚Üí 16 kHz mono WAV for listening; captions are preferred over ASR, and any ASR
-   transcript is labelled machine-generated.
+## Tooling, as executed
 
-## Evidence rules that will apply
+| Tool | Version | Evidence |
+|---|---|---|
+| `yt-dlp` | 2026.10.26 | `python3 -m yt_dlp --version` (installed from the PyPI wheel; 3.2 MB) |
+| `ffmpeg` | 7.0.2-static | `imageio-ffmpeg` wheel's bundled binary (79.8 MB, `chmod +x` needed) |
+| `ffprobe` | **absent** | the `imageio-ffmpeg` build ships `ffmpeg` only; metadata came from `ffmpeg -i` stderr and from our own parser |
+| Filters available | `select`, `tile`, `fps`, `scale`, `showinfo`, `signalstats`, `metadata` | `ffmpeg -filters` |
+| Encoders available | `libx264`, `libvpx`, `dav1d`, `freetype`, `ass` | `ffmpeg -encoders` |
+
+Install recipe (ephemeral sandbox; nothing is added to the product's dependency list):
+
+```bash
+python3 -m pip install --target=/tmp/mediapy yt-dlp imageio-ffmpeg
+FF=$(PYTHONPATH=/tmp/mediapy python3 -c "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())")
+chmod +x "$FF"
+```
+
+## The clip
+
+`tests/fixtures/sample.mp4` ‚Äî 5,205 bytes, SHA-256
+`7550f6fb095d4c31c56a0edd080861729aa6d50062c3e477abbc39b8eac8e308`. Generated by us with the
+command recorded in `tests/fixtures/make_media.py`: three 320√ó240 colour sources concatenated,
+`-c:v libx264 -pix_fmt yuv420p -g 10 -r 10`. Contents: **red ‚Üí green ‚Üí blue**.
+
+## Container metadata: our parser vs FFmpeg
+
+Both were run on the same file. Independent implementations agreeing is the reason to trust
+either.
+
+| Field | `media::inspect` (hand-written Rust) | `ffmpeg -i` stderr |
+|---|---|---|
+| container | `mp4`, brands `isom/iso2/avc1/mp41` | `h264 (High) (avc1 / 0x31637661)` |
+| duration | `6200 ms` (mvhd timescale 1000) | `Duration: 00:00:06.20` |
+| video timescale | `10240` | `10240 tbn` |
+| frame rate | `10.0 fps` (62 samples √∑ 6.2 s) | `10 fps, 10 tbr` |
+| display size | `320√ó240` (tkhd 16.16 fixed point) | `320x240 [SAR 1:1 DAR 4:3]` |
+| pixel format | not parsed (stsd only names the codec) | `yuv420p(progressive)` |
+
+Timeline, measured by decoding frames and averaging RGB (not by trusting the container):
+
+| Time | Mean RGB | Interpretation |
+|---|---|---|
+| 0.2 s, 1.0 s | (253, 0, 0) | red segment |
+| 2.2 s, 3.0 s | (0, 127, 0) | green segment |
+| 4.2 s, 5.0 s, 6.0 s | (0, 0, 254) | blue segment |
+
+The cuts land at frame 22 (‚âà2.2 s) and frame 42 (‚âà4.2 s), not at a clean 2.0/4.0 s: concat
+timing is not sample-accurate. A research pipeline that assumes cut times from the edit list
+would be wrong by up to a frame here; the decoded frame index is the reliable anchor.
+
+## Contact sheet ‚Äî the one image we looked at
+
+```bash
+ffmpeg -i sample.mp4 -vf "fps=0.5,scale=160:-1,tile=3x1" -frames:v 1 /tmp/sheet.png
+```
+
+Result: a single 480√ó80 PNG (1,274 bytes) containing three 160√ó80 tiles ‚Äî **solid red, solid
+green, solid blue**, left to right. That is the whole of the visual evidence in this repository
+for video. It proves the sampling ‚Üí scaling ‚Üí tiling chain works; it says nothing about any
+product.
+
+## Scene detection has a real trap, and we hit it
+
+```bash
+ffmpeg -i sample.mp4 -vf "select='gt(scene,0.3)'" -fps_mode vfr /tmp/scenes/s-%03d.png
+```
+
+Expected: two PNGs (two colour cuts). **Observed: one PNG**, at `pts_time 4.2`.
+
+Threshold sweep, all on the same file:
+
+| threshold | frames selected |
+|---|---|
+| 0.05 | 1 |
+| 0.10 | 1 |
+| 0.20 | 1 |
+| 0.30 | 1 |
+| 0.50 | 0 |
+
+Cause, measured with `signalstats`: the red frame and the green frame have **identical luma**
+(`YAVG=81` for both); the blue frame has `YAVG=41`. FFmpeg's `scene` score is luma-driven, so
+the red‚Üígreen cut scores `0.000000` while green‚Üíblue scores `0.400000`.
+
+Consequence for the method (¬ß5 of the spec): scene detection alone cannot be trusted to find
+screen transitions. Two UI states of similar brightness but different hue (dark theme ‚Üí dark
+caption bar, a modal over a dimmed page) will be missed. A screen-recording pipeline needs a
+colour-histogram or per-pixel difference check in addition to `scene`, and every candidate cut
+must be confirmed by looking at the frame pair, not by trusting the filter's count.
+
+## What is still blocked, and why
+
+| Goal | Status | Blocker |
+|---|---|---|
+| Watch a reference-product walkthrough | BLOCKED | no authorized copy; platform hosts unreachable from the sandbox; public visibility is not permission to republish |
+| Search YouTube for relevant videos | BLOCKED | `yt-dlp` is installed, but downloading needs a reachable platform host and a per-source licence decision |
+| Caption / transcribe audio | BLOCKED | no ASR engine offline (`whisper`, `vosk` absent); FFmpeg does not transcribe |
+| Describe what a frame shows | BLOCKED | no vision model available locally or through a reachable provider |
+| Read embedded subtitle tracks | BLOCKED | our parser reads the MP4 box tree; `sbtl`/`tx3g` handling is not implemented |
+| Parse WebM/Matroska metadata | BLOCKED | container detected by magic, fields not parsed (documented in `media.rs`) |
+| Decode frames **in the product** | NOT PLANNED | `crates/forge-core` has no codec; the product's media support is metadata-only by design (`DECISIONS.md` D18) |
+
+## Evidence rules this document follows
 
 * A contact sheet proves only the sampled frames; it is not proof of every frame.
-* A frame caption is not a verified user action; clicks and keystrokes are invisible.
-* Every table row needs `Time | Image evidence | Screen | Action | Observed result |
-  Confidence`, with the image path relative to the repository.
-* No video is downloaded unless it is the user's own, licensed for it, or permitted by
-  the platform's terms. Public visibility is not permission to republish.
-
-## Unblock
-
-`pip install --user yt-dlp` (or an isolated venv) plus a static FFmpeg build in an
-isolated prefix. Then this document becomes a result table instead of a plan.
+* A decoded frame is not a user action; clicks and keystrokes are invisible.
+* Numbers above are reproducible from the committed fixture with the commands shown.
+* Nothing here is a claim about another product, and no other product's video was downloaded.
 ```
 
 ## `masterprompt.md`
@@ -29331,6 +30567,11 @@ async function main() {
     /web_fetch/i.test(capsText) && /curl/i.test(capsText));
   check("informational capability rows are not shown as feature claims",
     !/\binfo\b.*configured/i.test(capsText));
+  check("capabilities discloses the media-metadata scope",
+    /media/i.test(capsText) && /\/api\/media\/inspect/.test(capsText) && /No frame decoding/i.test(capsText),
+    capsText.slice(0, 300));
+  check("capabilities marks video ingestion unsupported with a reason",
+    /video/i.test(capsText) && /authorized extractor/i.test(capsText));
   check("capabilities states the binary-analysis scope",
     /binary_analysis/.test(capsText) && /apk java decompilation/i.test(capsText) && /disassembly/i.test(capsText));
   const fileInput = window.document.querySelector('input[type="file"]');

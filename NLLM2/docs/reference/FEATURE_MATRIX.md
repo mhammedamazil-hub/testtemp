@@ -25,10 +25,11 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-18 | note → source conversion | documented ("convert note to source") | **done** | `note_to_source` | e2e |
 | SRC-19 | spreadsheet grid with sheet + A1 cell locators (§10.1) | documented (XLSX: sheet, cell range, formula/value) | **done** | `tables.rs` + `Locator::cell/sheet_row` | 22 unit + e2e + UI |
 | SRC-20 | hidden worksheets stored but never cited | own policy (safety) | **done** | `Table.hidden` | unit |
+| SRC-21 | video/audio **stream metadata** (duration, tracks, codec, fps, size, rotation, language) | documented (§7.12; `ffmpeg -i` on our own fixture) | **partial (honest)** — ISO base media parsed by hand; Matroska/MPEG-TS/AVI are named then refused; **no frame decoding, captions or transcript**, and video is not a source | `media.rs`, `POST /api/media/inspect` | 10 unit + 1 e2e + 2 UI |
 | SRC-10 | rename source + labels | documented | **done** | `PATCH /api/sources/:id` | e2e |
 | SRC-11 | images / OCR | documented | blocked | — | no OCR engine |
-| SRC-12 | audio → transcript | documented | blocked | — | no ASR |
-| SRC-13 | YouTube captions | documented | blocked | — | no yt-dlp |
+| SRC-12 | audio → transcript | documented | blocked | — | no ASR; audio *track metadata* is readable (SRC-21) but speech is not |
+| SRC-13 | YouTube captions | documented | blocked | — | `yt-dlp` installs, but no route to a platform host and no per-video licence decision |
 | SRC-14 | ePub | documented | planned | — | — |
 | SRC-15 | Drive / Docs / Sheets | documented | blocked | — | OAuth + credentials |
 | SRC-16 | GitHub repo/issues | not in reference | planned | — | `api.github.com` reachable |

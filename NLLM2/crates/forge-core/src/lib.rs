@@ -14,6 +14,7 @@ pub mod http;
 pub mod inflate;
 pub mod ingest;
 pub mod json;
+pub mod media;
 pub mod notebooklm;
 pub mod providers;
 pub mod retrieve;

@@ -285,3 +285,34 @@ retrieval knob wearing a presentation label. (c) Accepting any string and ignori
 **Consequences.** With a reachable provider, the citation budget is forwarded and the style
 vocabulary does not apply (documented in `UNKNOWN_AND_LIMITATIONS.md`); the provider path is
 marked partial in the feature matrix. Streaming remains unimplemented and is not claimed.
+
+## D18 — Media support is container metadata; frames are research tooling, not product code
+
+**Date.** 2026-10-31. **Background.** §7.12 asks for video as a source and for stream metadata
+including duration, frame rate, codec, pixel format, audio streams, rotation and corruption.
+`ffprobe` is unavailable, crates.io is unreachable, and a codec in the product would mean
+shipping (or shelling out to) FFmpeg.
+
+**Chosen.** A hand-written ISO base media (MP4/M4A/MOV) box parser in `media.rs`, exposed as
+`POST /api/media/inspect`: duration and timescale from `mvhd`, per-track `tkhd`/`mdhd`/`hdlr`/
+`stsd`/`stts` giving id, kind, codec, language, timescale, duration, sample count, frame rate,
+display size, rotation matrix, channels and sample rate; truncation, missing `moov`, fragmented
+`MP4` and zero-duration files are reported as warnings. Unknown values are `null`, never `0`.
+Matroska/WebM, MPEG-TS and AVI are *named by magic bytes and then refused* with a warning
+rather than half-parsed.
+
+Frame decoding stays **outside** the product: it was done with a static FFmpeg during research
+(`tests/fixtures/make_media.py`, `VIDEO_RESEARCH.md`), and its results are labelled as evidence
+about our own fixture. The `/api/media/inspect` response states `decoded_frames: 0`,
+`captions: "not read"`, `transcript: "not produced"` so a caller cannot mistake metadata for
+understanding.
+
+**Rejected.** (a) Shelling out to `ffmpeg`/`ffprobe` from the product — an undeclared runtime
+dependency that is absent on most machines, and a subprocess boundary we would have to harden.
+(b) Reporting a pixel format or a bitrate we did not read, because other tools do. (c) Parsing
+WebM "a bit" — half a container parser produces confident nonsense.
+
+**Consequences.** Video cannot be ingested as a source; `/api/capabilities` says
+`video: unsupported` with the reason. Frame-based research stays possible and reproducible via
+the committed commands, and its limits (no vision model, no authorized footage) are stated in
+`VIDEO_RESEARCH.md` rather than papered over.

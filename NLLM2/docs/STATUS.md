@@ -1,6 +1,6 @@
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length).
+Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length, media metadata).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -19,13 +19,14 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **186 passing, 0 failing** (26 `bininspect` + 142 lib + 13 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **70 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **197 passing, 0 failing** (26 `bininspect` + 152 lib + 14 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **72 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
 | Chat style / length | `style` (evidence · concise · detailed) and `length` (brief · standard · thorough = 1/2/4 citations) are validated, echoed back, and change the rendered answer without ever changing which passages are cited | `grounded::AnswerOptions` + e2e `chat_style_and_length_are_effective_and_validated` |
 | Source Guide | per-source orientation: verbatim quoted headline + summary with locators, recurring terms (incl. two-word phrases), real outline (sections/sheets), suggested questions | `guide` (8 tests) + e2e `source_guide_quotes_the_source_and_refuses_when_empty` + UI smoke (9 assertions) |
+| Media metadata | MP4/M4A/MOV box tree parsed by hand: duration, per-track kind/codec/language/timescale/duration/sample count/fps/display size/rotation/channels/sample rate; truncation, missing `moov` and fragmented files produce warnings; unknown values are `null`, never `0` | `media` (10 tests) + e2e `media_metadata_is_read_without_decoding_frames`; cross-checked against `ffmpeg -i` on a fixture we encoded |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
@@ -81,7 +82,7 @@ total          186
 |---|---|---|
 | URL / YouTube / Instagram / GitHub ingestion | build has no TLS client; sandbox has no outbound route to arbitrary hosts | `POST /sources/url` validates the URL (SSRF guard) then returns **501 `url_ingest_unavailable`** with instructions |
 | Remote LLM providers | HTTPS unavailable; keys are accepted and stored but a provider reports `available:false` | chat stays on the extractive engine and returns `engine_note` explaining the fallback |
-| Audio/video overviews, transcription | no TTS/ASR binary in the image (`espeak`, `ffmpeg` absent) | `audio_overview` is `unsupported`; `audio_script` (**text**) is generated instead |
+| Audio/video overviews, transcription | no TTS/ASR engine reachable from the product (FFmpeg is used only as research tooling, installed from PyPI during this session) | `audio_overview` is `unsupported`; `audio_script` (**text**) is generated instead; media **metadata** is readable (row above) but frames, captions and speech are not |
 | Image OCR | `tesseract` absent | images inside DOCX are counted in warnings, not read |
 | Semantic/vector retrieval | no embedding model offline | lexical BM25 only; documented, not disguised |
 | Multi-user auth | out of scope for a single-operator notebook | bind to `127.0.0.1` or a private network |
@@ -96,8 +97,9 @@ total          186
 
 ## Immediate next steps
 
-1. Wire an HTTPS client (requires a TLS-capable toolchain/route) to switch URL
-   ingestion and remote providers from "configured but unavailable" to working.
+1. Streaming answers + stop (CHAT-06) — the responder is buffered today.
 2. EPUB ingestion — the ZIP reader already exists; needs XHTML container mapping.
 3. Conversation export as Markdown; artifact re-generation on source change.
-4. Optional: local embedding index once a model can be shipped offline.
+4. Wire an HTTPS client (requires a TLS-capable toolchain/route) to switch URL
+   ingestion and remote providers from "configured but unavailable" to working.
+5. Optional: local embedding index once a model can be shipped offline.

@@ -272,6 +272,11 @@ async function main() {
     /web_fetch/i.test(capsText) && /curl/i.test(capsText));
   check("informational capability rows are not shown as feature claims",
     !/\binfo\b.*configured/i.test(capsText));
+  check("capabilities discloses the media-metadata scope",
+    /media/i.test(capsText) && /\/api\/media\/inspect/.test(capsText) && /No frame decoding/i.test(capsText),
+    capsText.slice(0, 300));
+  check("capabilities marks video ingestion unsupported with a reason",
+    /video/i.test(capsText) && /authorized extractor/i.test(capsText));
   check("capabilities states the binary-analysis scope",
     /binary_analysis/.test(capsText) && /apk java decompilation/i.test(capsText) && /disassembly/i.test(capsText));
   const fileInput = window.document.querySelector('input[type="file"]');

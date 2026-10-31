@@ -92,9 +92,10 @@ bug, or a limitation for a feature.
   (one retrieval path, full provenance, no duplicated citation logic). Direct
   inclusion without conversion is not implemented — that is a deliberate scope
   decision (`docs/DECISIONS.md` D14), not an oversight.
-* **Live product, video evidence, ASR/OCR/TTS/LLM, search providers, sharing and roles**
-  remain blocked or unimplemented; see `docs/RESEARCH_BLOCKERS.md` and
-  `docs/reference/FEATURE_MATRIX.md`.
+* **Live product, third-party video evidence, ASR/OCR/TTS/LLM, search providers, sharing
+  and roles** remain blocked or unimplemented; see `docs/RESEARCH_BLOCKERS.md` and
+  `docs/reference/FEATURE_MATRIX.md`. Video *tooling* was exercised on our own clip
+  (`docs/reference/VIDEO_RESEARCH.md`), which is not evidence about any product.
 
 ## Spreadsheet tables (2026-10-31)
 
@@ -163,3 +164,33 @@ producers emit is unverified.
   extractive engine; no test claims they do.
 * No streaming: the answer is computed, verified, then returned in one response. There is no
   "stop" button, and none is shown.
+
+## Media metadata (2026-10-31)
+
+What was measured: `crates/forge-core/src/media.rs` parses MP4-family box trees and
+`POST /api/media/inspect` returns duration, per-track codec/kind/language/timescale/duration/
+sample count/fps/display size/rotation/channels/sample rate. Cross-checked against `ffmpeg -i`
+on `tests/fixtures/sample.mp4`, a clip **we** encoded; the numbers agree (6200 ms, 320×240,
+10 fps, timescale 10240, 62 samples).
+
+Limits that are real, not hypothetical:
+
+* **MP4 family only.** Matroska/WebM, MPEG-TS and AVI are identified by magic bytes and then
+  refused with a warning. Their durations, codecs and track counts are unknown here — the API
+  returns zero tracks rather than a guess.
+* **No pixel format, bitrate or colour information.** Those live in `stsd`'s codec-specific
+  extension and in `btrt` boxes; not parsed. `ffmpeg -i` reports `yuv420p`; Forge does not, and
+  the response does not pretend to.
+* **`fragmented: true` means sample counts are a lower bound.** `moof` runs are not summed.
+* **Rotation comes from the display matrix, not the pixels.** 90/180/270 are read; values that
+  are not a clean right angle are reported as 0 with the limitation recorded, because the UI
+  cannot honour an arbitrary transform.
+* **Video is not a source.** No frame decoding, no caption track reading, no transcription, and
+  in this build no route to any platform to fetch one. `/api/capabilities` says so in the same
+  words, and the inspect response carries `notes.decoded_frames: 0`.
+* **The research tooling is not a dependency.** FFmpeg 7.0.2 was installed from PyPI for this
+  session only; the product never shells out to it. A machine without FFmpeg can still run every
+  test that matters here, because the fixture is committed.
+* **Scene detection is luma-based and was observed to miss a cut.** On our clip the red→green
+  transition scores 0.0 while green→blue scores 0.4 (`VIDEO_RESEARCH.md`). Any future
+  frame-sampling pipeline must not trust `select='gt(scene,…)'` alone.

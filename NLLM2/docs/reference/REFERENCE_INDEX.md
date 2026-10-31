@@ -11,7 +11,7 @@ Every document under `docs/reference/` describes the **reference product**
 | `CHAT_AND_CITATIONS.md` | chat controls, citation behaviour, grounding contract | documented + Forge implementation |
 | `STUDIO_ARTIFACTS.md` | artifact families and their controls | documented; provider-gated in Forge |
 | `OFFICIAL_DOC_INDEX.md` | help-centre pages read, with URL and retrieval date | machine-recorded |
-| `VIDEO_RESEARCH.md` | method for video evidence (no results — tools absent) | method only |
+| `VIDEO_RESEARCH.md` | video method **plus measurements of our own fixture** (container cross-check, RGB timeline, contact sheet); no third-party footage, no product evidence | method + own-clip results |
 
 Not created yet, deliberately: `SCREEN_CATALOG.md`, `WORKFLOW_CATALOG.md`,
 `SHARING_AND_PERMISSIONS.md`, `MOBILE_DIFFERENCES.md`, `LIMITS_AND_AVAILABILITY.md`.

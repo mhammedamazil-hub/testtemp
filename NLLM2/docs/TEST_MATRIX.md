@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 186 tests: 142 lib + 13 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 197 tests: 152 lib + 14 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 53 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 72 assertions
 ```
 
-## Unit tests (142) — exact names from `cargo test --lib -- --list`
+## Unit tests (152) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -100,11 +100,19 @@ These assert the **exact** wire shapes recovered by reverse engineering
 (`docs/NOTEBOOKLM_PROTOCOL.md`); they do not — and cannot — prove the service accepts
 them, because it is unreachable.
 
+### `media` (10)
+`reads_duration_streams_size_and_frame_rate`, `reads_display_rotation_from_the_track_matrix`,
+`json_reports_absent_values_as_null_not_zero`, `truncated_file_is_reported_not_guessed`,
+`missing_moov_is_a_warning_and_no_tracks`, `fragmented_mp4_is_flagged`,
+`other_containers_are_named_but_not_parsed`, `sixty_four_bit_box_sizes_are_understood`,
+`absurd_sample_tables_saturate_instead_of_overflowing`, `a_real_encoder_output_is_read_correctly`
+(the committed `sample.mp4`: mp4, 6200 ms, 320×240, avc1, 10 fps, 62 samples). The FFmpeg cross-check is in the "Media metadata" section below.
+
 ### `web` (3)
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
 
-## End-to-end HTTP tests (5, real sockets)
+## End-to-end HTTP tests (14, real sockets)
 
 | Test | Proves |
 |---|---|
@@ -112,6 +120,9 @@ them, because it is unreachable.
 | `rejects_bad_input_and_dangerous_urls` | empty question 422, no-sources 409, four SSRF URLs 422 `url_rejected`, public URL 501 `url_ingest_unavailable`, bad JSON 400, unknown route 404, hostile upload filename sanitised |
 | `static_app_is_served_over_http` | `/` and `/app.js` served; `/../../Cargo.toml` not served |
 | `imports_office_formats_over_http` | DOCX/PPTX/XLSX upload → correct `kind` and locator kind; a DOCX answer carries a `paragraph` citation |
+| `source_guide_quotes_the_source_and_refuses_when_empty` | guide is extractive (`model: null`); headline is a substring of a stored chunk; every summary line resolves to a real chunk + locator; unknown source 404; unextractable source 409 |
+| `chat_style_and_length_are_effective_and_validated` | `settings` echoed; brief → 1 citation; detailed shows per-quote source + locator; concise and detailed cite the same passages; unknown style/length → 422 and nothing stored |
+| `media_metadata_is_read_without_decoding_frames` | `sample.mp4` → mp4, ~6200 ms, avc1 320×240 @ 10 fps, `decoded_frames: 0`, `transcript: "not produced"`; Matroska bytes → `matroska` with **no** invented tracks; empty body 400; GET 404 |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
 ## UI assertions (29, jsdom + live server)
@@ -138,6 +149,7 @@ supported and audio as unsupported · responsive breakpoints present ·
 | `tests/fixtures/apk/classes.dex` | `make_apk.py` | DEX 035: 18 strings, 3 class defs, 8 methods, crypto/network/root/URL references |
 | `tests/fixtures/apk/sample.apk` | `make_apk.py` | ZIP of the two above + META-INF, assets, fake arm64 lib |
 | `tests/fixtures/sample.exe` | `make_pe.py` | PE32+ x86-64, real import table (KERNEL32), W+X high-entropy `.evil` section |
+| `tests/fixtures/sample.mp4` | `make_media.py` (records the FFmpeg command) | our own 5,205-byte clip: 320×240 avc1, 10 fps, 6.2 s, red→green→blue |
 
 Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/make_ooxml.py && python3 tests/fixtures/make_apk.py && python3 tests/fixtures/make_pe.py`.
 
@@ -293,6 +305,46 @@ compiled manifest, DEX inventory + finding categories, PE sections/imports/entro
 ELF identification, APK report assembly, format detection, base64 round-trip, and the HTTP
 endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
 
+## Media metadata (10 unit tests + 1 e2e + 2 UI assertions)
+
+`media` module — a hand-written ISO base media (MP4/M4A/MOV) parser. No FFmpeg, no
+`ffprobe`, no codec: it walks the box tree and reads `mvhd`/`tkhd`/`mdhd`/`hdlr`/`stsd`/`stts`.
+
+The same file was read by two independent implementations and they agree:
+`media::inspect(sample.mp4)` → container `mp4`, brands `isom/iso2/avc1/mp41`, duration
+**6200 ms**, timescale 1000, track `avc1` 320×240, timescale 10240, **62 samples**, 10 fps,
+rotation 0; `ffmpeg -i` on the same bytes → `Duration: 00:00:06.20`, `320x240`, `10 fps`,
+`10240 tbn`. `ffprobe` is not available, so ffmpeg's stderr is the second opinion.
+
+* `reads_duration_streams_size_and_frame_rate` — a built box tree yields duration, timescale,
+  codec fourcc, sample count, fps derived from `stts`, and 16.16 display size.
+* `reads_display_rotation_from_the_track_matrix` — 90/180/270 from the matrix in `tkhd` (and
+  `0` for the identity matrix), not inferred from swapped width/height.
+* `json_reports_absent_values_as_null_not_zero` — absent duration/fps/channels serialise as
+  `null`; a missing value never becomes a measured `0`.
+* `truncated_file_is_reported_not_guessed` — a file cut mid-box returns what was parsed plus a
+  warning naming the truncation; nothing is inferred past the cut.
+* `missing_moov_is_a_warning_and_no_tracks` — metadata that never arrives → warning,
+  `duration_ms: null`, zero tracks.
+* `fragmented_mp4_is_flagged` — `mvex`/`sidx` present → `fragmented: true`, with the warning
+  that sample counts are then only a lower bound.
+* `other_containers_are_named_but_not_parsed` — EBML (WebM/Matroska), MPEG-TS sync bytes and
+  `RIFF…AVI ` are named by magic and then **refused** with zero tracks; text is `unknown`.
+* `sixty_four_bit_box_sizes_are_understood` — `largesize` boxes parse; a 32-bit reader would
+  mis-walk the file.
+* `absurd_sample_tables_saturate_instead_of_overflowing` — `stts` entries of
+  (`u32::MAX` samples, `u32::MAX` delta) would overflow the `u64` multiply; the parser
+  saturates (`u64::MAX`) instead of panicking in a debug build, and a truncated entry list
+  stops at the last complete entry.
+* `a_real_encoder_output_is_read_correctly` — the committed fixture, end to end.
+
+Over HTTP: `POST /api/media/inspect?name=…` with the raw file; the response separates what was
+read (`media`) from what was not (`notes.decoded_frames: 0`, `captions: "not read"`,
+`transcript: "not produced"`). Empty body `400 empty_body`; oversized `413 too_large`.
+
+UI: `capabilities discloses the media-metadata scope`, `capabilities marks video ingestion
+unsupported with a reason`.
+
 ## Not covered (honest gaps)
 
 * No real browser engine: CSS layout is asserted at the media-query level only.
@@ -304,3 +356,10 @@ endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
   named ranges and shared-formula groups remain unverified.
 * No `.xls`/ODS fixtures at all — those formats have no parser here.
 * No streaming test: there is no streaming implementation to test.
+* No decoded pixel, caption or transcript is produced by the product. Frame decoding was used
+  **only** as research tooling on a fixture we encoded ourselves (`docs/reference/VIDEO_RESEARCH.md`);
+  no vision model, no ASR, no authorized third-party footage.
+* Media parsing is MP4-family only; Matroska/WebM, MPEG-TS and AVI are detected and refused, so
+  their durations and codecs are genuinely unknown here rather than merely untested.
+* No corrupted-but-parseable video fixtures (e.g. a valid `moov` with wrong `stco` offsets):
+  we test truncation and absence, not every malformed combination.

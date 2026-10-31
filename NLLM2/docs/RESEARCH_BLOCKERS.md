@@ -23,26 +23,30 @@ extended to the product origin.
 Every reference behaviour there is `OFFICIAL_DOCUMENTED`, `CODE_CORROBORATED`, or
 explicitly `INFERRED`.
 
-## 2. Video research (yt-dlp / FFmpeg) — BLOCKED
+## 2. Video research — PARTIAL (tooling unblocked, footage still BLOCKED)
 
-| Tool | Status |
+| Tool | Status 2026-10-31 |
 |---|---|
-| `yt-dlp` | absent |
-| `ffmpeg` | absent |
-| `ffprobe` | absent |
+| `yt-dlp` | **installed** 2026.10.26 from the PyPI wheel |
+| `ffmpeg` | **installed** 7.0.2 static (`imageio-ffmpeg` wheel; needs `chmod +x`) |
+| `ffprobe` | absent (that wheel ships `ffmpeg` only) |
 | `chromium` | absent |
 | `tesseract` | absent |
 
-No package manager route is available for arbitrary packages in this image, and the
-allowlist does not include GitHub release assets (`codeload`/`objects.githubusercontent`
-both fail), so the binaries cannot be fetched either. `MASTER_FORGE.md` §5 explicitly
-forbids bypassing platform protections and installing globally in a restricted sandbox.
+The earlier entry here said no package route existed. That was wrong in one direction:
+**PyPI is reachable** even though crates.io and GitHub release assets are not, so
+`pip install --target=/tmp/mediapy yt-dlp imageio-ffmpeg` works.
 
-**Unblock:** install `yt-dlp` + `ffmpeg` into an isolated prefix, or supply an
-authorised recording.
+What is still blocked is the evidence that matters: there is no authorized recording, no
+route to any platform host, and no permission to download or republish third-party footage.
+So `docs/reference/VIDEO_RESEARCH.md` now contains measurements of a clip **we generated**
+(container metadata cross-checked against `ffmpeg -i`, mean-RGB timelines, a contact sheet)
+and an explicit statement that none of it is evidence about another product. It records one
+reusable finding: FFmpeg's `scene` filter is luma-based and missed a red→green cut on our own
+clip, so cut detection cannot rely on it.
 
-**Consequence:** `docs/reference/VIDEO_RESEARCH.md` contains no frames, no transcripts
-and no timestamps, and says so. It is a specification of the *method*, not a result.
+**Consequence:** no video row in the feature matrix may be labelled `VIDEO_OBSERVED` about a
+reference product. The label is used only for our fixture, and the matrix says so.
 
 ## 3. Broad web research / search providers — BLOCKED
 
