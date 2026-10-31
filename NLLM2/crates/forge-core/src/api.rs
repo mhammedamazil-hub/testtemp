@@ -104,6 +104,7 @@ impl Api {
             ("GET", ["api", "notebooks", id, "notes"]) => Ok(ok(self.list_notes(id))),
             ("PATCH", ["api", "notes", nid]) => self.update_note(nid, req),
             ("DELETE", ["api", "notes", nid]) => Ok(self.delete_note(nid)),
+            ("POST", ["api", "notes", nid, "to-source"]) => self.note_to_source(nid),
             ("POST", ["api", "notebooks", id, "artifacts"]) => self.create_artifact(id, req),
             ("GET", ["api", "notebooks", id, "artifacts"]) => Ok(ok(self.list_artifacts(id))),
             ("GET", ["api", "artifacts", aid]) => Ok(self.get_artifact(aid)),
@@ -631,6 +632,7 @@ impl Api {
                 content_type: fetched.media_type(),
                 redirects: fetched.redirects.len(),
             }),
+            BTreeMap::new(),
             nb,
             &title,
             kind,
@@ -673,12 +675,13 @@ impl Api {
         bytes: &[u8],
         _mode: &str,
     ) -> Result<Response, Response> {
-        self.ingest_source(None, nb, title, kind, origin, bytes)
+        self.ingest_source(None, BTreeMap::new(), nb, title, kind, origin, bytes)
     }
 
     fn ingest_source(
         &self,
         fetched: Option<FetchedMeta>,
+        extra_meta: BTreeMap<String, String>,
         nb: &str,
         title: &str,
         kind: &str,
@@ -760,6 +763,9 @@ impl Api {
             ..Default::default()
         };
         apply_fetch_meta(&mut source, &fetched);
+        for (k, v) in &extra_meta {
+            source.meta.insert(k.clone(), v.clone());
+        }
         let chunks: Vec<Chunk> = parsed
             .blocks
             .into_iter()
@@ -792,10 +798,15 @@ impl Api {
 
         let fetched_url = fetched.as_ref().map(|f| f.canonical_url.clone()).unwrap_or_default();
         let fetched_status = fetched.as_ref().map(|f| f.status as u64).unwrap_or(0);
+        let mut meta_json = BTreeMap::new();
+        for (k, v) in &extra_meta {
+            meta_json.insert(k.clone(), Value::from(v.as_str()));
+        }
         Ok(created(obj! {
             "source_id" => source_id.clone(),
             "title" => title,
             "kind" => kind,
+            "meta" => Value::Obj(meta_json),
             "url" => fetched_url,
             "http_status" => fetched_status,
             "status" => "ready",
@@ -1064,6 +1075,55 @@ impl Api {
     }
 
     // --------------------------------------------------------- artifacts
+    /// Turn a note into a source so it can be selected for chat and artifacts.
+    ///
+    /// The reference product lists notes among the sources that participate in Q&A;
+    /// Forge implements that by conversion rather than by a second retrieval path, so
+    /// a note and a pasted source behave identically (citations, viewer, export).
+    /// Converting twice is refused rather than silently duplicating.
+    fn note_to_source(&self, nid: &str) -> Result<Response, Response> {
+        let note = self
+            .store
+            .read(|db| db.notes.iter().find(|n| n.id == nid).cloned());
+        let Some(note) = note else {
+            return Err(err(404, "not_found", "note not found"));
+        };
+        if note.body.trim().is_empty() {
+            return Err(err(422, "empty_note", "the note has no content to convert"));
+        }
+        let already = self.store.read(|db| {
+            db.sources
+                .iter()
+                .find(|s| s.meta_of("converted_from") == note.id)
+                .map(|s| (s.id.clone(), s.title.clone()))
+        });
+        if let Some((sid, title)) = already {
+            return Err(err(
+                409,
+                "already_a_source",
+                &format!("this note is already the source \"{}\" ({})", title, sid),
+            ));
+        }
+        let title = if note.title.trim().is_empty() {
+            format!("Note from {}", &note.updated_at.chars().take(10).collect::<String>())
+        } else {
+            note.title.clone()
+        };
+        let mut meta = BTreeMap::new();
+        meta.insert("converted_from".to_string(), note.id.clone());
+        meta.insert("converted_at".to_string(), now_iso());
+        let resp = self.ingest_source(
+            None,
+            meta,
+            &note.notebook_id,
+            &clip(&title, 120),
+            "text",
+            "note",
+            note.body.as_bytes(),
+        )?;
+        Ok(resp)
+    }
+
     fn create_artifact(&self, nb: &str, req: &Request) -> Result<Response, Response> {
         let body = parse_body(req)?;
         let kind = body.str_of("kind").unwrap_or("").to_string();

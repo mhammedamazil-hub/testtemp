@@ -168,3 +168,25 @@ Old citations are not silently repointed at new text.
 
 **Rejected.** Auto-regenerating artifacts (destroys evidence provenance); deleting stale
 artifacts (destroys user work).
+
+## D14 — Notes join the evidence set by conversion, not by a second retrieval path
+
+**Date.** 2026-10-31. **Background.** The reference product lists notes among the sources
+that can be used in Q&A, and also supports "convert note to source".
+
+**Chosen.** `POST /api/notes/:id/to-source` copies the note body into a normal `Source`
+with `origin=note` and `meta.converted_from=<note id>`. From that moment the note is
+indistinguishable from any other source: same chunking, same citations, same viewer, same
+export, same staleness rules. Re-converting is refused (`409 already_a_source`) rather
+than creating a second copy.
+
+**Rejected.** A separate "notes as context" retrieval path — it would need its own
+citation rendering, its own viewer, its own locator semantics, and would drift from the
+source path in exactly the way that produces wrong citations.
+
+**Consequences.** Selecting a note for chat is a two-step action (convert, then tick it).
+The conversion is visible in the UI ("use as source") and in the API. Deleting the note
+afterwards does not delete the evidence, which is stated in the test.
+
+**Revisit when** direct note selection is added: it should reuse `to-source` internally
+(lazily converting), so there is still exactly one retrieval path.

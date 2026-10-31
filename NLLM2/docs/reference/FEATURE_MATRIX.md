@@ -22,6 +22,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-07 | PDF served over a URL | documented | done | `Fetched::ingest_kind` | unit |
 | SRC-08 | duplicate URL refused, names the original | inferred (sane default) | done | `add_url_source` | e2e |
 | SRC-09 | source refresh / sync | documented ("Click to sync"; outputs do not change) | **done** | `refresh_source` | e2e |
+| SRC-18 | note → source conversion | documented ("convert note to source") | **done** | `note_to_source` | e2e |
 | SRC-10 | rename source + labels | documented | **done** | `PATCH /api/sources/:id` | e2e |
 | SRC-11 | images / OCR | documented | blocked | — | no OCR engine |
 | SRC-12 | audio → transcript | documented | blocked | — | no ASR |
@@ -39,7 +40,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | CHAT-07 | style / length / custom instructions | documented | partial (notebook instructions only) | `api.rs` | — |
 | NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
 | NOTE-02 | save answer as note | documented | done | UI | UI smoke |
-| NOTE-03 | note used as chat context | documented | planned | — | Journey D |
+| NOTE-03 | note used as chat context | documented | **done** via conversion to a source (reference also allows direct selection) | `POST /api/notes/:id/to-source` | e2e Journey D |
 | ART-01 | summary / report / study guide / FAQ | documented | done | `artifacts.rs` | lib |
 | ART-02 | mind map | documented | done | `artifacts.rs` | lib + UI |
 | ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |

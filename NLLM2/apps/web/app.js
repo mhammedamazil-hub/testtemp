@@ -633,11 +633,24 @@ function renderNotes(el) {
       h("div", { style: "white-space:pre-wrap" }, n.body),
       h("div", { class: "row-between", style: "margin-top:6px" },
         h("span", { class: "hint" }, fmtDate(n.updated_at)),
-        h("button", { class: "ghost danger", onclick: async () => {
-          await api.del(`/notes/${n.id}`); toast("Deleted");
-          await openNotebook(document.getElementById("app"), nb.id);
-          state.tab = "notes";
-        } }, "delete"))));
+        h("div", { class: "row", style: "gap:6px" },
+          h("button", { class: "ghost", title: "Make this note selectable as evidence", onclick: async (e) => {
+            e.target.disabled = true;
+            try {
+              const r = await api.post(`/notes/${n.id}/to-source`, {});
+              toast(`“${r.title}” is now a source — select it to use it in chat`);
+              await openNotebook(document.getElementById("app"), nb.id);
+              state.tab = "notes";
+            } catch (err) {
+              toast(err.message, "err");
+              e.target.disabled = false;
+            }
+          } }, "use as source"),
+          h("button", { class: "ghost danger", onclick: async () => {
+            await api.del(`/notes/${n.id}`); toast("Deleted");
+            await openNotebook(document.getElementById("app"), nb.id);
+            state.tab = "notes";
+          } }, "delete")))));
   }
   if (!(nb.notes || []).length) el.append(h("p", { class: "empty" }, "No notes yet."));
 }

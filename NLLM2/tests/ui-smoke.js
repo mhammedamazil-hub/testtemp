@@ -132,6 +132,9 @@ async function main() {
   byText("#sideContent button", "Save note").click();
   await wait(800);
   check("note saved and listed", /Remember to verify/.test($("#sideContent").textContent));
+  check("note offers conversion to a source",
+    [...window.document.querySelectorAll("#sideContent button")]
+      .some((b) => /use as source/i.test(b.textContent)));
 
   // --- report
   byText(".tabs button", "Report").click();

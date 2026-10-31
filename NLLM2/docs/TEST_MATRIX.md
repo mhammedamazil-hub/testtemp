@@ -149,7 +149,8 @@ Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/m
 | e2e | `refreshing_a_url_source_reindexes_only_when_content_changed` | artifact marked `stale` after a real content change; answer switches from `2.75` to `4.5`; a second refresh with unchanged content reports `changed:false` and re-indexes nothing |
 | e2e | `pasted_sources_are_not_refreshable_and_labels_persist` | refresh of a pasted source → `422 not_refreshable`; PATCH renames and labels; both persist on re-read |
 | e2e | `rejects_bad_input_and_dangerous_urls` | loopback, `169.254.169.254`, `file://`, `localhost` refused with `url_rejected`; a public host with no route is `502 fetch_failed` (**not** a policy refusal); an unresolvable name is also `fetch_failed` |
-| UI | 2 assertions | the Add-from-URL control exists and its input is labelled; capabilities reports the fetch transport |
+| UI | 3 assertions | the Add-from-URL control exists and its input is labelled; capabilities reports the fetch transport; a note offers conversion to a source |
+| e2e | `note_can_become_a_cited_source` (Journey D) | note → source with `converted_from` provenance; second conversion refused `409 already_a_source`; a question about a number present only in the note is answered **and cited to the note-source**; deselecting it removes the influence; deleting the note leaves the source intact |
 
 ## Binary analysis (31 unit tests + 5 HTTP tests + 6 UI assertions)
 

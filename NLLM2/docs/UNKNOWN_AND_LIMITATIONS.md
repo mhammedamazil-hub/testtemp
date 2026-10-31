@@ -87,6 +87,11 @@ bug, or a limitation for a feature.
   a login page, which will be indexed as text. Recorded, not worked around.
 * **The reference product's own ceilings are not copied.** Forge's are its own and
   configurable (`docs/reference/SOURCE_MATRIX.md`).
+* **Notes participate through conversion.** The reference product lets a note be
+  selected directly in chat *and* converted to a source. Forge implements conversion
+  (one retrieval path, full provenance, no duplicated citation logic). Direct
+  inclusion without conversion is not implemented — that is a deliberate scope
+  decision (`docs/DECISIONS.md` D14), not an oversight.
 * **Live product, video evidence, ASR/OCR/TTS/LLM, search providers, sharing and roles**
   remain blocked or unimplemented; see `docs/RESEARCH_BLOCKERS.md` and
   `docs/reference/FEATURE_MATRIX.md`.

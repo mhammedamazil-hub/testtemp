@@ -18,8 +18,8 @@ is aspirational. Where a claim is untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **145 passing, 0 failing** (26 `bininspect` + 106 lib + 8 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **38 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **146 passing, 0 failing** (26 `bininspect` + 106 lib + 9 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **41 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide/row locators | `ingest::ooxml` + e2e |
@@ -29,6 +29,7 @@ is aspirational. Where a claim is untested it says so.
 | Security | SSRF guard, traversal guard, filename sanitising, CSP, owner-only secrets | `security`, `web`, `providers` tests |
 | URL sources | fetched with curl, SSRF-guarded, DNS-pinned per hop, deduped by canonical URL, refreshable | `fetch` (11 tests) + e2e |
 | Source metadata | content hash, canonical URL, fetch time, labels, provenance meta | `Source` + `store` |
+| Notes as evidence | `POST /api/notes/:id/to-source` converts a note into a cited source with provenance | e2e `note_can_become_a_cited_source` |
 | Artifact staleness | re-indexing a changed source flags affected artifacts | e2e `refreshing_a_url_source_…` |
 | APK analysis | binary manifest decoded (package, permissions, exported components), DEX inventory + code findings, native libs, signing | `bininspect` 20 tests, `docs/BINARY_ANALYSIS.md` |
 | EXE analysis | PE headers/sections + per-section entropy, imports/exports, .NET metadata, version info, packer indicators | `bininspect` 20 tests, `POST /api/binary/inspect` |

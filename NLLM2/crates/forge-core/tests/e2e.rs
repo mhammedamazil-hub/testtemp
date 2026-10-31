@@ -715,3 +715,85 @@ fn pasted_sources_are_not_refreshable_and_labels_persist() {
     assert_eq!(reloaded.str_of("title"), Some("Renamed source"));
     assert_eq!(reloaded.get("labels").and_then(|l| l.as_arr()).map(|l| l.len()), Some(2));
 }
+
+/// Journey D: a note becomes evidence, is cited, and stops influencing when deselected.
+#[test]
+fn note_can_become_a_cited_source() {
+    let s = Server::start(tempdir("note-source"));
+    let (_, _) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Notes"))])));
+    let (_, list) = s.json("GET", "/api/notebooks", None);
+    let nb = list.get("notebooks").unwrap().as_arr().unwrap()[0].str_of("id").unwrap().to_string();
+
+    // one ordinary source, so the notebook is not empty
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb),
+        Some(obj(&[
+            ("title", Value::from("Handbook")),
+            ("text", Value::from("The retention window for uploaded artefacts is thirty days by default.")),
+        ])),
+    );
+    assert_eq!(st, 201);
+
+    let (st, note) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/notes", nb),
+        Some(obj(&[
+            ("title", Value::from("Reviewer note")),
+            ("body", Value::from("Verification pass: the audit threshold was agreed at 2.25 sigma for this quarter.")),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let note_id = note.str_of("id").unwrap().to_string();
+
+    // convert
+    let (st, conv) = s.json("POST", &format!("/api/notes/{}/to-source", note_id), None);
+    assert_eq!(st, 201, "{:?}", conv);
+    let sid = conv.str_of("source_id").unwrap().to_string();
+    assert_eq!(
+        conv.get("meta").and_then(|m| m.str_of("converted_from")),
+        Some(note_id.as_str())
+    );
+
+    // provenance is on the record
+    let (_, src) = s.json("GET", &format!("/api/sources/{}", sid), None);
+    assert_eq!(src.str_of("origin"), Some("note"));
+    assert_eq!(src.get("meta").and_then(|m| m.str_of("converted_from")), Some(note_id.as_str()));
+
+    // converting again is refused, not duplicated
+    let (st, dup) = s.json("POST", &format!("/api/notes/{}/to-source", note_id), None);
+    assert_eq!(st, 409);
+    assert_eq!(dup.str_of("code"), Some("already_a_source"));
+
+    // with the note-source selected, the answer cites it
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb),
+        Some(obj(&[
+            ("question", Value::from("What is the audit threshold?")),
+            ("source_ids", Value::Arr(vec![Value::from(sid.as_str())])),
+        ])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    assert!(answer.str_of("answer").unwrap_or("").contains("2.25"), "{:?}", answer.str_of("answer"));
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(cites[0].str_of("source_id"), Some(sid.as_str()));
+
+    // deselected: the note no longer influences the answer
+    let (st, other) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb),
+        Some(obj(&[("question", Value::from("What is the audit threshold?"))])),
+    );
+    assert_eq!(st, 200);
+    let text = other.str_of("answer").unwrap_or("");
+    assert!(!text.contains("2.25") || !cites.is_empty() && text.contains("does not"),
+        "unselected note must not be quoted: {}", text);
+
+    // deleting the note keeps the source: it is its own evidence record now
+    let (st, _) = s.json("DELETE", &format!("/api/notes/{}", note_id), None);
+    assert_eq!(st, 200);
+    let (st, still) = s.json("GET", &format!("/api/sources/{}", sid), None);
+    assert_eq!(st, 200, "{:?}", still);
+    assert_eq!(still.str_of("origin"), Some("note"));
+}
