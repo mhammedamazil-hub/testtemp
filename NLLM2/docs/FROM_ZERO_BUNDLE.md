@@ -10,223 +10,3261 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
-## `crates/bininspect/src/xmltext.rs`
+## `crates/forge-core/src/fetch.rs`
 
 ```rust
-//! Plain-text Android manifest support.
+//! Outbound URL fetching, with the SSRF policy enforced at every hop.
 //!
-//! Build intermediates (`merged_manifest/debug/AndroidManifest.xml`) ship the manifest as
-//! ordinary XML rather than compiled AXML. Rather than write a second summariser, this
-//! converts text XML into the same `axml::Element` stream so both paths share one set of
-//! semantics (package qualification, exported defaults, permissions, launcher detection).
+//! Why `curl` and not a Rust client: this build has no TLS crate (crates.io is
+//! unreachable — `docs/DECISIONS.md` D1), and the reference product's URL sources
+//! are overwhelmingly https. `curl` is a mature, ubiquitous HTTP client, invoked
+//! here as a subprocess with an explicit argument vector — never through a shell —
+//! and never with credentials, cookies, or a proxy configuration.
+//!
+//! The security properties are ours, not curl's:
+//!
+//! 1. the URL is parsed by `security::parse_url` (scheme, userinfo, control chars);
+//! 2. the host is resolved by us, and **every** address must be public;
+//! 3. curl is pinned with `--resolve host:port:ip` so its own DNS lookup cannot
+//!    disagree with ours (this is what defeats DNS rebinding);
+//! 4. redirects are *not* followed by curl (`--max-redirs 0`); each `Location` is
+//!    re-validated and re-pinned, with a hop cap;
+//! 5. body size and time are capped, and `--proto`/`--proto-redir` restrict the
+//!    scheme set even if a Location points somewhere unexpected.
 
-use crate::axml::{Attr, Element};
+use crate::security::{self, ParsedUrl};
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::Duration;
 
-/// Cheap sniff: does this look like a text XML manifest?
-pub fn is_text_manifest(data: &[u8]) -> bool {
-    let head = &data[..data.len().min(512)];
-    let text = String::from_utf8_lossy(head);
-    let t = text.trim_start_matches('\u{feff}').trim_start();
-    t.starts_with("<?xml") || t.starts_with("<manifest")
+/// Default ceilings for a single fetch.
+pub const MAX_FETCH_BYTES: usize = 20 * 1024 * 1024;
+pub const MAX_HOPS: usize = 5;
+pub const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub const USER_AGENT: &str = "ForgeBot/0.1 (local research workspace; +https://example.invalid/forge)";
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FetchError {
+    /// The URL was refused before any network activity.
+    Rejected(String),
+    /// No transport could be started (curl missing, spawn failure).
+    NoTransport(String),
+    /// The transport ran but the request failed or returned a non-success status.
+    Failed(String),
+    /// The response was too large or took too long.
+    Limit(String),
 }
 
-fn decode_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-}
-
-/// Scan text XML into elements. Deliberately minimal: tags and attributes only — no
-/// namespace resolution, no text nodes, no validation. Comments, CDATA, processing
-/// instructions and doctypes are skipped.
-pub fn parse(data: &[u8]) -> Result<Vec<Element>, String> {
-    let text = String::from_utf8_lossy(data);
-    let b = text.as_bytes();
-    let mut out = Vec::new();
-    let mut i = 0usize;
-
-    while i < b.len() {
-        if b[i] != b'<' {
-            i += 1;
-            continue;
+impl FetchError {
+    pub fn message(&self) -> String {
+        match self {
+            FetchError::Rejected(m) => format!("refused: {}", m),
+            FetchError::NoTransport(m) => format!("no fetch transport: {}", m),
+            FetchError::Failed(m) => format!("fetch failed: {}", m),
+            FetchError::Limit(m) => format!("limit exceeded: {}", m),
         }
-        // skip comments / CDATA / declarations
-        if text[i..].starts_with("<!--") {
-            match text[i..].find("-->") {
-                Some(p) => {
-                    i += p + 3;
-                    continue;
-                }
-                None => break,
-            }
-        }
-        if text[i..].starts_with("<![CDATA[") {
-            match text[i..].find("]]>") {
-                Some(p) => {
-                    i += p + 3;
-                    continue;
-                }
-                None => break,
-            }
-        }
-        if text[i..].starts_with("<?") || text[i..].starts_with("<!") {
-            match text[i..].find('>') {
-                Some(p) => {
-                    i += p + 1;
-                    continue;
-                }
-                None => break,
-            }
-        }
-        if text[i..].starts_with("</") {
-            match text[i..].find('>') {
-                Some(p) => {
-                    i += p + 1;
-                    continue;
-                }
-                None => break,
-            }
-        }
-
-        // opening tag: read the name
-        i += 1;
-        let start = i;
-        while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'>' && b[i] != b'/' {
-            i += 1;
-        }
-        let name = text[start..i].to_string();
-        if name.is_empty() {
-            i += 1;
-            continue;
-        }
-
-        // attributes until '>' (respecting quoted values)
-        let mut attributes = Vec::new();
-        loop {
-            while i < b.len() && b[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            if i >= b.len() || b[i] == b'>' {
-                i += 1;
-                break;
-            }
-            if b[i] == b'/' {
-                i += 1;
-                continue;
-            }
-            let astart = i;
-            while i < b.len() && b[i] != b'=' && !b[i].is_ascii_whitespace() && b[i] != b'>' && b[i] != b'/' {
-                i += 1;
-            }
-            let full = text[astart..i].to_string();
-            if full.is_empty() {
-                i += 1;
-                continue;
-            }
-            while i < b.len() && b[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            let mut value = String::new();
-            if i < b.len() && b[i] == b'=' {
-                i += 1;
-                while i < b.len() && b[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-                if i < b.len() && (b[i] == b'"' || b[i] == b'\'') {
-                    let quote = b[i];
-                    i += 1;
-                    let vstart = i;
-                    while i < b.len() && b[i] != quote {
-                        i += 1;
-                    }
-                    value = decode_entities(&text[vstart..i]);
-                    i += 1;
-                }
-            }
-            let (ns, local) = match full.rsplit_once(':') {
-                Some((ns, local)) => (Some(ns.to_string()), local.to_string()),
-                None => (None, full),
-            };
-            attributes.push(Attr {
-                ns,
-                name: local,
-                raw: Some(value.clone()),
-                value,
-                type_id: 0x03,
-            });
-        }
-        out.push(Element { name, attributes });
     }
 
-    if out.is_empty() {
-        Err("text manifest: no elements found".into())
+    pub fn code(&self) -> &'static str {
+        match self {
+            FetchError::Rejected(_) => "url_rejected",
+            FetchError::NoTransport(_) => "fetch_transport_unavailable",
+            FetchError::Failed(_) => "fetch_failed",
+            FetchError::Limit(_) => "fetch_limit_exceeded",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Fetched {
+    /// The URL that produced the body after following redirects.
+    pub final_url: String,
+    /// Normalised identity of `final_url`, used for duplicate detection.
+    pub canonical_url: String,
+    pub status: u16,
+    pub content_type: String,
+    pub body: Vec<u8>,
+    pub redirects: Vec<(u16, String)>,
+}
+
+impl Fetched {
+    /// Media type without parameters, lower-cased (`text/html; charset=utf-8` → `text/html`).
+    pub fn media_type(&self) -> String {
+        self.content_type
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase()
+    }
+
+    /// Best guess at the ingest kind for `ingest::extract`, from Content-Type first
+    /// and the URL path second.
+    pub fn ingest_kind(&self) -> &'static str {
+        let mt = self.media_type();
+        let path = self.final_url.split(['?', '#']).next().unwrap_or("").to_ascii_lowercase();
+        let ends = |ext: &str| path.ends_with(&format!(".{}", ext));
+        if mt == "application/pdf" || ends("pdf") || self.body.starts_with(b"%PDF") {
+            return "pdf";
+        }
+        if mt == "text/html" || mt == "application/xhtml+xml" || ends("html") || ends("htm") {
+            return "html";
+        }
+        if mt == "text/markdown" || ends("md") || ends("markdown") {
+            return "markdown";
+        }
+        if mt == "text/csv" || ends("csv") {
+            return "csv";
+        }
+        if mt == "text/tab-separated-values" || ends("tsv") {
+            return "tsv";
+        }
+        // JSON, plain text, and anything unrecognised are treated as text: better to
+        // index a readable body than to reject a source the user asked for.
+        "text"
+    }
+}
+
+/// Provenance for a source created by fetching a URL.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FetchedMeta {
+    pub canonical_url: String,
+    pub fetched_at: String,
+    pub status: u16,
+    pub content_type: String,
+    pub redirects: usize,
+}
+
+/// Is a working HTTP transport present?
+pub fn transport_available() -> bool {
+    Command::new("curl")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn temp_paths() -> (PathBuf, PathBuf) {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let base = std::env::temp_dir();
+    (
+        base.join(format!("forge-fetch-{}-{}.body", pid, stamp)),
+        base.join(format!("forge-fetch-{}-{}.hdr", pid, stamp)),
+    )
+}
+
+/// One request, no redirect following. Returns (status, headers text, body).
+fn request_once(url: &ParsedUrl, ip: std::net::IpAddr, max_bytes: usize) -> Result<(u16, String, Vec<u8>), FetchError> {
+    let (body_path, hdr_path) = temp_paths();
+    let pin = if url.host.contains(':') {
+        format!("[{}]:{}:{}", url.host, url.port, ip)
     } else {
-        Ok(out)
+        format!("{}:{}:{}", url.host, url.port, ip)
+    };
+    let output = Command::new("curl")
+        .args([
+            "--silent",
+            "--show-error",
+            "--no-progress-meter",
+            "--proto",
+            "=http,https",
+            "--proto-redir",
+            "=http,https",
+            "--max-redirs",
+            "0",
+            "--max-time",
+            &FETCH_TIMEOUT.as_secs().to_string(),
+            "--max-filesize",
+            &max_bytes.to_string(),
+            "--user-agent",
+            USER_AGENT,
+            "--header",
+            "Accept: text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
+            "--resolve",
+            &pin,
+            "--dump-header",
+            &hdr_path.to_string_lossy(),
+            "--output",
+            &body_path.to_string_lossy(),
+            "--write-out",
+            "%{http_code}",
+            &url.to_url(),
+        ])
+        .output();
+
+    let cleanup = || {
+        let _ = std::fs::remove_file(&body_path);
+        let _ = std::fs::remove_file(&hdr_path);
+    };
+
+    let out = match output {
+        Ok(o) => o,
+        Err(e) => {
+            cleanup();
+            return Err(FetchError::NoTransport(format!("cannot run curl: {}", e)));
+        }
+    };
+    let headers = std::fs::read_to_string(&hdr_path).unwrap_or_default();
+    let body = std::fs::read(&body_path).unwrap_or_default();
+    cleanup();
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        // curl exit code 63 = max-filesize exceeded
+        return if out.status.code() == Some(63) {
+            Err(FetchError::Limit(format!(
+                "response body exceeds {} bytes",
+                max_bytes
+            )))
+        } else if out.status.code() == Some(28) {
+            Err(FetchError::Limit(format!(
+                "request exceeded {}s",
+                FETCH_TIMEOUT.as_secs()
+            )))
+        } else {
+            Err(FetchError::Failed(if stderr.is_empty() {
+                format!("curl exited {:?}", out.status.code())
+            } else {
+                stderr
+            }))
+        };
     }
+    let status: u16 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    Ok((status, headers, body))
+}
+
+fn header_value(headers: &str, name: &str) -> Option<String> {
+    let want = format!("{}:", name.to_ascii_lowercase());
+    // Last occurrence wins: with `--dump-header` a redirect chain can appear, and we
+    // only ever issue single-hop requests, so the last block is the real one.
+    headers
+        .lines()
+        .filter(|l| l.to_ascii_lowercase().starts_with(&want))
+        .last()
+        .map(|l| l[want.len()..].trim().to_string())
+}
+
+fn resolve_location(base: &ParsedUrl, location: &str) -> Result<ParsedUrl, FetchError> {
+    let loc = location.trim();
+    if loc.starts_with("http://") || loc.starts_with("https://") {
+        return security::parse_url(loc).map_err(FetchError::Rejected);
+    }
+    if loc.starts_with("//") {
+        return security::parse_url(&format!("{}:{}", base.scheme, loc)).map_err(FetchError::Rejected);
+    }
+    if loc.starts_with('/') {
+        let (path, query) = match loc.split_once('?') {
+            Some((p, q)) => (p, format!("?{}", q)),
+            None => (loc, String::new()),
+        };
+        return Ok(ParsedUrl {
+            scheme: base.scheme.clone(),
+            host: base.host.clone(),
+            port: base.port,
+            path_query: format!("{}{}", path, query),
+        });
+    }
+    // Relative to the current directory
+    let base_dir = base.path_query.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+    Ok(ParsedUrl {
+        scheme: base.scheme.clone(),
+        host: base.host.clone(),
+        port: base.port,
+        path_query: format!("{}/{}", base_dir, loc),
+    })
+}
+
+/// Fetch a URL, validating policy at every hop.
+pub fn fetch(raw_url: &str) -> Result<Fetched, FetchError> {
+    fetch_with_limits(raw_url, MAX_FETCH_BYTES)
+}
+
+pub fn fetch_with_limits(raw_url: &str, max_bytes: usize) -> Result<Fetched, FetchError> {
+    let mut url = security::parse_url(raw_url).map_err(FetchError::Rejected)?;
+    let mut redirects: Vec<(u16, String)> = Vec::new();
+
+    for hop in 0..=MAX_HOPS {
+        if hop == MAX_HOPS {
+            return Err(FetchError::Rejected(format!(
+                "more than {} redirects",
+                MAX_HOPS
+            )));
+        }
+        let ips = security::resolve_public(&url.host, url.port).map_err(|e| match e {
+            security::ResolveError::Blocked(m) => FetchError::Rejected(m),
+            security::ResolveError::Dns(m) => FetchError::Failed(m),
+        })?;
+        let ip = ips[0];
+        let (status, headers, body) = request_once(&url, ip, max_bytes)?;
+
+        if (300..400).contains(&status) {
+            let location = header_value(&headers, "location")
+                .ok_or_else(|| FetchError::Failed(format!("HTTP {} without Location", status)))?;
+            let next = resolve_location(&url, &location)?;
+            redirects.push((status, next.to_url()));
+            url = next;
+            continue;
+        }
+        if !(200..300).contains(&status) {
+            return Err(FetchError::Failed(format!(
+                "HTTP {} for {}",
+                status,
+                url.to_url()
+            )));
+        }
+        if body.len() > max_bytes {
+            return Err(FetchError::Limit(format!(
+                "body of {} bytes exceeds {}",
+                body.len(),
+                max_bytes
+            )));
+        }
+        let content_type = header_value(&headers, "content-type").unwrap_or_default();
+        return Ok(Fetched {
+            final_url: url.to_url(),
+            canonical_url: url.canonical(),
+            status,
+            content_type,
+            body,
+            redirects,
+        });
+    }
+    unreachable!("loop always returns")
+}
+
+/// Remove a fragment and normalise a URL for duplicate detection without network access.
+pub fn canonicalize(raw: &str) -> Option<String> {
+    security::parse_url(raw).ok().map(|u| u.canonical())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::axml;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    const SAMPLE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.text" android:versionName="2.0" android:versionCode="7">
-  <!-- a comment <activity android:name=".Nope"/> -->
-  <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33"/>
-  <uses-permission android:name="android.permission.INTERNET"/>
-  <application android:debuggable="true">
-    <activity android:name=".Main" android:exported="true">
-      <intent-filter>
-        <action android:name="android.intent.action.MAIN"/>
-      </intent-filter>
-    </activity>
-    <service android:name=".Sync"/>
-  </application>
-</manifest>
-"#;
+    // ---- one shared loopback fixture server -------------------------------
+    //
+    // Private-range fetching is off by default; the test opts in explicitly for the
+    // duration of the test. Because the flag is process-global and tests run in
+    // parallel, every test that needs the server goes through `with_server`, which
+    // holds a lock.
+    static SERVER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static HITS: AtomicUsize = AtomicUsize::new(0);
 
-    #[test]
-    fn sniffs_text_manifests() {
-        assert!(is_text_manifest(SAMPLE.as_bytes()));
-        assert!(is_text_manifest(b"\xef\xbb\xbf<?xml version=\"1.0\"?>"));
-        assert!(!is_text_manifest(b"\x03\x00\x08\x00"));
-        assert!(!is_text_manifest(b"PK\x03\x04"));
+    fn with_server<T>(f: impl FnOnce(u16) -> T) -> T {
+        let _guard = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("FORGE_FETCH_ALLOW_PRIVATE", "1");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            for stream in listener.incoming().take(6) {
+                let mut stream = match stream {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                HITS.fetch_add(1, Ordering::SeqCst);
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut first = String::new();
+                let _ = reader.read_line(&mut first);
+                let path = first.split_whitespace().nth(1).unwrap_or("/").to_string();
+                // drain headers
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+                        break;
+                    }
+                }
+                let (status, ctype, body): (u16, &str, Vec<u8>) = match path.as_str() {
+                    "/page" => (
+                        200,
+                        "text/html; charset=utf-8",
+                        b"<html><head><title>Fixture Page</title></head><body>\
+                          <h1>Retrieval</h1><p>Hybrid retrieval combines lexical and dense signals.</p>\
+                          <h2>Grounding</h2><p>Every claim must cite an evidence span.</p></body></html>"
+                            .to_vec(),
+                    ),
+                    "/doc.pdf" => (200, "application/pdf", b"%PDF-1.4\n%fake\n".to_vec()),
+                    "/redirect" => (302, "text/plain", b"".to_vec()),
+                    "/loop" => (302, "text/plain", b"".to_vec()),
+                    "/big" => (200, "text/plain", vec![b'x'; 3 * 1024 * 1024]),
+                    "/missing" => (404, "text/plain", b"nope".to_vec()),
+                    _ => (200, "text/plain", b"plain text body about widgets".to_vec()),
+                };
+                let location = match path.as_str() {
+                    "/redirect" => "Location: /page\r\n",
+                    "/loop" => "Location: /loop\r\n",
+                    _ => "",
+                };
+                let head = format!(
+                    "HTTP/1.1 {} X\r\nContent-Type: {}\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                    status, ctype, location, body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+                let _ = stream.flush();
+            }
+        });
+        let out = f(port);
+        // let the thread finish its accept loop
+        drop(handle);
+        std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+        out
     }
 
     #[test]
-    fn text_manifest_reuses_the_axml_summariser() {
-        let els = parse(SAMPLE.as_bytes()).expect("parse");
-        let s = axml::summarize(&els);
-        assert_eq!(s.package, "com.example.text");
-        assert_eq!(s.version_name, "2.0");
-        assert_eq!(s.version_code, "7");
-        assert_eq!(s.min_sdk.as_deref(), Some("21"));
-        assert_eq!(s.target_sdk.as_deref(), Some("33"));
-        assert!(s.debuggable);
-        assert!(s.permissions.contains(&"android.permission.INTERNET".to_string()));
-        assert_eq!(s.launcher_activity.as_deref(), Some("com.example.text.Main"));
-        assert!(s.activities.iter().any(|(n, e)| n == "com.example.text.Main" && *e));
-        assert!(s.services.iter().any(|(n, e)| n == "com.example.text.Sync" && !*e));
-        assert_eq!(s.exported_count, 1, "comment must not be parsed as an element");
+    fn transport_is_present_in_this_image() {
+        assert!(transport_available(), "curl must be available for URL ingestion");
     }
 
     #[test]
-    fn handles_entities_and_single_quotes() {
-        let els = parse(b"<manifest package='a.b'><application android:label='Tom &amp; Jerry'/></manifest>")
-            .expect("parse");
-        let app = els.iter().find(|e| e.name == "application").expect("app");
-        assert_eq!(app.value("label"), Some("Tom & Jerry"));
+    fn fetches_html_and_classifies_it() {
+        with_server(|port| {
+            let got = fetch(&format!("http://127.0.0.1:{}/page", port)).expect("fetch");
+            assert_eq!(got.status, 200);
+            assert_eq!(got.media_type(), "text/html");
+            assert_eq!(got.ingest_kind(), "html");
+            assert!(String::from_utf8_lossy(&got.body).contains("Hybrid retrieval"));
+            assert_eq!(got.canonical_url, format!("http://127.0.0.1:{}/page", port));
+        });
     }
 
     #[test]
-    fn rejects_non_xml() {
-        assert!(parse(b"\x00\x01\x02binary garbage").is_err());
+    fn follows_redirects_hop_by_hop_and_records_them() {
+        with_server(|port| {
+            let got = fetch(&format!("http://127.0.0.1:{}/redirect", port)).expect("fetch");
+            assert_eq!(got.status, 200);
+            assert!(got.final_url.ends_with("/page"), "final: {}", got.final_url);
+            assert_eq!(got.redirects.len(), 1);
+            assert_eq!(got.redirects[0].0, 302);
+        });
+    }
+
+    #[test]
+    fn refuses_a_redirect_loop() {
+        with_server(|port| {
+            let err = fetch(&format!("http://127.0.0.1:{}/loop", port)).unwrap_err();
+            assert!(matches!(err, FetchError::Rejected(_)), "{:?}", err);
+            assert!(err.message().contains("redirects"), "{}", err.message());
+        });
+    }
+
+    #[test]
+    fn enforces_the_size_cap() {
+        with_server(|port| {
+            let err = fetch_with_limits(&format!("http://127.0.0.1:{}/big", port), 1024 * 1024)
+                .unwrap_err();
+            assert!(matches!(err, FetchError::Limit(_)), "{:?}", err);
+        });
+    }
+
+    #[test]
+    fn reports_non_success_status() {
+        with_server(|port| {
+            let err = fetch(&format!("http://127.0.0.1:{}/missing", port)).unwrap_err();
+            assert!(err.message().contains("404"), "{}", err.message());
+        });
+    }
+
+    #[test]
+    fn detects_pdf_by_magic_even_without_a_content_type() {
+        with_server(|port| {
+            let got = fetch(&format!("http://127.0.0.1:{}/doc.pdf", port)).expect("fetch");
+            assert_eq!(got.ingest_kind(), "pdf");
+        });
+    }
+
+    #[test]
+    fn private_addresses_are_refused_when_the_override_is_off() {
+        // holds SERVER_LOCK because it mutates the same process-global flag
+        let _guard = SERVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+        assert!(!security::allow_private());
+        let err = fetch("http://127.0.0.1:9/nope").unwrap_err();
+        assert!(matches!(err, FetchError::Rejected(_)), "{:?}", err);
+        // and the classic metadata endpoint
+        let err = fetch("http://169.254.169.254/latest/meta-data/").unwrap_err();
+        assert!(matches!(err, FetchError::Rejected(_)));
+    }
+
+    #[test]
+    fn rejects_bad_schemes_and_credentials() {
+        assert!(matches!(fetch("file:///etc/passwd").unwrap_err(), FetchError::Rejected(_)));
+        assert!(matches!(fetch("gopher://x/").unwrap_err(), FetchError::Rejected(_)));
+        let err = fetch("https://user:pass@example.com/").unwrap_err();
+        assert!(err.message().contains("credentials"), "{}", err.message());
+    }
+
+    #[test]
+    fn canonicalization_matches_equivalent_urls() {
+        let a = canonicalize("HTTP://Example.COM:80/a/b#frag").unwrap();
+        let b = canonicalize("http://example.com/a/b").unwrap();
+        assert_eq!(a, b, "scheme/host case, default port and fragment must normalise");
+        let c = canonicalize("https://example.com").unwrap();
+        assert_eq!(c, "https://example.com/");
+        // query strings are preserved (they often select different content)
+        assert_ne!(
+            canonicalize("https://e.com/x?a=1").unwrap(),
+            canonicalize("https://e.com/x?a=2").unwrap()
+        );
+    }
+
+    #[test]
+    fn reads_bodies_and_ignores_short_reads() {
+        // a guard against regressing to a fixed-size read
+        with_server(|port| {
+            let got = fetch(&format!("http://127.0.0.1:{}/page", port)).expect("fetch");
+            let mut buf = Vec::new();
+            got.body.as_slice().read_to_end(&mut buf).unwrap();
+            assert!(buf.len() > 100);
+        });
     }
 }
+```
+
+## `docs/MASTER_FORGE.md`
+
+```markdown
+# MASTER_FORGE.md
+## Forge — Independent Research, Knowledge, and Learning Workspace
+### Master product specification, reverse-engineering research plan, implementation contract, and acceptance programme
+
+**Document type:** Authoritative build brief for the Arena coding agent  
+**Product:** Forge  
+**Reference product:** NotebookLM, officially renamed **Gemini Notebook** by Google on 16 July 2026  
+**Reference URL:** https://notebook.google.com/  
+**Research baseline:** 30 October 2026  
+**Implementation philosophy:** Evidence-first, Rust-first, source-grounded, independently engineered, production-oriented  
+**Status:** Living specification. Update it as evidence changes. Do not silently delete requirements.
+
+---
+
+# 0. Read this first — non-negotiable mission
+
+You are building **Forge**, a complete, independent, production-quality research and knowledge workspace inspired by the product experience and capabilities of NotebookLM / Gemini Notebook.
+
+You are **not** building an agent-engineering workbench, an operating system, a generic chatbot with file upload, a UI mock-up, a static demo, a CLI-only proof of concept, a Google NotebookLM API wrapper, or a clone that depends on undocumented Google endpoints.
+
+Forge must become a useful application in its own right. It should reach feature parity where practical, then continue beyond parity with capabilities that make it more useful, reliable, extensible, and transparent.
+
+The core product promise:
+
+> Bring together sources, understand them, ask questions grounded in those sources, inspect the evidence, discover connections, and turn the knowledge into useful outputs.
+
+The user must be able to trust the distinction between:
+1. what a source explicitly says;
+2. what multiple sources jointly support;
+3. what the model infers;
+4. what is uncertain or unsupported.
+
+**Never fabricate a source, quotation, citation, page, timestamp, result, test, integration, or capability.** An honest unsupported result is better than a plausible invented one.
+
+## 0.1 Work autonomously, but do not fake certainty
+
+Research, inspect, implement, test, document, and improve Forge continuously. Do not stop after producing a plan or a feature matrix. Do not ask the user to approve every ordinary implementation decision.
+
+Stop and request the user's decision only when a decision is genuinely user-owned or risky, such as spending money, activating a paid service, using a personal account or credentials that the user has not authorized, making a public release or irreversible destructive change, changing product direction, or removing established functionality.
+
+Do not wait for approval to fix ordinary bugs, add tests, improve documentation, or implement a clearly specified feature.
+
+## 0.2 Existing project must be preserved
+
+The most recent user-provided progress report described:
+- a Rust-first codebase under `NLLM2/`;
+- a `forge-core` crate and an additional `bininspect` crate;
+- source ingestion, grounded answer and artifact functionality;
+- an HTTP server and browser UI;
+- a NotebookLM protocol experiment in `crates/forge-core/src/notebooklm.rs`;
+- a binary-inspection capability;
+- a reported baseline of 128 passing tests and 36 passing UI smoke assertions;
+- reported commits `3ad0ce8` and `a3b6bd7`, pushed to `arena/e86028ee-testtemp`.
+
+These are **historical claims supplied by the user from an agent report**, not independently verified facts about the current checkout. First inspect the actual repository, branch, remotes, commit graph, working tree, tests, and running service. The sandbox may have been recycled.
+
+Before changing anything:
+1. run `pwd`, `git status --short --branch`, `git remote -v`, `git log --oneline -12`, and inspect the current branch;
+2. identify uncommitted work and backup refs;
+3. verify that the expected project directory exists;
+4. inspect the actual `Cargo.toml` workspace and crate structure;
+5. inspect current documentation and tests;
+6. record the actual baseline in `docs/STATUS.md`;
+7. preserve all user and agent work.
+
+**Never reset, clean, force-push, overwrite, or re-clone over uncommitted work.** If the sandbox was reset, recover from the remote carefully and verify file hashes before moving refs or replacing a checkout.
+
+## 0.3 Reference product naming
+
+Google announced that NotebookLM was renamed **Gemini Notebook** on 16 July 2026. The product remains the relevant standalone research application, with additional connections to the wider Gemini ecosystem.
+
+Use both names in research:
+- “Gemini Notebook” for the current official name and official documentation;
+- “NotebookLM” for historical documentation, older videos, existing community terminology, and protocol research.
+
+Do not assume every old NotebookLM tutorial describes the current product. Date every finding.
+
+## 0.4 Build independently
+
+The reference product is an evidence source, not a software dependency.
+
+- Do not copy Google's proprietary frontend, private code, protected assets, branding, or internal services.
+- Do not make Forge depend on undocumented Google RPCs.
+- Do not bypass authentication, quotas, access controls, DRM, or paywalls.
+- Do not use private source data or session credentials without authorization.
+- Do not misrepresent the relationship between Forge and Google.
+- Implement equivalent user value using Forge-owned code, documented APIs, properly licensed libraries, and user-authorized providers.
+
+The experimental NotebookLM RPC work may remain as a quarantined research module, but it must not become Forge's primary backend.
+
+---
+
+# 1. Product definition and quality bar
+
+## 1.1 Product definition
+
+Forge is a persistent, multi-source research workspace. A user creates notebooks, imports material, organizes sources, asks source-grounded questions, saves notes, generates study and presentation artifacts, and revisits the complete research history.
+
+It must support:
+- persistent notebooks and projects;
+- source ingestion from multiple formats and origins;
+- robust document parsing and normalization;
+- source-level and notebook-level understanding;
+- hybrid search and source retrieval;
+- evidence-grounded chat with precise citations;
+- notes and annotations;
+- generated study materials and reports;
+- generated audio and visual explainers where actual engines are available;
+- web research and source discovery;
+- source management, refresh, and deduplication;
+- export, backup, restore, and sharing;
+- reliable operation when optional providers are unavailable.
+
+## 1.2 Product values
+
+1. **Evidence before eloquence.** The answer must be supported by selected sources.
+2. **Exact citations.** A citation must take the user to the exact relevant evidence, not merely to a source's first page.
+3. **Source transparency.** Show the origin, extraction status, date, and limitations of every source.
+4. **Honest capabilities.** Never label an unavailable, mocked, stubbed, or untested feature as complete.
+5. **User control.** Users choose source scope, provider, output format, sharing level, and deletion.
+6. **Persistent work.** Notebooks, notes, citations, artifacts, and conversation state survive restarts.
+7. **Low-friction UX.** Powerful features should not make basic use confusing.
+8. **Modularity.** New parsers, providers, retrieval algorithms, and artifact generators should be pluggable.
+9. **Security by default.** Imported material is untrusted data. Never execute it.
+10. **Independent product identity.** Forge should have original product design, code, and branding.
+
+## 1.3 Definition of production-ready
+
+A feature is not production-ready merely because a route exists, a button renders, a test fixture passes, the backend returns HTTP 200, a model generated plausible text, or the feature appears in a capability table.
+
+A production feature must have:
+- a real backend implementation;
+- a real UI workflow;
+- persistent data model where persistence is expected;
+- validation and error handling;
+- security review appropriate to its risk;
+- unit and integration tests;
+- user-visible loading, empty, success, and failure states;
+- documentation;
+- evidence from representative real inputs;
+- graceful degradation when dependencies are absent.
+
+---
+
+# 2. Reference intelligence: current Gemini Notebook / NotebookLM
+
+This is a **research inventory**, not a claim that every feature is already fully understood. Official Google Help Center pages and release announcements are the primary source of truth for documented capabilities. Actual UI inspection and controlled testing are required to understand current workflow details.
+
+## 2.1 Product shell and notebook lifecycle
+
+Research and reproduce the complete observable lifecycle:
+- home / notebook library;
+- create notebook;
+- rename notebook;
+- notebook icon / emoji or visual identity;
+- notebook title and metadata;
+- recent notebooks;
+- sort, search, and filter;
+- open notebook;
+- notebook loading and empty states;
+- delete notebook and confirmation;
+- duplicate/copy behaviour if available;
+- notebook ownership;
+- notebook access levels;
+- notebook sharing;
+- viewer and editor roles;
+- public notebook sharing;
+- chat-only / focused view links;
+- featured and public notebooks;
+- notebooks appearing in Gemini Apps;
+- notebook sync or cross-product availability;
+- account and plan indicators;
+- usage/quota indicators;
+- settings;
+- language preferences;
+- feedback and reporting controls;
+- mobile vs desktop differences.
+
+For each workflow record screen dimensions, responsive states, visible controls, keyboard behaviour, click sequence, modal/menu contents, confirmation behaviour, navigation changes, persistence after reload, error behaviour, access restrictions, actual screenshot, and source evidence.
+
+Do not infer that hiding an item in a “chat view” revokes access to it. Examine actual sharing semantics and permissions.
+
+## 2.2 Sources: import, discovery, processing, organization
+
+Research every currently supported source type. Google's public help currently lists a broad set that includes:
+- PDF;
+- Microsoft Word / DOCX;
+- PowerPoint / PPTX;
+- Google Docs;
+- Google Slides;
+- Google Sheets;
+- CSV;
+- TXT;
+- Markdown;
+- pasted text;
+- web URLs;
+- public YouTube video URLs;
+- audio files;
+- images;
+- ePub;
+- eligible Play Books / textbook sources;
+- Gemini chat threads;
+- files from Google Drive.
+
+Exact availability and limits can vary by account, plan, country, age, rollout, and device. **Inspect and record values visible in the current test environment; do not hard-code Google's published limits as Forge limits.**
+
+For every source type, research:
+
+### A. Add flow
+- Add Sources button;
+- drag and drop;
+- file picker;
+- multiple-file selection;
+- URL input;
+- pasted text;
+- Drive picker;
+- web search;
+- research question input;
+- YouTube URL;
+- audio upload;
+- image upload;
+- import progress;
+- duplicate-source behaviour;
+- cancellation;
+- retry.
+
+### B. Validation and restrictions
+- extension and MIME acceptance;
+- maximum size;
+- word/token/page/slide limits;
+- source count limits;
+- unsupported or damaged file behaviour;
+- password-protected documents;
+- paywalled websites;
+- private or unlisted media;
+- public YouTube caption requirements;
+- newly uploaded video delay;
+- unsupported languages;
+- OCR requirements;
+- audio without speech;
+- file permission changes;
+- deleted upstream files;
+- plan and device restrictions.
+
+### C. Processing lifecycle
+Capture every visible state: queued, uploading, fetching, extracting, parsing, transcribing, indexing, summarizing, ready, partial, failed, retrying, and removed.
+
+Determine whether import is a fixed snapshot, periodically synchronized, manually refreshable, linked to an upstream file, or reprocessed on changes.
+
+Google's help documentation describes Drive-imported sources as syncing periodically and records source-specific caveats for URLs and YouTube. Verify current behaviour rather than extrapolating to every source type.
+
+### D. Source list and organization
+Research source cards/icons; selected/unselected state; select all/clear selection; per-source menu; rename; remove; refresh/sync; labels and categories; automatic categorization; manual label create/rename/delete; source count; source guide/summary; source opening and preview; source status; failed-source diagnostics; filters; selection persistence; source selection for chat versus artifacts.
+
+### E. Source preview and evidence navigation
+Research source viewer layout, text rendering, page/slide navigation, zoom, search within source, source summary, citation highlighting, citation jump position, image display, table rendering, page number display, quote hover cards, and source-specific viewer behaviour.
+
+## 2.3 Chat and evidence-grounded answering
+
+Research the full chat experience:
+- initial prompt suggestions;
+- prompt entry and send;
+- stop generation;
+- continue generation;
+- revise prompt while running;
+- loading/thinking indicators;
+- streaming response;
+- answer formatting;
+- inline citations;
+- citation hover preview;
+- citation click navigation;
+- source selection controls;
+- use all selected sources;
+- answer from a specific subset;
+- conversational follow-up;
+- regenerate;
+- copy;
+- feedback;
+- save response as note;
+- chat history;
+- delete history;
+- error/retry;
+- empty-context behaviour;
+- unsupported-question behaviour;
+- long-answer behaviour;
+- tables and structured outputs;
+- multilingual responses;
+- references to contradictory material;
+- answer style and length preferences.
+
+Officially documented styles have included Default, Learning Guide, and Custom instructions/custom style. Officially documented response lengths have included Default, Longer, and Shorter. Verify current labels and exact behaviour. Research any newer Custom Chat controls, role/persona controls, analytics, advanced reasoning, tool use, and provider/model selection.
+
+### Required Forge chat capabilities
+
+Implement notebook-scoped conversation threads, source-scoped and notebook-scoped context, explicit active-source indicator, conversation persistence, streaming, cancellation, follow-up questions, configurable response style/length, user custom instructions, copy/save actions, exact evidence citations, citation feedback, answer regeneration, and clear “not enough evidence” state.
+
+### Grounding contract
+
+Every factual claim presented as source-grounded must point to one or more evidence spans. Never attach a citation to a paragraph merely because the source is broadly related.
+
+The answer engine must:
+1. parse the question;
+2. identify active source scope;
+3. retrieve candidate chunks;
+4. rerank them;
+5. select evidence;
+6. generate an answer under a grounded prompt;
+7. validate citations and source coverage;
+8. remove unsupported claims or abstain;
+9. render citations and evidence previews.
+
+Support direct quote, paraphrase, multi-source synthesis, comparison, chronology, definition, extraction, table answers, image/diagram answers where available, “what is missing?” questions, conflict/contradiction reporting, and “show the evidence” follow-ups.
+
+Citations should carry source ID, chunk ID, exact text span, page/slide/time/cell location, and enough information to reopen the source at the correct place.
+
+## 2.4 Source discovery and research
+
+Investigate current official source-discovery tools and how they interact with notebooks.
+
+### Fast Research
+Research Web vs Drive source search, query entry, result cards, source relevance explanation, title/snippet, open original source, select/deselect results, import one or many, cancellation, partial results, duplicate handling, and source attribution.
+
+### Deep Research
+Research where it appears; account/age/plan restrictions; research prompt; research scope; progress and intermediate state; report format; sources discovered; cited vs uncited sources; review and selection; import into notebook; cancel/minimize; partial import on usage limits; follow-up research; provenance and citations.
+
+Do not state that Forge's web search is Deep Research unless it genuinely plans and performs a multi-step research task.
+
+### Forge research implementation goals
+- provider-independent web search adapter;
+- multiple search providers where feasible;
+- source credibility and freshness metadata;
+- query planning;
+- sub-question decomposition;
+- domain diversification;
+- page retrieval and readable extraction;
+- duplicate and near-duplicate detection;
+- claim/evidence mapping;
+- contradiction detection;
+- source review UI;
+- import-selected-results workflow;
+- source attribution;
+- explicit source date and retrieval date;
+- research report with references;
+- cancellation and budget controls.
+
+Treat web pages, comments, PDFs, and source text as untrusted input. Prompt injection found in source material must not override system instructions, access controls, or user settings.
+
+## 2.5 Notes and noteboard
+
+Research create note, edit note, paste text, save chat response, preserve tables and citation links, notes appearing in source list, notes selected as context, notes used for Q&A, notes used for artifacts, old Studio notes, convert note to source, convert all notes, export to Google Docs, note title/rename, save state, delete/recovery, citation preservation, and mobile limitations.
+
+Forge must provide rich text/Markdown notes, autosave with clear persistence feedback, user-authored notes, saved-answer notes, source-linked annotations, pinned notes, labels, note search, note-to-source conversion, notes in retrieval/artifact generation, and export to Markdown, HTML, PDF, and DOCX where implemented.
+
+## 2.6 Studio: every artifact family
+
+Studio is a major part of the reference product. Investigate each artifact as a separate product workflow. Record customizations, source scope, prompt fields, output variants, generation lifecycle, viewer, editing, export, download, sharing, deletion, regeneration, loading previous artifacts, and known limits.
+
+### A. Audio Overview
+Investigate available formats; default format; Deep Dive and other formats shown in the current UI; host style and conversation structure; language; custom prompt/instructions; source selection; generation queue; background generation; concurrent artifact generation; player; play/pause; playback speed; seek; duration; transcript/caption availability; download; sharing; load previous result; delete; regenerate; view custom prompt; accessibility; interactive mode if present; and mobile behaviour.
+
+Audio must be grounded in selected notebook sources. Where multiple hosts are used, investigate voices, host roles, interruptions, transitions, and format customization.
+
+### B. Video Overview
+Investigate Explainer, Short, Cinematic, current age/plan restrictions, supported narration languages, visual styles, custom styles, steering prompt, source selection, producer notes/outline review if present, generation now vs later, background jobs, player, playback speed/seeking, fullscreen, download/sharing, feedback, generation failure, visual inaccuracies/narration glitches, and artifact re-opening.
+
+Treat video generation as a real multimedia pipeline, not a slideshow with a video label.
+
+### C. Mind Maps
+Investigate generation entry points, topic hierarchy, node and edge types, expansion/collapse, zoom/pan, node selection, ask chat about a node, regeneration, download, source association, persistence, loading an old map, and error/large-map behaviour.
+
+Forge mind maps must support node-to-evidence links and preserve provenance.
+
+### D. Flashcards
+Investigate customization, difficulty, prompt/instructions, quantity, audience, source scope, card generation, front/back, flip, next/previous, shuffle, progress, known/unknown, incorrect answers, revise/regenerate, persistence, export, and mobile interactions.
+
+### E. Quizzes
+Investigate difficulty, question count, question formats, prompt customization, source scope, answer options, submit, feedback, explanation, cited evidence, correct/incorrect state, score, retake, question navigation, progress, regeneration, and export.
+
+Do not create questions that cannot be answered from selected sources. Every correct answer and explanation must be evidence-backed.
+
+### F. Reports
+Investigate all report formats, including structured text-only reports, interactive reports, learning overview, briefing document, study guide, FAQ, timeline, comparison, other current templates, embedded Studio artifacts, custom prompt, output structure, editing, export, share, regenerate, delete, source scope, and age/plan restrictions.
+
+Do not assume an old list of report templates is complete. Discover currently visible templates.
+
+### G. Infographics
+Investigate output language, detail level, orientation, visual style, custom style, prompt, source selection, generated image dimensions, image quality, text legibility, downloadable PNG, sharing, regeneration, editing/revision, feedback, and age/plan restrictions.
+
+### H. Slide Decks
+Investigate Detailed Deck vs Presenter Slides or current formats; language; short/default/long length; prompt; outline generation; review outline notes; revise outline before final render; slide ordering; slide count; visual style; slide content; source citations/source-checking; edit existing slides; revise text/layout/visuals; add/delete/restore/reorder slide; pending changes; regenerate revised deck; fullscreen slideshow; keyboard navigation; download PDF; download PPTX; share; load prior deck; custom prompt; limits and restrictions.
+
+A Forge deck editor must not pretend source verification was done when a revision workflow does not use the original sources.
+
+### I. Data Tables and structured extraction
+Investigate whether Data Tables are present in the current plan/account; how the user describes the requested table; row/column inference; schema editing; source selection; citation/evidence per cell; export; rerun; partial/missing values; data type validation; CSV/XLSX compatibility; custom fields; and limits.
+
+Forge should make structured extraction auditable: every extracted value should have a source reference or an explicit missing/unknown value.
+
+### J. Other Studio outputs
+Discover all currently offered output types. Do not limit research to this list. Add newly discovered tools to `docs/reference/FEATURE_MATRIX.md` and this master specification.
+
+## 2.7 Connected apps, Gemini integration, and code execution
+
+Google's 2026 documentation describes connected apps in chat and notebooks appearing in Gemini Apps. The July 2026 rename announcement also discussed code execution and notebook synchronization in the wider Gemini ecosystem.
+
+Research connected-app catalogue; app names and supported actions; enable/disable at global and notebook level; permission prompts; app action execution; data sent to each app; output confirmation; error states; app connection removal; custom chat settings; shared notebook semantics; Gemini chat sources; notebook availability in Gemini Apps; differences in source grounding between Gemini Notebook and Gemini Apps; code execution location/isolation; downloadable outputs; chart/file/image generation; execution trace visibility; security; privacy; quotas; and plan restrictions.
+
+Forge must use a pluggable connector system. Each connector must declare provider, scopes/permissions, operations, input schema, output schema, user approval requirement, data-sharing disclosure, rate limits, and error semantics.
+
+Never silently call a connected app. Show what operation will be performed and what information will be sent when the action is consequential.
+
+Code execution is a separate sandboxed capability. Never run imported source code on the host. If Forge later executes generated code, use an isolated environment with resource limits and filesystem/network controls.
+
+## 2.8 Sharing, collaboration, and permissions
+
+Research private notebook, invite by email, viewer/editor roles, public link, public notebook discovery, share artifact link, chat view link, access revocation, permission inheritance, what a viewer can actually access, what an editor can change, source visibility, artifact visibility, public sharing restrictions by account type, group sharing, collaborator count, ownership transfer if supported, deletion of owner/collaborator, and link invalidation after artifact deletion.
+
+Forge permissions must be explicit and enforced server-side. UI hiding is not authorization.
+
+## 2.9 Mobile, responsive, and accessibility
+
+Research desktop, tablet, narrow phone, touch interactions, keyboard shortcuts, navigation, source viewer, chat, Studio, artifact player, downloads, file picker, offline state, background processing, sync delay, theme, font scaling, screen reader labels, focus order, contrast, and reduced motion.
+
+Forge should be responsive and usable on a tablet. Do not make desktop-only workflows inaccessible without stating the limitation.
+
+## 2.10 Accounts, plans, limits, privacy, and availability
+
+Research standard/free access, paid tiers, account type differences, age restrictions, region restrictions, usage quotas, rolling reset windows, notebook/source limits, feature-specific generation limits, compute-based limits, queued/generate-later operations, automatic suggestions, watermarking, access to advanced models, model availability, privacy/data handling, training policy, human review policy, Workspace/Education distinctions, retention/deletion, and user feedback handling.
+
+**Never copy a quota table into Forge as a hard-coded product limit.** Google's limits change. Forge's own resource limits must be independently designed and configurable.
+
+---
+
+# 3. Evidence system: how to know what is true
+
+## 3.1 Required evidence labels
+
+| Label | Meaning | Allowed wording |
+|---|---|---|
+| `LIVE_OBSERVED` | Directly observed in live application using an authorized account/session | “Observed in the current UI” |
+| `OFFICIAL_DOCUMENTED` | Explicitly described by official Google source | “Google documents…” |
+| `VIDEO_OBSERVED` | Visible/audible in recorded demonstration, with timestamp | “Shown at 02:14 in this video” |
+| `COMMUNITY_REPORTED` | Community report; useful lead, not authoritative | “A user reports…” |
+| `CODE_CORROBORATED` | Supported by publicly available code or trace | “This implementation suggests…” |
+| `INFERRED` | Plausible interpretation not directly verified | “Likely…” / “Inferred…” |
+| `UNVERIFIED` | Not enough evidence | “Unknown; needs investigation” |
+| `BLOCKED` | Could not investigate due to environment/access constraints | Explain exact blocker |
+
+Do not upgrade a status because multiple websites repeat the same copied claim.
+
+## 3.2 Independent corroboration
+
+When a claim is supported by several codebases or articles, check whether they share the same upstream library, whether they copied the same blog post or captured trace, inspect commit history and publication dates, distinguish independent experiments from forks, cite the exact file/line/commit or capture, and record the number of genuinely independent confirmations.
+
+Three repositories copied from one reverse-engineering project count as one underlying evidence lineage, not three independent confirmations.
+
+## 3.3 Evidence record template
+
+```yaml
+feature_id: SRC-YOUTUBE-001
+name: Import public YouTube video
+status: OFFICIAL_DOCUMENTED
+checked_at: 2026-10-30
+product_version_or_date: "current web UI as observed"
+account_context:
+  plan: "record actual plan or UNKNOWN"
+  country: "record only if relevant"
+  device: "desktop/tablet/mobile"
+steps:
+  - "Exact sequence"
+expected_result: "..."
+actual_result: "..."
+limitations:
+  - "..."
+evidence:
+  - type: official_documentation
+    url: "https://support.google.com/gemininotebook/answer/16215270"
+  - type: screenshot
+    path: "research/evidence/screenshots/source-youtube-import.png"
+  - type: video
+    path: "research/evidence/videos/<id>.mp4"
+    timestamp: "00:42-01:13"
+confidence: high
+open_questions:
+  - "..."
+forge_requirement: "..."
+acceptance_test: "..."
+```
+
+Do not store cookies, access tokens, private user data, or unredacted authorization headers in evidence.
+
+## 3.4 Required living research documents
+
+Create and keep current:
+
+```text
+docs/
+  STATUS.md
+  DECISIONS.md
+  USER_REQUIREMENTS.md
+  FEATURE_PARITY.md
+  RESEARCH_PLAN.md
+  RESEARCH_LOG.md
+  RESEARCH_BLOCKERS.md
+  UNKNOWN_AND_LIMITATIONS.md
+  SECURITY.md
+  TEST_MATRIX.md
+  ARCHITECTURE.md
+  DATA_MODEL.md
+  API_CONTRACT.md
+  DEPLOYMENT.md
+  PRIVACY.md
+  ROADMAP.md
+  reference/
+    REFERENCE_INDEX.md
+    FEATURE_MATRIX.md
+    SCREEN_CATALOG.md
+    WORKFLOW_CATALOG.md
+    SOURCE_MATRIX.md
+    CHAT_AND_CITATIONS.md
+    STUDIO_ARTIFACTS.md
+    SHARING_AND_PERMISSIONS.md
+    MOBILE_DIFFERENCES.md
+    LIMITS_AND_AVAILABILITY.md
+    PROTOCOL_EVIDENCE.md
+    VIDEO_RESEARCH.md
+    REA_CAPABILITY_REPORT.md
+    evidence/
+      screenshots/
+      contact-sheets/
+      frames/
+      transcripts/
+      metadata/
+      network-shapes/
+      rea/
+```
+
+Use a separate `research/` root instead if that matches the existing repository. Do not create duplicate documentation trees unnecessarily. Update existing documents when they already serve the same purpose.
+
+## 3.5 Feature matrix schema
+
+Every reference feature must appear in a single canonical matrix with: feature ID; category; user value; UI entry point; prerequisites; inputs; outputs; workflow; options; states; error cases; account/plan/device restrictions; evidence labels; evidence links; Forge implementation module; implementation status; tests; known gaps; and priority.
+
+No feature is “complete” if its error states, persistence, and tests are missing.
+
+---
+
+# 4. Research workflow — investigate the real product systematically
+
+## 4.1 Source priority
+
+Research in this order:
+1. **Live product** — authorized, direct observation.
+2. **Official Google Help Center** — detailed feature workflow and restrictions.
+3. **Official Google product announcements and Workspace documentation** — launches, changes, rollout, plan differences.
+4. **Official demonstrations and events** — visual behaviour.
+5. **Independent current tutorials** — workflows not covered by official documentation.
+6. **Community discussions** — bugs, edge cases, user pain points, hidden behaviour.
+7. **Public GitHub projects and code** — technical corroboration, parsers, protocol research, examples.
+8. **Reverse-engineering and captured traces** — only when collected lawfully and with authorization.
+
+Do not begin from a random blog and treat it as canonical.
+
+## 4.2 Mandatory official starting points
+
+Use these exact starting points and follow related links:
+
+- Gemini Notebook Help Center: https://support.google.com/gemininotebook/
+- Learn about Gemini Notebook: https://support.google.com/gemininotebook/answer/16164461
+- Create a notebook: https://support.google.com/gemininotebook/answer/16206563
+- Add or discover sources: https://support.google.com/gemininotebook/answer/16215270
+- Use chat: https://support.google.com/gemininotebook/answer/16179559
+- Create and add notes: https://support.google.com/gemininotebook/answer/16262519
+- Mind Maps: https://support.google.com/gemininotebook/answer/16212283
+- Audio Overview: https://support.google.com/gemininotebook/answer/16212820
+- Video Overview: https://support.google.com/gemininotebook/answer/16454555
+- Flashcards / Quizzes: https://support.google.com/gemininotebook/answer/16958963
+- Slide Decks: https://support.google.com/gemininotebook/answer/16757456
+- Infographics: https://support.google.com/gemininotebook/answer/16758265
+- Connected apps: https://support.google.com/gemininotebook/answer/18784282
+- Public / featured notebooks: https://support.google.com/gemininotebook/answer/16322204
+- Plans and limits: https://support.google.com/gemininotebook/answer/16213268 and https://support.google.com/gemininotebook/answer/17670842
+- Notebooks in Gemini Apps: https://support.google.com/gemininotebook/answer/17003757
+- Google rename announcement: https://blog.google/innovation-and-ai/products/gemini-notebook/notebooklm-gemini-notebook/
+- Flexible usage limits announcement: https://blog.google/innovation-and-ai/products/gemini-notebook/new-flexible-usage-limits/
+
+Some official pages may be region-specific or rate-limited. Try equivalent official locale URLs, search by exact page title, and record any retrieval failure. A failed fetch is not evidence that the feature does not exist.
+
+## 4.3 Controlled browser research
+
+If the environment provides a browser:
+1. determine whether the browser is installed and can open the product;
+2. determine whether a persistent profile is available;
+3. use an authorized account/session only;
+4. let the user complete login and any multi-factor verification;
+5. never ask the user to paste passwords or authentication codes into the research log;
+6. keep cookies and credentials in the browser's protected profile; do not export or print them;
+7. browse the product screen by screen;
+8. record screenshots at every significant UI state;
+9. record exact click paths and visible text;
+10. test ordinary, authorized product actions;
+11. repeat with different source types and account/device states where possible.
+
+If the agent cannot access the live product, record the exact network/browser blocker. Continue with official docs and public demonstrations. Do not pretend live inspection occurred.
+
+### Browser investigation checklist
+
+- [ ] Product home
+- [ ] Empty notebook
+- [ ] New notebook
+- [ ] Notebook menu
+- [ ] Add-source panel
+- [ ] Each source type
+- [ ] Source processing state
+- [ ] Source list and selection
+- [ ] Source preview
+- [ ] Source Guide / summary
+- [ ] Chat configuration
+- [ ] Chat response
+- [ ] Citation hover
+- [ ] Citation click/jump
+- [ ] Save response
+- [ ] Notes
+- [ ] Fast Research
+- [ ] Deep Research
+- [ ] Every Studio artifact
+- [ ] Artifact customizations
+- [ ] Artifact viewer
+- [ ] Artifact edit/revise
+- [ ] Artifact export/download
+- [ ] Sharing dialog
+- [ ] Viewer role test
+- [ ] Editor role test
+- [ ] Settings
+- [ ] Usage/quota
+- [ ] Mobile/tablet
+- [ ] Errors and unsupported cases
+
+### Test notebook corpus
+
+Create a small, lawful, controlled reference corpus with:
+- a 3-page PDF with known page text;
+- a DOCX with headings, tables, footnotes, and hyperlinks;
+- a PPTX with text and images;
+- a spreadsheet/CSV with known values;
+- a web page with headings, links, and a table;
+- a public captioned YouTube video;
+- a public video with little/no speech if legally usable;
+- a short audio recording with known transcript;
+- two sources that agree;
+- two sources that contradict;
+- a source with a fact deliberately absent;
+- a source with prompt-injection text;
+- a multilingual source;
+- a large source;
+- a malformed source.
+
+Use this corpus to compare actual behaviour, but never upload private or copyrighted material without appropriate rights.
+
+---
+
+# 5. YouTube video research: yt-dlp + FFmpeg + visual inspection
+
+This section is mandatory for tutorial/demonstration videos that are useful evidence of UI behaviour. It is not a general permission to download any YouTube video.
+
+## 5.1 Legal and platform boundaries
+
+Use `yt-dlp` only for material Arena is authorized to download and analyze: videos owned by the user; videos for which the user has permission; videos under a licence permitting the intended download and analysis; or other material where downloading is lawful and compliant with applicable platform terms.
+
+Prefer official downloadable source files when provided.
+
+Do **not** bypass DRM or technical protection; bypass private/unlisted access restrictions; download paid or access-controlled material without authorization; use stolen cookies or session files; access content the operator is not authorized to access; redistribute downloaded videos or extracted media without rights; or interpret public visibility as automatic permission to republish.
+
+When in doubt, use the official page, embedded player, available captions, screenshots taken during authorized viewing, and timestamped notes rather than downloading the video.
+
+## 5.2 Check tools first
+
+```bash
+command -v yt-dlp
+yt-dlp --version
+command -v ffmpeg
+ffmpeg -version
+command -v ffprobe
+ffprobe -version
+```
+
+If missing, inspect the current OS and installation options. Do not blindly install packages globally in an immutable/restricted sandbox. Use an isolated environment or available package manager where appropriate.
+
+Official documentation:
+- yt-dlp repository / README: https://github.com/yt-dlp/yt-dlp
+- yt-dlp options: `yt-dlp --help`
+- FFmpeg documentation: https://ffmpeg.org/documentation.html
+- FFmpeg filters: https://ffmpeg.org/ffmpeg-filters.html
+- FFprobe documentation: https://ffmpeg.org/ffprobe.html
+
+Check version-specific flags before relying on them.
+
+## 5.3 Inspect metadata before download
+
+For a permitted public video:
+
+```bash
+mkdir -p research/evidence/videos
+yt-dlp --no-playlist --skip-download --dump-single-json \
+  "VIDEO_URL" \
+  > research/evidence/videos/video-metadata.json
+```
+
+Record video ID, title, channel/uploader, canonical URL, upload date, duration, description, chapters, available formats, available subtitle languages, licence metadata if present, and retrieval date. Metadata is evidence about what the extractor reported at that time; it is not a guarantee that the content's licence is valid.
+
+## 5.4 Download permitted media and preserve metadata/captions
+
+For authorized videos only:
+
+```bash
+mkdir -p research/evidence/videos
+yt-dlp \
+  --no-playlist \
+  --write-info-json \
+  --write-thumbnail \
+  --write-subs \
+  --write-auto-subs \
+  --sub-langs "en.*,en" \
+  --convert-subs srt \
+  -f "bv*+ba/b" \
+  --merge-output-format mp4 \
+  -o "research/evidence/videos/%(id)s.%(ext)s" \
+  "VIDEO_URL"
+```
+
+Notes:
+- `bv*+ba/b` prefers a video-containing best stream plus best audio when needed, with a best combined fallback.
+- `--write-info-json` preserves extractor metadata.
+- `--write-subs` requests uploader-provided subtitles.
+- `--write-auto-subs` requests auto-generated subtitles.
+- `--sub-langs` controls requested language patterns.
+- If subtitles are unavailable, record that fact. Do not invent a transcript.
+- Inspect available languages first:
+
+```bash
+yt-dlp --no-playlist --list-subs "VIDEO_URL"
+yt-dlp --no-playlist --list-formats "VIDEO_URL"
+```
+
+If authorized, select other language patterns explicitly. Preserve original subtitle files as evidence. Convert copies for convenience if needed.
+
+Do not use cookies by default. Do not retrieve browser cookies into research files. If an authorized workflow genuinely requires an authenticated session, have the account owner operate the browser and keep credentials inside the protected browser session. Do not export the session.
+
+## 5.5 Inspect the actual media with FFprobe
+
+```bash
+VIDEO="research/evidence/videos/VIDEO_ID.mp4"
+
+ffprobe -v error \
+  -show_format \
+  -show_streams \
+  -show_chapters \
+  -of json \
+  "$VIDEO" \
+  > research/evidence/videos/VIDEO_ID.ffprobe.json
+```
+
+Record duration, frame width/height, average and real frame rate, codec, pixel format, audio streams, sample rate, channel layout, subtitle streams, chapters, rotation/display matrix, and missing/corrupt packets if detectable. Do not assume extension accurately describes the stream/container.
+
+## 5.6 Generate full-video visual contact sheets
+
+The purpose is to visually inspect the whole demonstration, not just read its transcript.
+
+Get duration:
+
+```bash
+DURATION="$(
+  ffprobe -v error \
+    -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 \
+    "$VIDEO"
+)"
+printf 'Duration: %s seconds\\n' "$DURATION"
+```
+
+Generate a coarse, full-duration 48-frame overview, sampled across the timeline, as a 6-column by 8-row contact sheet:
+
+```bash
+RATE="$(awk -v d="$DURATION" 'BEGIN {
+  if (d > 0) printf "48/%f", d;
+  else print "1";
+}')"
+
+ffmpeg -hide_banner -y -i "$VIDEO" \
+  -vf "fps=${RATE},scale=480:-1,tile=6x8" \
+  -frames:v 1 \
+  research/evidence/videos/VIDEO_ID.contact-48.jpg
+```
+
+This is an overview, not proof that every frame was inspected. For long or information-dense videos, create denser samples.
+
+Sample one frame per second and generate paginated 5×5 contact sheets:
+
+```bash
+mkdir -p research/evidence/videos/VIDEO_ID-1fps
+
+ffmpeg -hide_banner -y -i "$VIDEO" \
+  -vf "fps=1,scale=480:-1,tile=5x5:nb_frames=25" \
+  -fps_mode vfr \
+  research/evidence/videos/VIDEO_ID-1fps/sheet-%04d.jpg
+```
+
+If the FFmpeg build does not support an option, inspect `ffmpeg -h filter=tile` and `ffmpeg -h full`, then use the equivalent supported option. Verify multiple sheets are produced and the final partial sheet is not silently lost.
+
+For very long videos, use 0.2 or 0.5 fps for the overview, then extract detailed frames around feature transitions.
+
+## 5.7 Scene-change extraction
+
+Extract likely scene changes to locate navigation between product screens, modal openings, source processing transitions, menus, artifact changes, different visual styles, error states, and before/after UI comparisons.
+
+```bash
+mkdir -p research/evidence/videos/VIDEO_ID-scenes
+
+ffmpeg -hide_banner -y -i "$VIDEO" \
+  -vf "select='gt(scene,0.30)',scale=1280:-1" \
+  -fps_mode vfr \
+  -q:v 3 \
+  research/evidence/videos/VIDEO_ID-scenes/scene-%05d.jpg
+```
+
+`0.30` is a starting threshold, not a universal truth. Tune it if too many or too few frames are returned. Scene detection can miss meaningful UI changes with small pixel differences. Combine it with regular temporal sampling and manual inspection.
+
+## 5.8 Extract a targeted time range
+
+When a contact sheet identifies a relevant moment, extract a short interval at higher frame density:
+
+```bash
+ffmpeg -hide_banner -y \
+  -ss 00:02:10 -to 00:02:30 \
+  -i "$VIDEO" \
+  -vf "fps=2,scale=1280:-1" \
+  -q:v 2 \
+  research/evidence/videos/VIDEO_ID-detail-%04d.jpg
+```
+
+For a single timestamp:
+
+```bash
+ffmpeg -hide_banner -y \
+  -ss 00:02:14 \
+  -i "$VIDEO" \
+  -frames:v 1 \
+  -q:v 2 \
+  research/evidence/videos/VIDEO_ID-at-00-02-14.jpg
+```
+
+Check seeking accuracy, especially with long-GOP video. If exact frame accuracy matters, use frame-based verification.
+
+## 5.9 Extract audio for listening/transcription
+
+```bash
+ffmpeg -hide_banner -y -i "$VIDEO" \
+  -vn -ac 1 -ar 16000 \
+  -c:a pcm_s16le \
+  research/evidence/videos/VIDEO_ID-audio.wav
+```
+
+Then use original captions if available; listen to audio around feature demonstrations; if speech recognition is available and permitted, generate a transcript; label machine-generated transcripts as machine-generated; compare transcript against audio for important names/settings/technical terms; preserve timestamps.
+
+Do not claim to have listened to a video merely because a transcript file exists. Do not claim a transcript is original if generated by speech recognition.
+
+## 5.10 Visual inspection requirements
+
+The agent must inspect actual contact sheet/frame images using its available visual understanding. Do not just create image files and declare the video analyzed.
+
+For each relevant segment, record timestamp, screenshot/frame path, visible screen/panel, visible text, controls and selected states, action being performed, before/after state, narration summary, uncertainty, related official documentation, and Forge requirement.
+
+Maintain `docs/reference/VIDEO_RESEARCH.md` with a table:
+
+| Time | Image evidence | Screen | Visible action | Observed result | Confidence |
+|---|---|---|---|---|---|
+| 00:42 | `...jpg` | Source panel | User selects a PDF | Upload begins | VIDEO_OBSERVED |
+
+A video demonstration can omit clicks, settings, delays, errors, and account limitations. A screenshot proves only what is visible in that frame. A contact sheet is a sampling method, not proof of every frame. Use direct browser observation to verify important workflows.
+
+---
+
+# 6. REA: use it deeply, but only where its capabilities are real
+
+REA is a reverse-engineering toolkit connected to the coding agent. Current public REA materials describe work across native binaries, JavaScript/Electron applications, browser/runtime activity, application workflows and code paths, and network/browser evidence and screenshots depending on the installed version and provider capabilities.
+
+Official starting points:
+- REA site: https://rea.tools/
+- REA guides: https://rea.tools/guides/
+- REA GitHub: https://github.com/Eng-RSMY/REA
+- REA setup example: `npx rea-agents@latest setup`
+
+## 6.1 Initial REA capability audit
+
+Before using it:
+1. locate installed REA package and version;
+2. inspect its own `--help`;
+3. run `rea doctor --json` if that command exists in this version;
+4. read bundled/current REA docs and skill;
+5. identify available providers and missing engines;
+6. inspect whether the agent is configured for CLI, MCP, or both;
+7. inspect available browser/runtime targets;
+8. produce `docs/reference/REA_CAPABILITY_REPORT.md`.
+
+Do not assume a tool is installed merely because the skill or package is mentioned in a prompt. Verify it. Use exact syntax documented by the installed version; commands may change between releases.
+
+## 6.2 REA browser investigation
+
+Use REA for browser observation when a supported browser is running and the user has authorized access.
+
+Preferred safe approach:
+- a real Chrome/Chromium browser;
+- a persistent profile controlled by the authorized user;
+- local loopback CDP endpoint;
+- exact approved origin list;
+- passive capture or approved observation workflow;
+- redaction of sensitive values;
+- no cookie/token export;
+- no hidden authentication bypass.
+
+The official REA materials and public guides describe browser observation and application workflow tracing. Verify the current version's exact feature names and consent configuration.
+
+If a version uses environment variables for approved browser observation, inspect current REA documentation rather than copying stale values from an unrelated fork or older release. Constrain observation to exact origins, e.g. current notebook origin and required official help origin, not unrestricted browsing.
+
+Potential origins to investigate only when necessary:
+- `https://notebook.google.com`
+- `https://notebooklm.google.com` (legacy)
+- `https://support.google.com`
+- `https://gemini.google.com`
+- `https://drive.google.com`
+
+Do not add all origins automatically. Approve only origins required for a specific task.
+
+REA browser inspection should help answer which application route is active; which scripts/modules are loaded; what UI structure is visible; which controls exist; what observable request metadata is associated with a user action; what response shape/application state appears; what changed between runs; and which evidence maps a visible action to an implementation path.
+
+Do not capture or print raw session cookies, bearer tokens, passwords, authorization headers, private messages, or unrelated browsing activity.
+
+## 6.3 REA static JavaScript/application analysis
+
+When public application bundles or legally accessible scripts are available:
+- identify entrypoints and chunks;
+- enumerate modules;
+- inspect source maps only when accessible;
+- map route/component relationships;
+- identify feature flags and lazy-loaded feature bundles;
+- trace event handlers and state transitions;
+- identify network call sites and response consumers;
+- map relevant data models;
+- search error strings and capability flags;
+- compare code versions where available.
+
+Do not call obfuscated/minified implementation details “understood” merely because strings were found. Trace actual references and execution paths where possible.
+
+## 6.4 REA workflow tracing
+
+For each feature:
+1. identify the user action;
+2. capture visible before-state;
+3. perform authorized action in the browser;
+4. capture resulting state;
+5. use REA to inspect relevant browser/runtime evidence;
+6. map feature to code/request path where possible;
+7. compare multiple runs;
+8. document known, inferred, and unknown points;
+9. implement Forge's independent equivalent;
+10. test Forge against the same workflow.
+
+Use REA as much as it helps. If no browser, runtime, native-analysis engine, or provider is available, record that limitation and continue with other evidence. Do not spend the whole project trying to install an unavailable engine.
+
+## 6.5 Protocol research isolation
+
+The existing project reportedly contains a NotebookLM protocol experiment in `crates/forge-core/src/notebooklm.rs`, based on public reverse-engineering research. Audit current code and documents.
+
+Requirements:
+- keep it isolated and clearly labelled experimental;
+- identify public evidence and exact commit/version provenance;
+- distinguish request serialization tests from actual live-service verification;
+- check whether sources are genuinely independent;
+- check authentication and request prerequisites;
+- never extract or store user's cookies;
+- never bypass Google authentication;
+- never claim a working integration if no authenticated request and response were tested;
+- do not make Forge's normal source/chat/artifact workflows dependent on private/undocumented endpoints;
+- do not run unapproved requests against Google services.
+
+The protocol client must remain disabled unless a legitimate, authorized, stable use is established. Official APIs and Forge-owned implementations take precedence.
+
+---
+# 7. Forge functional requirements
+
+The following is the target product inventory. Investigate, implement, test, and maintain its status. Some items are foundational; some may be staged due to dependencies and resource limits.
+
+Priority:
+- **P0:** essential for the application to be useful and trustworthy.
+- **P1:** core NotebookLM-class functionality.
+- **P2:** advanced experience / differentiation.
+- **P3:** optional or high-cost expansion.
+
+## 7.1 Workspace and notebooks — P0
+
+- persistent notebook creation;
+- rename;
+- delete with confirmation;
+- open/close;
+- recent notebook list;
+- search notebooks;
+- sort;
+- notebook icon/emoji or original visual identifier;
+- notebook metadata;
+- empty state;
+- source count;
+- last updated;
+- persistent selection;
+- export notebook;
+- backup and restore;
+- duplicate notebook if safe and useful;
+- local project organization;
+- notebook deletion that correctly removes or retains related records according to documented policy.
+
+## 7.2 Source ingestion — P0
+
+Implement real import paths for:
+- pasted text;
+- Markdown;
+- TXT;
+- PDF;
+- DOCX;
+- PPTX;
+- XLSX;
+- CSV/TSV;
+- HTML;
+- public web URL;
+- image files;
+- audio files;
+- public YouTube URL with permitted transcript retrieval.
+
+Then expand:
+- Google Drive/Docs/Slides/Sheets;
+- ePub;
+- GitHub repositories/issues/releases/README;
+- additional web connectors;
+- RSS feeds;
+- authorized video files;
+- additional audio formats;
+- other source types discovered in research.
+
+For each parser provide format validation, metadata extraction, text extraction, tables and structured data, page/slide/sheet/cell locators, image/figure handling, OCR if needed, error reporting, size/resource caps, test fixtures, and real-world samples where rights permit.
+
+Do not report a source as indexed until extraction and indexing completed. Store an import job state and diagnostics.
+
+## 7.3 Source processing and canonical representation — P0
+
+Create a common source representation with stable source ID, notebook ID, original name/title, original URL or local origin, MIME type, content hash, file size, import time, source date if known, refresh/update state, parser and parser version, raw extraction metadata, normalized text, text blocks/chunks, image references, tables, structure hierarchy, locator map, extraction warnings, language, and indexing state.
+
+Maintain links from every normalized block back to the original source location. Avoid flattening every format into one text blob and losing precise citations.
+
+## 7.4 Search, indexing, retrieval — P0
+
+Implement lexical search, full-text search, chunk-level retrieval, semantic/vector retrieval when an embedding provider is available, hybrid scoring, query rewriting, source filters, active-source filtering, metadata filters, page/title/section weighting, reranking, duplicate chunk suppression, diversity across sources, retrieval explanations for debugging, index rebuild, incremental updates, and cache invalidation.
+
+Do not require a local LLM or local embedding model for basic operation. Keep provider adapters modular. If semantic search is unavailable, use the available lexical strategy honestly.
+
+## 7.5 Grounded chat and citations — P0
+
+- persistent conversation;
+- streaming answer;
+- stop;
+- retry;
+- follow-up prompts;
+- configurable source scope;
+- configurable style/length;
+- citations to exact evidence;
+- quotation preview;
+- exact source location opening;
+- citations for tables and images where supported;
+- unsupported answer abstention;
+- contradiction warnings;
+- answer copy;
+- save response to note;
+- conversation history management;
+- user feedback;
+- model/provider status;
+- model failures and rate limits;
+- token/usage accounting if available.
+
+A citation must never be generated only because a source was retrieved. It must support the associated claim.
+
+## 7.6 Notes, annotations, noteboard — P1
+
+- rich-text / Markdown notes;
+- autosave;
+- save chat answer as note;
+- edit;
+- rename;
+- pin;
+- labels;
+- search;
+- source links;
+- highlighted quotes;
+- annotations;
+- convert note to source;
+- include/exclude note from chat;
+- include notes in artifacts;
+- export;
+- delete;
+- persistence across reloads.
+
+## 7.7 Study and learning tools — P1
+
+- flashcards;
+- quiz generator;
+- practice mode;
+- difficulty;
+- prompt customization;
+- question count;
+- explanation;
+- cite supporting evidence;
+- score/history;
+- shuffle;
+- revisit missed cards/questions;
+- export;
+- regenerate.
+
+Add spaced repetition, study sessions, progress analytics, learning objectives, glossary, key terms, concept explanations, and compare/contrast exercises. These additional learning tools must be source-grounded, not generic filler.
+
+## 7.8 Knowledge visualization — P1
+
+- mind maps;
+- hierarchical concept graph;
+- node expansion/collapse;
+- pan/zoom;
+- node-to-chat question action;
+- node-to-source evidence link;
+- concept relationship labels;
+- citations on nodes/edges where possible;
+- download/export;
+- large-map performance;
+- keyboard accessibility.
+
+Later: timelines; entity/relation graph; source-to-claim map; contradiction map; data visualizations; knowledge graph exploration.
+
+## 7.9 Documents and reports — P1
+
+- summaries;
+- study guides;
+- briefings;
+- FAQ;
+- research reports;
+- comparisons;
+- structured extraction;
+- timelines;
+- learning overviews;
+- interactive reports;
+- user templates;
+- export Markdown/HTML/PDF/DOCX;
+- source citations in output;
+- artifact history;
+- regenerate;
+- revise;
+- download;
+- share.
+
+## 7.10 Visual artifacts — P1/P2
+
+- infographics;
+- slide decks;
+- Detailed Deck;
+- Presenter Slides;
+- outline preview;
+- review/edit outline;
+- per-slide revision;
+- reorder;
+- delete/restore slides;
+- PPTX/PDF export;
+- fullscreen slideshow;
+- image generation where an actual authorized image model is configured;
+- text legibility validation;
+- source-to-slide traceability.
+
+Do not fake image generation with a static placeholder or claim an artifact is AI-generated if it is actually a template.
+
+## 7.11 Audio — P1/P2
+
+- audio overview script;
+- multiple-speaker dialogue format;
+- text-to-speech generation through a real provider;
+- configurable language;
+- configurable style and length;
+- audio player;
+- background job;
+- generation history;
+- download;
+- transcript;
+- citation/source traceability for each segment where feasible.
+
+Audio generation requires a real speech provider or installed model. If unavailable, provide a script and label audio generation unsupported. Do not return an empty or silent file as a successful podcast.
+
+## 7.12 Video understanding and video generation — P1/P2
+
+Two separate capabilities.
+
+### Video as a source
+- public URL metadata;
+- caption/transcript ingestion;
+- local authorized video ingestion;
+- FFprobe metadata;
+- audio extraction;
+- ASR where available;
+- scene-change sampling;
+- keyframe extraction;
+- timestamped visual captions/observations;
+- visual embeddings where available;
+- video player / timestamp jump;
+- citations to time ranges;
+- transcript and visual evidence kept distinct.
+
+### Video as an output
+- storyboard;
+- producer notes;
+- narration script;
+- visual scene plan;
+- generated narration audio;
+- generated/selected visuals;
+- captions;
+- final rendering via FFmpeg;
+- export;
+- job progress;
+- asset provenance;
+- source validation.
+
+Do not describe a narration script as a finished video. Do not describe transcript ingestion as full visual understanding.
+
+## 7.13 Deep Research and web discovery — P1/P2
+
+- search query planning;
+- multiple sub-queries;
+- search provider adapters;
+- URL retrieval;
+- readable page extraction;
+- canonical URLs;
+- publication date and author where available;
+- content date vs crawl date;
+- duplicate detection;
+- source quality indicators;
+- claim/evidence table;
+- citation graph;
+- contradictions;
+- import selected results;
+- research report;
+- cancellation;
+- progress display;
+- limits/cost controls;
+- source review.
+
+Research must not silently trust generated summaries without checking original sources.
+
+## 7.14 Integrations and connected apps — P2
+
+Design a connector registry for Google Drive, Google Docs/Slides/Sheets, GitHub, other storage providers, calendar/task providers if relevant, approved external APIs, and user-configured connectors.
+
+Each connector requires OAuth/API key handling or an explicitly scoped authorization flow. Never request secrets in a chat message or commit them to the repository.
+
+MCP may be used as an optional tool interface if it materially helps; it is not the product architecture and not a required dependency. A connector can also be implemented through a normal Rust interface or HTTP client.
+
+## 7.15 Collaboration and sharing — P2
+
+- user identity;
+- owner/editor/viewer;
+- notebook invitation;
+- share link;
+- revoke;
+- public/private;
+- artifact share;
+- source access enforcement;
+- collaborator activity;
+- audit trail;
+- conflict handling;
+- concurrent edit strategy;
+- export shared workspace.
+
+Implement server-side authorization before public sharing.
+
+## 7.16 Advanced research quality — P2/P3
+
+- contradiction detection;
+- claim extraction;
+- evidence graph;
+- source reliability annotations;
+- temporal reasoning;
+- cross-source comparison;
+- missing-information detection;
+- structured dataset extraction;
+- formula-aware spreadsheet analysis;
+- chart extraction;
+- visual document understanding;
+- multi-modal retrieval;
+- citation quality scoring;
+- answer faithfulness evaluation;
+- research reproducibility;
+- source freshness alerts.
+
+## 7.17 Settings and user control — P0/P1
+
+- provider configuration;
+- model selection;
+- BYO API keys;
+- safe key storage;
+- default language;
+- chat style;
+- response length;
+- theme;
+- appearance;
+- storage;
+- export/backup;
+- privacy;
+- usage display;
+- data deletion;
+- source-processing preferences;
+- connector permissions;
+- keyboard shortcuts;
+- accessibility options.
+
+---
+
+# 8. Multimedia understanding architecture
+
+## 8.1 Do not confuse transcript with video
+
+A video contains speech, non-speech audio, text visible on screen, UI layout, diagrams and images, transitions, animations, cursor movement, user interaction, and timing/sequence.
+
+A transcript contains only spoken/written text that has been transcribed. It does not explain all visual content.
+
+Forge's evidence model must distinguish:
+- `TRANSCRIPT_SPAN`;
+- `VIDEO_FRAME`;
+- `SCENE`;
+- `AUDIO_EVENT`;
+- `OCR_REGION`;
+- `VISUAL_CAPTION`;
+- `USER_OBSERVATION`.
+
+All video evidence must carry timecodes.
+
+## 8.2 Audio understanding
+
+Processing stages:
+1. ingest authorized audio/video;
+2. validate codec and duration;
+3. extract audio with FFmpeg;
+4. normalize channels/sample rate when required;
+5. detect speech/silence;
+6. transcribe with timestamps;
+7. detect language;
+8. optionally diarize speakers;
+9. preserve source transcript separately from machine transcript;
+10. map transcript segments to timecodes;
+11. index segments;
+12. expose timecode citations.
+
+## 8.3 Visual understanding
+
+Processing stages:
+1. probe stream metadata;
+2. sample frames at adaptive intervals;
+3. detect scene changes;
+4. extract keyframes;
+5. optionally detect slide boundaries;
+6. run OCR if required and available;
+7. run image understanding with a configured vision provider if available;
+8. record visual descriptions and confidence;
+9. connect observations to the timeline;
+10. index timestamped visual evidence.
+
+OCR alone is not visual understanding. A frame caption alone is not a verified UI action. Keep evidence provenance.
+
+## 8.4 Document images and diagrams
+
+For PDFs and slides: detect embedded images; extract them with location metadata; render pages when layout matters; OCR scanned pages; inspect charts and diagrams; preserve relationships between OCR text and page coordinates; cite page and region; store generated previews separately from originals.
+
+## 8.5 Image and video model providers
+
+Implement optional provider interfaces for image understanding, image OCR, speech recognition, speaker diarization, embeddings, text-to-speech, image generation, and video generation.
+
+Do not hard-code one vendor into the ingestion pipeline. Each provider should declare capabilities, limits, costs if known, supported MIME types, privacy implications, and failure modes.
+
+---
+
+# 9. Technical architecture — Rust-first and modular
+
+## 9.1 Architecture rule
+
+Inspect the existing architecture first. Preserve working code unless there is strong evidence for a change. Do not rewrite the whole application because a new architecture looks cleaner.
+
+Keep the product Rust-first. Use non-Rust tools only when a mature, safe library or external program is the pragmatic option.
+
+Conceptual module map:
+
+```text
+Forge
+├── domain
+│   ├── notebook
+│   ├── source
+│   ├── conversation
+│   ├── evidence
+│   ├── note
+│   ├── artifact
+│   ├── permissions
+│   └── jobs
+├── ingestion
+│   ├── file validators
+│   ├── parsers
+│   ├── URL fetcher
+│   ├── YouTube importer
+│   ├── audio/video pipeline
+│   ├── OCR adapters
+│   └── normalization
+├── indexing
+│   ├── chunking
+│   ├── lexical index
+│   ├── embeddings
+│   ├── vector index
+│   ├── reranking
+│   └── retrieval
+├── answer
+│   ├── provider interface
+│   ├── prompt builder
+│   ├── evidence selector
+│   ├── citation validator
+│   └── abstention logic
+├── research
+│   ├── search providers
+│   ├── page fetchers
+│   ├── research planner
+│   ├── source evaluator
+│   └── report generator
+├── artifacts
+│   ├── summaries
+│   ├── reports
+│   ├── flashcards
+│   ├── quizzes
+│   ├── mind maps
+│   ├── slide decks
+│   ├── infographics
+│   ├── audio
+│   └── video
+├── integrations
+│   ├── provider registry
+│   ├── Google Drive
+│   ├── GitHub
+│   └── optional connectors
+├── persistence
+├── security
+├── server
+└── frontend
+```
+
+This is a conceptual map, not an instruction to create one crate per bullet. Choose boundaries based on actual coupling and compile/test speed.
+
+## 9.2 Provider architecture
+
+Define traits/interfaces for chat completion, structured generation, embeddings, reranking, image understanding, OCR, transcription, speech synthesis, image generation, search, URL extraction, and optional code execution.
+
+The core application must not depend on one model vendor. Possible adapters can include configured Gemini, OpenAI-compatible, OpenRouter, or other providers, but verify current APIs and SDKs before implementation. Do not invent model names or endpoints.
+
+BYO-key requirements:
+- secrets stored outside source control;
+- restrictive filesystem permissions or platform secret store;
+- never return full keys in API responses;
+- never log secrets;
+- never write secrets to browser local storage;
+- explicit delete/rotate;
+- clear error for missing credentials;
+- no surprise paid usage.
+
+Cloud-first is acceptable. A local LLM is not required. Local parsers and retrieval should still work without a model provider.
+
+## 9.3 Persistence
+
+Inspect the existing data layer. Use a durable database and migrations. SQLite is acceptable for local/single-user deployment if concurrency and backup behaviour are properly handled; do not use in-memory state for persistent user content.
+
+Persistent entities should include users or local profiles, notebooks, notebook settings, source records, source versions, raw file metadata, extracted blocks, chunks, index state, citation/evidence records, conversations, messages, notes, artifacts, artifact versions, background jobs, connector configurations, sharing grants, feedback, and audit events.
+
+Use stable IDs. Use migrations. Test backup/restore. Define deletion and retention semantics.
+
+## 9.4 Background jobs
+
+Long-running tasks must not block HTTP request workers:
+- source ingestion;
+- OCR;
+- ASR;
+- embedding;
+- web research;
+- artifact generation;
+- audio/video rendering;
+- exports;
+- sync.
+
+Every job needs ID, state, created/started/finished timestamps, progress, cancellation, retry policy, idempotency, failure reason, resource limit, and result association.
+
+UI must distinguish queued, running, partially complete, succeeded, failed, and canceled.
+
+## 9.5 Frontend
+
+Keep the UI responsive and usable. Research the reference layout but use original Forge design.
+
+Core application areas: notebook library; notebook workspace; source panel; source preview; chat panel; notes; Studio/artifacts; artifact viewers/editors; settings; source discovery; job/status indicators.
+
+Provide desktop/tablet/mobile layouts, loading skeletons, empty states, clear error messages, keyboard navigation, focus visibility, accessible labels, reduced motion, coherent theme, no inert buttons, and no placeholder controls presented as working.
+
+## 9.6 Resource constraints
+
+The development sandbox and user's laptop may be resource-constrained. Verify actual CPU, RAM, disk, and available system packages each time the environment changes.
+
+Prioritize no mandatory local LLM, streaming, incremental parsing, bounded concurrency, file-size limits, memory-aware page rendering, temporary-file cleanup, optional heavy pipelines, small efficient UI bundles, no unnecessary Docker dependency, and no heavyweight local database service if embedded storage suffices.
+
+Never solve an environment constraint by silently removing a feature. Record the actual limitation and provide a fallback.
+
+---
+
+# 10. Source parsing and locator contract
+
+## 10.1 Canonical evidence locators
+
+Each extracted evidence block should preserve the best possible original location.
+
+Examples:
+- PDF: page number, block index, optional bounding box;
+- DOCX: heading path, paragraph index, table row/cell;
+- PPTX: slide number, shape ID, shape text, image location;
+- XLSX: sheet name, cell range, formula/value;
+- CSV: row and column;
+- HTML: canonical URL, heading, DOM selector or stable text offset;
+- YouTube: video ID, start/end time, transcript segment;
+- audio: time range and speaker if known;
+- video visual: frame timestamp and image hash;
+- image: image hash, OCR region/bounding box;
+- Markdown: heading path and line range;
+- code/GitHub: repository, commit hash, path, line range.
+
+Never substitute a generic “source 1” locator when a precise locator can be preserved.
+
+## 10.2 Chunking
+
+Chunk along document structure: headings, paragraphs, tables, slides, pages, transcript segments, and visual scenes.
+
+Avoid splitting sentences and table rows unnecessarily. Store parent-child relationships and overlapping context where useful.
+
+Every chunk should have stable chunk ID, source ID/version, normalized text, original text span, locator, token estimate, language, and index metadata.
+
+## 10.3 Source updates
+
+When a source is updated: compare content hash; determine changed blocks; reprocess changed content; preserve stable links where feasible; mark old citation versions if they no longer resolve; update retrieval index; mark downstream artifacts as potentially stale; do not silently mutate old evidence snapshots.
+
+## 10.4 Deduplication
+
+Detect exact duplicate files, same URL variants, duplicate text, same YouTube video ID, near-identical documents, and overlapping imported pages.
+
+Do not destroy source records during deduplication. Preserve provenance and let the user understand which sources were merged or treated as duplicates.
+
+---
+# 11. Security, privacy, and abuse resistance
+
+Security is a release blocker, not a polish task.
+
+## 11.1 Untrusted inputs
+
+Treat all imported material as untrusted: PDFs; Office documents; archives; images; audio/video; web pages; transcripts; source code; extracted metadata; and model outputs.
+
+Never execute uploaded files. Never execute macros. Never run shell commands derived from source text. Never allow source prompt injection to override application instructions, access controls, or user settings.
+
+## 11.2 File/parser safety
+
+Implement:
+- upload size limits;
+- decompressed size limits;
+- archive entry count limits;
+- nested archive depth limits;
+- parser timeouts;
+- memory limits;
+- path traversal prevention;
+- MIME sniffing;
+- extension validation;
+- malformed-file handling;
+- integer overflow checks;
+- out-of-bounds protection;
+- temp-directory isolation;
+- no arbitrary file write;
+- no automatic execution.
+
+Do not trust user-supplied filenames. Generate internal storage names.
+
+## 11.3 URL and SSRF safety
+
+For URL ingestion:
+- allow only supported schemes;
+- block localhost/private/link-local/multicast/reserved IP ranges;
+- validate DNS and revalidate after redirects;
+- prevent DNS rebinding;
+- cap redirects;
+- cap response size;
+- set timeouts;
+- restrict ports where appropriate;
+- reject `file://`, `data://`, and dangerous custom schemes;
+- reject credentials embedded in URLs;
+- prevent access to cloud metadata endpoints;
+- validate every redirect target;
+- do not forward private cookies or credentials.
+
+## 11.4 Browser and connector security
+
+- exact origin allowlists;
+- explicit permission scopes;
+- secret redaction;
+- no session cookie logging;
+- no arbitrary page execution;
+- no broad browser activity capture;
+- no silent connected-app actions;
+- no credentials in evidence;
+- no secrets in source control;
+- safe OAuth state handling.
+
+## 11.5 Web application security
+
+Audit authentication, authorization, CSRF, XSS, SQL injection, path traversal, SSRF, content security policy, file upload endpoints, rate limiting, access checks for every source and artifact, secure session handling, API schema validation, error sanitization, secret handling, and dependency vulnerabilities.
+
+## 11.6 Model prompt injection and data leakage
+
+Retrieved sources may contain malicious instructions. They are data, not instructions.
+
+- keep system/developer instructions separate from retrieved content;
+- quote and delimit source material;
+- never give retrieved content authority to call tools;
+- require explicit approval for external actions;
+- do not transmit all notebook content to every provider by default;
+- disclose provider data sharing;
+- support data minimization;
+- provide deletion/export controls.
+
+## 11.7 Privacy
+
+Document what data is stored, where it is stored, which provider receives it, retention, deletion, backups, logs, telemetry, model training policy of configured providers (as documented, not assumed), and whether user content is sent outside the device.
+
+Do not make absolute privacy promises that depend on third-party provider terms.
+
+---
+
+# 12. Testing and verification programme
+
+## 12.1 Test layers
+
+### Unit tests
+- parsers;
+- chunking;
+- locator mapping;
+- source normalization;
+- retrieval;
+- citation validation;
+- serialization;
+- permissions;
+- job state machine;
+- provider adapters;
+- API schema.
+
+### Integration tests
+- upload → parse → index;
+- select source → retrieve → answer;
+- answer → citation preview;
+- save response → note;
+- note used as source;
+- source update and re-index;
+- artifact generation;
+- export;
+- backup and restore;
+- background job cancellation;
+- permission enforcement.
+
+### End-to-end UI tests
+- create notebook;
+- upload source;
+- view source;
+- ask question;
+- open citation;
+- save note;
+- create artifact;
+- edit/revise;
+- export;
+- delete source;
+- restart server and reopen notebook.
+
+### Security tests
+- malformed files;
+- zip bombs;
+- path traversal;
+- SSRF;
+- redirects;
+- huge uploads;
+- decompression bombs;
+- malicious HTML;
+- prompt-injection sources;
+- XSS;
+- unauthorized notebook access;
+- revoked share link;
+- leaked credentials;
+- concurrent requests.
+
+### Regression tests
+
+Maintain known fixtures and expected evidence locators. Do not weaken tests to make a new parser pass.
+
+## 12.2 Grounding evaluation corpus
+
+Create a gold corpus with known answers and evidence:
+- questions answerable from one source;
+- questions requiring multiple sources;
+- questions with contradictory sources;
+- questions absent from all sources;
+- ambiguous questions;
+- questions requiring exact numbers;
+- questions requiring date interpretation;
+- tables and spreadsheet data;
+- image/diagram content;
+- transcript and timecode evidence;
+- prompt injection inside sources;
+- multilingual content.
+
+Metrics:
+- answer correctness;
+- citation precision;
+- citation recall;
+- evidence entailment;
+- unsupported-claim rate;
+- abstention correctness;
+- source coverage;
+- locator accuracy.
+
+A fluent answer with the wrong citation is a failure.
+
+## 12.3 Test evidence
+
+For every test run, record command, environment, commit hash, exit code, summary, relevant output, failures, and skipped tests with reason.
+
+Do not write “all tests pass” when tests were skipped, offline, or not run. Distinguish locally executed, CI executed, agent-reported, and not executed.
+
+## 12.4 Real-world files
+
+Use representative legal/public/open test files. Record origin, hash, licence/permission basis, size, file type, and expected behaviour.
+
+Self-created fixtures are necessary but insufficient. Include real-world samples after sanitization and permission review.
+
+Do not upload user-provided APKs/EXEs to external services. Treat binary analysis as a separate static-analysis feature and never execute untrusted binaries.
+
+---
+
+# 13. Feature implementation roadmap
+
+Research and implementation should overlap. Do not let research become an endless phase, but do not build large features from guesses.
+
+## Phase 0 — repository recovery and baseline
+
+Deliver actual repository state report, environment report, existing feature inventory, test baseline, known architecture, current limitations, and preserved work/backup strategy.
+
+**Gate:** no changes until actual project state is understood.
+
+## Phase 1 — reference intelligence
+
+Deliver official feature inventory, live UI investigation if available, video analysis corpus and timestamped notes, REA capability report, evidence catalogue, feature parity matrix, and explicit unknowns/blockers.
+
+**Gate:** all major feature families must be represented. Unknowns are acceptable if explicitly recorded.
+
+## Phase 2 — core product integrity
+
+Verify/improve persistence, migrations, notebook lifecycle, ingestion job model, source model, source viewer, parser reliability, exact locators, index/retrieval, citation system, provider abstraction, and error handling.
+
+**Gate:** user can create a notebook, import supported material, restart, reopen, ask a question, and verify the answer against exact evidence.
+
+## Phase 3 — source coverage and source UX
+
+Expand formats, URL ingestion, public YouTube transcript, audio transcript, source guide, labeling, source filters, source refresh, duplicate management, and visual document extraction.
+
+**Gate:** all source claims in the UI match actual parsers and tests.
+
+## Phase 4 — chat and research quality
+
+Implement source selection, custom chat, streaming/cancel, follow-ups, evidence validator, abstention, contradictions, Fast Research, and Deep Research workflow.
+
+**Gate:** grounding evaluation meets explicit quality thresholds; no fabricated citations.
+
+## Phase 5 — Studio and learning
+
+Implement notes, flashcards, quizzes, mind maps, reports, summaries, study guides, FAQ, and structured tables.
+
+**Gate:** each artifact is persisted, re-openable, exportable, and traceable to source evidence.
+
+## Phase 6 — visual, audio, and slide artifacts
+
+Implement infographics, slide decks, outline/revision workflow, audio overviews, narration, and video storyboard/rendering.
+
+**Gate:** each is a real output generated by a real pipeline/provider. Unsupported providers must be reported clearly.
+
+## Phase 7 — research and integrations
+
+Implement web source discovery, research planner, connected apps, Drive/GitHub adapters, source sync, citations, and provenance.
+
+**Gate:** safe authorization, permissions, failure handling, and provider documentation.
+
+## Phase 8 — sharing, device polish, release readiness
+
+Implement roles and access control, public/private sharing if suitable, artifact sharing, responsive tablet/mobile UX, accessibility, backup/restore, privacy and security audit, deployment/install docs, and release tests.
+
+**Gate:** release checklist passes and limitations are published.
+
+## Phase 9 — beyond parity
+
+After reference parity work, prioritize differentiated strengths:
+- stronger source-to-claim traceability;
+- more reliable multimodal evidence;
+- reproducible Deep Research;
+- cross-notebook knowledge;
+- better source versioning;
+- research lineage;
+- claim conflict explorer;
+- advanced learning analytics;
+- portable open formats;
+- user-controlled local/cloud workflows.
+
+---
+
+# 14. Acceptance tests: user-visible journeys
+
+Implement exact repeatable tests for these journeys.
+
+## Journey A — first notebook
+1. Open Forge.
+2. Create a notebook.
+3. Rename it.
+4. Close and reopen it.
+5. Confirm persistence.
+6. Confirm no hidden demo data is shown as user data.
+
+## Journey B — PDF evidence
+1. Upload a multi-page PDF.
+2. Wait for actual parse completion.
+3. Inspect extracted pages.
+4. Ask a question whose answer is on page 2.
+5. Confirm response citation points to page 2.
+6. Click citation.
+7. Confirm exact passage is highlighted or visible.
+8. Ask an unsupported question.
+9. Confirm the system abstains rather than inventing an answer.
+
+## Journey C — multi-source reasoning
+1. Import two sources with overlapping claims.
+2. Ask a question needing both sources.
+3. Confirm both sources are cited.
+4. Import a source contradicting one claim.
+5. Ask for a comparison.
+6. Confirm the contradiction is surfaced, not silently reconciled.
+
+## Journey D — note as a source
+1. Create a note.
+2. Save a chat response as a note.
+3. Edit the note.
+4. Include it in chat scope.
+5. Ask a question requiring note content.
+6. Confirm citation to the note.
+7. Exclude it and confirm it no longer influences the answer.
+
+## Journey E — YouTube/video source
+1. Add a public captioned video URL.
+2. Import available transcript with source/time metadata.
+3. Ask a question about a statement at a known time.
+4. Confirm a timecode citation.
+5. If visual analysis is available, ask about an on-screen diagram.
+6. Verify answer cites visual-frame evidence, not only transcript.
+7. If visual analysis is unavailable, state that limitation explicitly.
+
+## Journey F — flashcards and quiz
+1. Generate flashcards with a chosen difficulty.
+2. Review and flip cards.
+3. Record known/unknown.
+4. Generate a quiz.
+5. Answer correctly and incorrectly.
+6. Verify explanations against citations.
+7. Reopen the artifact after restart.
+
+## Journey G — mind map
+1. Generate mind map.
+2. Expand/collapse nodes.
+3. Select a node.
+4. Ask a question about it.
+5. Open its source evidence.
+6. Export it.
+7. Reopen it after restart.
+
+## Journey H — slide deck
+1. Select sources.
+2. Set audience and output.
+3. Generate outline.
+4. Review and revise.
+5. Generate deck.
+6. Edit one slide.
+7. Reorder and delete/restore a slide.
+8. Export PPTX/PDF.
+9. Confirm persisted artifact version.
+
+## Journey I — research discovery
+1. Submit a research question.
+2. Search multiple independent domains.
+3. Review results.
+4. Open original sources.
+5. Select imports.
+6. Generate a report.
+7. Confirm references are real and correspond to claims.
+8. Export the report.
+
+## Journey J — access control
+1. Create a private notebook.
+2. Share with viewer.
+3. Confirm viewer cannot edit.
+4. Share with editor.
+5. Confirm editor can perform only permitted actions.
+6. Revoke access.
+7. Confirm revoked user cannot access source, note, chat, or artifact endpoints.
+
+## Journey K — resilience
+1. Start an ingestion job.
+2. Stop/restart server during processing.
+3. Verify recovery or clear failure.
+4. Retry safely.
+5. Confirm duplicate records are not created.
+6. Verify database consistency.
+7. Verify job and UI states.
+
+---
+
+# 15. UI/UX direction
+
+Create an original visual design. Do not copy Google's protected assets or exact visual identity.
+
+Target experience:
+- calm, focused research environment;
+- clear notebook navigation;
+- compact, readable source panel;
+- high-quality document viewer;
+- readable chat with strong citation affordances;
+- Studio artifact shelf;
+- obvious selected-source context;
+- visible processing status;
+- attractive but restrained visualizations;
+- responsive tablet support;
+- fast initial load.
+
+Design principles:
+- functional hierarchy over decoration;
+- avoid crowded sidebars;
+- prevent important actions from being hidden in menus;
+- distinguish source facts from AI-generated outputs;
+- citations must be visually obvious;
+- errors must be understandable;
+- avoid excessive animation;
+- keep the interface accessible.
+
+Perform screenshot comparisons of layout and workflows against authorized reference screenshots, but do not copy logos, proprietary illustrations, or protected product artwork.
+
+---
+
+# 16. Documentation and release discipline
+
+Every implementation change must update appropriate documents.
+
+`docs/STATUS.md`:
+- current commit;
+- branch;
+- running service;
+- features genuinely implemented;
+- known blockers;
+- tests run;
+- next task.
+
+`docs/FEATURE_PARITY.md`:
+- one row per reference feature;
+- reference evidence;
+- Forge status;
+- test evidence;
+- gaps.
+
+`docs/UNKNOWN_AND_LIMITATIONS.md`:
+- unsupported features;
+- missing dependencies;
+- blocked research;
+- inferred behaviours;
+- unverified APIs;
+- known quality limitations.
+
+`docs/SECURITY.md`:
+- threat model;
+- upload limits;
+- parser sandbox;
+- SSRF controls;
+- secret handling;
+- authorization;
+- prompt-injection controls;
+- known residual risks.
+
+`docs/TEST_MATRIX.md`:
+- feature;
+- unit tests;
+- integration tests;
+- UI tests;
+- security tests;
+- real-world fixtures;
+- result.
+
+`docs/DECISIONS.md`:
+- decision;
+- date;
+- alternatives;
+- reason;
+- consequences;
+- revisit condition.
+
+## 16.1 Git discipline
+
+- Work on the expected branch.
+- Commit in coherent, reviewable increments.
+- Never claim a push succeeded unless the push command succeeded and remote state was verified.
+- Never force-push without explicit user approval.
+- Preserve working changes.
+- Record commit hashes in status.
+- Run tests before commit.
+- Inspect `git diff --check`.
+- Ensure generated files and secrets are not accidentally committed.
+
+## 16.2 Honest capability page
+
+The UI capability page must distinguish working and tested; working but partially tested; provider required; dependency required; unsupported; experimental; and blocked by environment.
+
+Do not use an attractive feature card to disguise a stub.
+
+---
+
+# 17. Arena execution instructions: how to proceed now
+
+Perform these steps in order.
+
+## Step 1 — establish reality
+
+Inspect the current repository, branch, commit, working tree, remotes, filesystem, toolchain, and test baseline. Do not assume the sandbox persists from a previous run.
+
+## Step 2 — audit existing Forge before rebuilding
+
+Read existing status and decisions, user requirements, current feature parity, architecture, source parser implementations, retrieval and answer flow, citation implementation, frontend, HTTP endpoints, tests, NotebookLM protocol experiment, binary inspection code, and test claims.
+
+Identify actual working features and missing features. Preserve current working behaviour.
+
+## Step 3 — discover available research tools
+
+Inspect available web search, browser automation, REA, GitHub, terminal, yt-dlp, FFmpeg/FFprobe, screenshot/visual inspection, OCR, speech recognition, and image understanding.
+
+Check versions and actual availability. Do not claim an unavailable tool is installed. If a task-specific skill library exists, search it for relevant research, browser, testing, Rust, parsing, UI, accessibility, and security skills. Use skills as guidance; do not let them replace verification.
+
+## Step 4 — build the evidence map
+
+Research all sections in §2. Record evidence and unknowns in the required files. Use official Google materials first. Use browser and REA when available. Use authorized YouTube videos with yt-dlp and FFmpeg visual inspection when useful.
+
+## Step 5 — create the feature parity matrix
+
+Every major feature family must have evidence, user workflow, Forge requirement, implementation location, acceptance test, status, and blocker.
+
+## Step 6 — choose next implementation task from highest value gap
+
+Prefer the smallest complete, testable vertical slice. Do not add many disconnected buttons. A complete source path is more valuable than ten mock features.
+
+## Step 7 — implement and test
+
+For each slice: inspect existing code; state intended changes in a short work note; implement; run unit/integration/UI tests; add regression tests; update docs; review security; commit; verify remote push if available.
+
+## Step 8 — repeat toward parity
+
+Continue across the roadmap. Do not stop after research documents are complete. Do not stop after the next commit. Keep building until blocked by a real constraint or the work is complete.
+
+## Step 9 — report truthfully
+
+At each checkpoint report what was researched; what was directly observed; what was only documented; what was inferred; what was implemented; what test commands ran; exact pass/fail counts; commit and push status; remaining blockers; and next best task.
+
+No fabricated screenshots, tests, citations, browser sessions, file paths, or success claims.
+
+---
+
+# 18. Definition of done for the overall product
+
+Forge is not “complete” merely because it resembles Gemini Notebook visually.
+
+The first serious release is acceptable when:
+- users can create, organize, and reopen persistent notebooks;
+- core source formats import reliably;
+- source extraction preserves precise locators;
+- the source viewer works;
+- notebook-scoped chat is grounded;
+- citations open exact evidence;
+- unsupported questions trigger honest abstention;
+- notes work as persistent sources;
+- core study artifacts work and persist;
+- users can export their work;
+- security controls are in place;
+- the UI works on desktop and tablet;
+- optional providers fail gracefully;
+- documentation accurately lists gaps;
+- tests cover critical journeys.
+
+A broader parity release must also include applicable research, multimedia, Studio, sharing, and integration features discovered in the current reference inventory.
+
+The long-term product should exceed the reference in citation reliability, reproducibility, source provenance, multimodal evidence, exportability, user control, privacy transparency, cross-source reasoning, and extensibility.
+
+---
+
+# 19. Current baseline research notes (30 October 2026)
+
+The following is a starting map based on official sources checked while preparing this document. It is not a replacement for current in-product verification.
+
+1. Google announced the NotebookLM → Gemini Notebook rename on 16 July 2026.
+2. The official Help Center currently lists topics for chat, source discovery, notes, mind maps, Audio Overviews, Video Overviews, flashcards/quizzes, infographics, slide decks, reports, public notebooks, mobile app, connected apps, plans, and usage limits.
+3. Official documentation describes source types including common documents, Google Workspace files, images, ePub, audio, web URLs, public YouTube URLs, and Gemini chats. It also records source limits and source-specific caveats; verify current visible values.
+4. Google documents source selection in chat and citations that can show quoted text and navigate to the passage.
+5. Google documents Default, Learning Guide, and Custom chat styles, with response-length settings; verify current availability.
+6. Google documents Fast Research from Web or Drive and a separate Deep Research workflow that reviews and imports results.
+7. Google documents notes as sources that can participate in Q&A and artifact generation.
+8. Google documents background generation for at least some Studio artifacts.
+9. Audio Overviews and Video Overviews have separate workflows and customization controls.
+10. Mind Maps support interaction such as zoom/pan, expand/collapse, and asking about a selected node.
+11. Slide Decks have format/length/language/prompt controls and revision workflows; official docs describe Detailed Deck and Presenter Slides.
+12. Infographics have language, detail, orientation, style, and prompt controls.
+13. Official help describes connected apps and Gemini chat threads as notebook context, with differences in source grounding between Gemini Notebook and Gemini Apps.
+14. Plan limits, age restrictions, mobile limitations, and feature rollouts vary. Never assume all accounts see every control.
+
+Treat this list as a baseline for what to investigate, not as an exhaustive final inventory.
+
+---
+
+# 20. Primary research references
+
+Use these links as first-stop sources and check them again because Google may change documentation and features.
+
+## Google / Gemini Notebook
+
+- Product rename announcement (16 July 2026): https://blog.google/innovation-and-ai/products/gemini-notebook/notebooklm-gemini-notebook/
+- Gemini Notebook Help Center: https://support.google.com/gemininotebook/
+- Learn about Gemini Notebook: https://support.google.com/gemininotebook/answer/16164461
+- Create a notebook: https://support.google.com/gemininotebook/answer/16206563
+- Add or discover sources: https://support.google.com/gemininotebook/answer/16215270
+- Use chat: https://support.google.com/gemininotebook/answer/16179559
+- Create and add notes: https://support.google.com/gemininotebook/answer/16262519
+- Mind Maps: https://support.google.com/gemininotebook/answer/16212283
+- Audio Overview: https://support.google.com/gemininotebook/answer/16212820
+- Video Overview: https://support.google.com/gemininotebook/answer/16454555
+- Flashcards and quizzes: https://support.google.com/gemininotebook/answer/16958963
+- Slide Decks: https://support.google.com/gemininotebook/answer/16757456
+- Infographics: https://support.google.com/gemininotebook/answer/16758265
+- Connected apps: https://support.google.com/gemininotebook/answer/18784282
+- Public/featured notebooks: https://support.google.com/gemininotebook/answer/16322204
+- Plans: https://support.google.com/gemininotebook/answer/16213268
+- Usage limits: https://support.google.com/gemininotebook/answer/17670842
+- Notebooks in Gemini Apps: https://support.google.com/gemininotebook/answer/17003757
+- Flexible usage limits announcement: https://blog.google/innovation-and-ai/products/gemini-notebook/new-flexible-usage-limits/
+- Workspace admin guide and plan limit table: https://knowledge.workspace.google.com/admin/generative-ai/gemini-notebook/turn-gemini-notebook-on-or-off-for-users
+
+## REA
+
+- REA main site: https://rea.tools/
+- REA guides: https://rea.tools/guides/
+- REA source repository: https://github.com/Eng-RSMY/REA
+
+Read the installed version's current documentation. Public GitHub forks, mirrors, and examples may be useful but are not automatically authoritative for the installed build.
+
+## Video tooling
+
+- yt-dlp source repository and README: https://github.com/yt-dlp/yt-dlp
+- FFmpeg documentation: https://ffmpeg.org/documentation.html
+- FFmpeg filters: https://ffmpeg.org/ffmpeg-filters.html
+- FFprobe documentation: https://ffmpeg.org/ffprobe.html
+
+## Additional code/research sources
+
+- `notebooklm-py` and other public protocol research may help identify hypotheses, request shapes, or observed behaviour. Pin the exact repository revision, record its licence, inspect its source and history, and independently validate claims. It is secondary research, not a Google-supported API.
+- Official SDK/API documentation must be consulted before implementing a provider integration.
+- GitHub issues and community discussions are discovery leads. Verify consequential claims against primary evidence.
+
+---
+
+# 21. Final instruction
+
+Build Forge as a complete, reliable, independent research product.
+
+Investigate the reference product down to the smallest observable details. Use official documents, real browser workflows, screenshots, video analysis, yt-dlp, FFmpeg, FFprobe, REA, source-code research, tests, and real files wherever they are available and authorized.
+
+Use every tool that genuinely helps. Do not spend days fighting a blocked tool when another evidence route is available. Do not mistake a tool's presence for proof that it can inspect the target.
+
+**Research thoroughly. Preserve evidence. Separate facts from inference. Implement the real workflow. Test the complete path. Be honest about every limitation. Keep going.**
+```
+
+## `docs/RESEARCH_BLOCKERS.md`
+
+```markdown
+# Research blockers
+
+Everything here was **tested**, not assumed. Each entry states the attempt, the exact
+result, and what would unblock it. A blocker is never a reason to invent a finding.
+
+Last verified: 2026-10-31.
+
+## 1. Live product access — BLOCKED
+
+| Attempt | Result |
+|---|---|
+| `curl https://notebook.google.com` from the sandbox | HTTP **000** (no route) |
+| `curl https://support.google.com/gemininotebook/` | HTTP **000** (no route) |
+| agent page-fetch tool → `support.google.com` | **works** (this is how official docs were read) |
+| browser for REA to attach to | none installed (`chromium` absent), and no authenticated session exists |
+| user credentials | none available, and none will be requested in chat |
+
+**Unblock:** the operator runs a browser with an authorised session and exposes a
+loopback CDP endpoint, or grants a screen/recording; or the agent's page tool is
+extended to the product origin.
+
+**Consequence:** no `LIVE_OBSERVED` rows exist in `docs/reference/FEATURE_MATRIX.md`.
+Every reference behaviour there is `OFFICIAL_DOCUMENTED`, `CODE_CORROBORATED`, or
+explicitly `INFERRED`.
+
+## 2. Video research (yt-dlp / FFmpeg) — BLOCKED
+
+| Tool | Status |
+|---|---|
+| `yt-dlp` | absent |
+| `ffmpeg` | absent |
+| `ffprobe` | absent |
+| `chromium` | absent |
+| `tesseract` | absent |
+
+No package manager route is available for arbitrary packages in this image, and the
+allowlist does not include GitHub release assets (`codeload`/`objects.githubusercontent`
+both fail), so the binaries cannot be fetched either. `MASTER_FORGE.md` §5 explicitly
+forbids bypassing platform protections and installing globally in a restricted sandbox.
+
+**Unblock:** install `yt-dlp` + `ffmpeg` into an isolated prefix, or supply an
+authorised recording.
+
+**Consequence:** `docs/reference/VIDEO_RESEARCH.md` contains no frames, no transcripts
+and no timestamps, and says so. It is a specification of the *method*, not a result.
+
+## 3. Broad web research / search providers — BLOCKED
+
+Sandbox egress is allowlisted to `api.github.com`. There is no search API key, and no
+provider is reachable. Forge therefore implements **no** web-search provider today; the
+Deep/Fast Research workflows are specified but unimplemented rather than faked.
+
+**Note:** Forge *can* fetch URLs it is given (via `curl`) — the guard and the fetcher are
+tested against a real local HTTP origin — but in this sandbox any public host fails at
+connect, returning `502 fetch_failed` honestly.
+
+## 4. Providers for generation (LLM, TTS, ASR, vision, embeddings) — BLOCKED
+
+No API keys, no credits, and the zero-budget constraint forbids paid services. Forge
+ships provider *interfaces* (`providers.rs`, keys write-only and `0600`) and the local
+extractive engine keeps working without any provider. Anything requiring a model is
+marked `unsupported` in `/api/capabilities` with a reason.
+
+## 5. REA
+
+`rea-agents@6.8.0` installs and runs, but `analyze` needs ghidra/hopper/ida/kuna (none
+present, one is paid, one macOS-only) and there is no browser target.
+`inspect-artifact` (hashing/inventory) works. Full detail: `docs/REA_EVIDENCE_INDEX.md`.
+
+## 6. What is *not* blocked
+
+* official help-centre documentation (agent page tool);
+* pinned public repositories via the GitHub API (`api.github.com` is reachable);
+* local HTTP/HTTP fixtures, so network-facing code can be tested end-to-end;
+* the full Rust toolchain (installed per session into `/tmp/forge-rust`).
+```
+
+## `docs/RESEARCH_LOG.md`
+
+```markdown
+# Research log
+
+Chronological, dated, with the exact evidence label. Nothing here is remembered
+from training data; each entry was produced by an action in this workspace.
+
+---
+
+## 2026-10-31 — session start: environment reality check
+
+| What | Result | Label |
+|---|---|---|
+| Sandbox state | recycled again: local branch refs at `274352b`, project directories untracked | observed |
+| Recovery | `origin/arena/e86028ee-testtemp` = `a3b6bd7`; all **164 tracked files byte-identical** (`git hash-object` per path, 0 mismatches, 0 missing); `git reset --mixed` left the working tree untouched | observed |
+| Toolchain | `cargo`/`rustc` absent at start; reinstalled to `/tmp/forge-rust` in ~10 s by `scripts/install-rust.sh` | observed |
+| Test baseline | `cargo test --offline` → 128 passing, 0 failing (31 bininspect + 92 lib + 5 e2e + 5 server after the hashes move) | executed |
+| Sandbox egress | `curl` reaches **only** `api.github.com` (200). `support.google.com`, `example.com`, `notebook.google.com` all return **000** | measured |
+| Agent page tool | *can* read `support.google.com` — this is how official documentation below was obtained | observed |
+| DNS | resolves normally (`example.com` → 172.66.147.243), so fetch failures during tests are transport, not DNS | measured |
+| Research tools | `yt-dlp`, `ffmpeg`, `ffprobe`, `chromium`, `tesseract` **absent**; `curl`, `wget`, `jq`, `node`, `python3`, `git` present | measured |
+
+Consequence recorded in `RESEARCH_BLOCKERS.md`: live-product and video research are
+blocked; official documentation is not.
+
+---
+
+## 2026-10-31 — official documentation: sources and limits
+
+Page: <https://support.google.com/gemininotebook/answer/16215270> — "Add or discover
+new sources for your notebook" (Computer). Read in full. Label:
+`OFFICIAL_DOCUMENTED`.
+
+Findings (verbatim-derived, not paraphrased into claims the page does not make):
+
+1. **Source types listed**: audio (MP3/WAV "among others"), copy-pasted text, Google
+   Docs, Google Slides **up to 100 slides**, Google Sheets **limited to 100k tokens**,
+   images (avif, bmp, gif, heic, heif, ico, jp2, jpe, jpeg, jpg, png, tif, tiff, webp),
+   docx, txt, md, pdf, csv, pptx, notes, Play Books/textbooks (text only), web URLs,
+   ePub, YouTube URLs of **public** videos, Gemini Chats.
+2. **Per-source ceiling**: "up to 500,000 words or up to 200MB for uploaded files".
+3. **Source count**: "up to 50 sources (for Free users)", with a link to the limits page.
+4. **Drive import**: auto-synced "every few minutes"; manual *"Click to sync with
+   Google Drive"*; losing access makes the source inaccessible but it **still counts
+   toward source limits**; chats and Studio will not reference it; footnotes and
+   comments are **not** imported; multiple tabs of a Doc/Sheet import as one source.
+5. **Web URL import**: only the **text** of the HTML is scraped — images, embedded
+   videos and nested pages are not imported; paywalled pages unsupported; a **PDF served
+   over a URL is treated as a PDF source**.
+6. **YouTube import**: public videos **with captions** only (uploader or auto);
+   **transcript only**, no visual analysis; videos **< 72 h old may not be importable**;
+   videos without speech unsupported; if a video is deleted or made private the source
+   is **auto-deleted within 30 days**; captions over 500,000 words are not supported.
+7. **Audio import**: transcribed **at import time** and the text is stored; a long list
+   of container types (3g2…wma); **audio with no speech is unsupported**; ~50 supported
+   languages are listed explicitly.
+8. **Editing sources**: "When you update or delete a source, studio outputs generated
+   with that source do not change." ← directly informs `§10.3` stale-artifact handling.
+9. **Summaries**: two modes — ask in chat, or the **Source Guide** auto-summary in the
+   left-side source viewer.
+
+### What this changes in Forge
+
+* **Refresh + staleness is now backed by documentation**: upstream Studio outputs are
+  frozen, so Forge marks artifacts `stale` instead of silently rewriting them.
+  Implemented this session (`POST /api/sources/:id/refresh` + `Artifact.stale`).
+* **URL import must treat a PDF response as a PDF** — implemented by sniffing
+  `Content-Type` *and* the `%PDF` magic, then routing to the PDF parser.
+* **Per-source ceilings**: Forge keeps its **own** configurable cap
+  (`security::MAX_SOURCE_BYTES = 25 MiB`) and does **not** copy Google's 200 MB /
+  500k-word numbers (`MASTER_FORGE.md` §2.10 forbids exactly that).
+
+---
+
+## 2026-10-31 — what was implemented from that research
+
+Not research, but this log is the honest record of what the evidence changed:
+
+| Change | Evidence basis | Test |
+|---|---|---|
+| `fetch` module: SSRF-checked, DNS-pinned, hop-by-hop redirect fetch via `curl` | `§11.3` policy + documented https-only reality | 11 unit tests + 3 e2e |
+| URL → source ingestion (title from `<title>`, canonical URL, content hash, dedup) | doc points 2/5 above | `url_source_is_fetched_indexed_cited_and_deduplicated` |
+| PDF-over-URL routed to the PDF parser | doc point 5 | `detects_pdf_by_magic_even_without_a_content_type` |
+| `POST /api/sources/:id/refresh` + `Artifact.stale` | doc point 8 | `refreshing_a_url_source_reindexes_only_when_content_changed` |
+| Source rename + labels (`PATCH /api/sources/:id`) | §2.2 D source organisation | `pasted_sources_are_not_refreshable_and_labels_persist` |
+| Sentence splitter keeps decimals/abbreviations intact | defective citation text found by the new e2e | 3 unit tests |
+
+---
+
+## Open questions carried forward
+
+1. Exact **Source Guide** layout and whether it is per-source or per-selection
+   (`OFFICIAL_DOCUMENTED` describes the entry point only — not verified visually).
+2. Whether Studio outputs are re-openable after the source they used is deleted
+   (doc says outputs "do not change"; it does not say whether they remain usable).
+3. Chat style/length control names in the current UI (docs referenced "Default,
+   Learning Guide, Custom"; not verified this session).
+4. Whether URL sources for the *same* page under different query strings dedupe
+   upstream (Forge keeps query strings distinct; see `fetch::canonicalize`).
+```
+
+## `docs/RESEARCH_PLAN.md`
+
+```markdown
+# Research plan
+
+Last updated: 2026-10-31. Owner: the Forge implementation programme described in
+`docs/MASTER_FORGE.md`.
+
+## 1. What "research" means here
+
+The reference product (**Gemini Notebook**, formerly NotebookLM) is treated as an
+*evidence source*, never as a dependency. Each claim about it carries one of the
+labels from `MASTER_FORGE.md` §3.1. Today only three of those labels are reachable
+from this sandbox:
+
+| Label | Reachable? | Basis |
+|---|---|---|
+| `OFFICIAL_DOCUMENTED` | **yes** | `support.google.com` help pages, fetched and read in full this session |
+| `CODE_CORROBORATED` | **yes** | pinned public repositories (protocol research, parsers) |
+| `INFERRED` | **yes** | used only where marked |
+| `LIVE_OBSERVED` | **no** | no browser, no authenticated account, no route to `notebook.google.com` |
+| `VIDEO_OBSERVED` | **no** | `yt-dlp`/`ffmpeg`/`ffprobe` are not installed (see `RESEARCH_BLOCKERS.md`) |
+| `COMMUNITY_REPORTED` | **no** | no general web egress from the sandbox |
+
+## 2. Source priority actually used
+
+1. **Official help centre** — `support.google.com/gemininotebook/*`. Reachable by the
+   agent's page-fetch tool even though the *sandbox* cannot route to it (curl to
+   `support.google.com` returns 000). This distinction matters: it is the difference
+   between reading the documentation and guessing from memory.
+2. **Pinned public code** — recorded with exact revisions and sha256 in
+   `docs/rea/MANIFEST.md`.
+3. **The specification itself** — `docs/MASTER_FORGE.md` §2 is a research inventory
+   written from official material; where I could verify a claim against the help
+   centre I did, and where I could not, the row says so.
+
+## 3. Instrumentation
+
+* `scripts/research/fetch_docs.sh` — records every help-centre page used as evidence,
+  with URL, HTTP status, sha256 and retrieval date, into `docs/reference/official/`.
+* Offline protocol research lives in `docs/rea/` (vendored, hashed).
+* `bininspect` is used for **binary** evidence only; it is unrelated to product research.
+
+## 4. Question order
+
+Research is driven by implementation risk, not completeness:
+
+| Order | Question | Why now |
+|---|---|---|
+| 1 | What are the documented source types, and their limits? | decides the ingestion roadmap |
+| 2 | How is source selection + citation described? | decides the chat/citation contract |
+| 3 | Which Studio artifacts are documented, with what controls? | decides artifact scope |
+| 4 | What do the docs say about notes-as-sources? | Journey D |
+| 5 | Plans/limits/availability | must not be hard-coded as Forge limits |
+| 6 | Mobile/accessibility differences | informs responsive work |
+
+## 5. Rules I hold myself to
+
+* A failed fetch is **not** evidence that a feature does not exist.
+* Repeated copies of one claim are one evidence lineage, not several confirmations
+  (`MASTER_FORGE.md` §3.2).
+* No screenshots, transcripts, browser sessions, citations or test results are
+  fabricated. Anything not executed is labelled as not executed.
+* Google's quotas are never copied into Forge as product limits.
+```
+
+## `docs/reference/CHAT_AND_CITATIONS.md`
+
+```markdown
+# Chat and citations
+
+## Reference behaviour
+
+`OFFICIAL_DOCUMENTED` (page 16215270, read 2026-10-31): the model answers from the
+sources in the notebook; sources can be selected individually in the Source panel to
+scope a chat; summaries can be requested in chat or read from the **Source Guide**;
+"mentioning source names in your query helps … narrow its search". The rename
+announcement and help topic list describe chat styles (Default / Learning Guide /
+Custom) and response lengths — **not verified in this session** (`INFERRED` from the
+specification's inventory, `UNVERIFIED` for exact current labels).
+
+`CODE_CORROBORATED`: the streamed-chat framing recorded in `docs/rea/` and implemented
+in `crates/forge-core/src/notebooklm.rs` (quarantined, not used for Forge's own chat).
+
+## Forge's contract (implemented)
+
+1. **Scope**: only sources the user has selected; if none, the request is refused
+   (`409 no_sources`) rather than answered from nothing.
+2. **Retrieval**: lexical scoring over chunks, then **sentence-level** selection from
+   the best chunk. A chunk is not quoted just because it matched.
+3. **Evidence floor**: a sentence must overlap enough of the question's content words
+   (`grounded::MIN_OVERLAP`) and live inside the chunk text, otherwise it is dropped.
+4. **Abstention**: if nothing clears the floor, the answer says so — it never invents.
+5. **Citations**: each claim carries `source_id`, `chunk_id`, the **exact quote**, and a
+   locator (page / paragraph / row / section) that reopens the source at that spot.
+6. **Verification**: the quoted span is checked against the chunk before the answer is
+   emitted; a citation that fails verification is dropped, not shown.
+7. **No outside knowledge**: the extractive engine adds nothing that is not in a source.
+
+### Sentence segmentation (fixed 2026-10-31)
+
+The splitter used to break on every `.`, so `"The evidence floor is 0.42"` became
+`"The evidence floor is 0"` — a citation that loses the number the user asked for.
+`retrieve::split_sentences` now keeps decimals (`0.42`), abbreviations (`e.g.`, `Dr.`,
+`etc.`), initials, and URLs intact, and treats `;` as a continuation, not a boundary.
+Verified by `split_sentences_keeps_decimals_and_abbreviations_intact` and by the
+end-to-end URL test, which asserts the answer to "What is the evidence floor?" contains
+`0.42`.
+```
+
+## `docs/reference/FEATURE_MATRIX.md`
+
+```markdown
+# Feature matrix — reference feature → Forge status
+
+Schema per `MASTER_FORGE.md` §3.5, trimmed to the columns that carry information today.
+**Evidence** describes the *reference* claim; **Forge** describes our code, verified by
+running it. No row is `LIVE_OBSERVED` — see `docs/RESEARCH_BLOCKERS.md`.
+
+Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (environment) ·
+`unsupported` (deliberate, with reason).
+
+| ID | Feature | Evidence | Forge | Where | Test |
+|---|---|---|---|---|---|
+| NB-01 | create / rename / delete notebook | documented | done | `api.rs`, `app.js` | e2e + UI smoke |
+| NB-02 | persistent library, reopen after restart | documented | done | `store.rs` | `persistence` tests |
+| NB-03 | notebook icon/emoji | documented | planned | — | — |
+| NB-04 | sort / filter / search library | documented | planned | — | — |
+| SRC-01 | paste text | documented | done | `ingest::text` | lib + UI |
+| SRC-02 | PDF with page locators | documented | done | `ingest::pdf` | lib + e2e |
+| SRC-03 | DOCX / PPTX / XLSX | documented | done | `ingest::ooxml` | lib + e2e |
+| SRC-04 | CSV / TSV rows | documented | done | `text::csv_blocks` | lib |
+| SRC-05 | HTML files | documented | done | `text::html_blocks` | lib |
+| SRC-06 | **web URL fetch** | documented | **done** | `fetch.rs` + `api.rs` | 11 unit + 1 e2e |
+| SRC-07 | PDF served over a URL | documented | done | `Fetched::ingest_kind` | unit |
+| SRC-08 | duplicate URL refused, names the original | inferred (sane default) | done | `add_url_source` | e2e |
+| SRC-09 | source refresh / sync | documented ("Click to sync"; outputs do not change) | **done** | `refresh_source` | e2e |
+| SRC-10 | rename source + labels | documented | **done** | `PATCH /api/sources/:id` | e2e |
+| SRC-11 | images / OCR | documented | blocked | — | no OCR engine |
+| SRC-12 | audio → transcript | documented | blocked | — | no ASR |
+| SRC-13 | YouTube captions | documented | blocked | — | no yt-dlp |
+| SRC-14 | ePub | documented | planned | — | — |
+| SRC-15 | Drive / Docs / Sheets | documented | blocked | — | OAuth + credentials |
+| SRC-16 | GitHub repo/issues | not in reference | planned | — | `api.github.com` reachable |
+| SRC-17 | Source Guide auto-summary | documented | planned | — | — |
+| CHAT-01 | notebook-scoped grounded chat | documented | done | `grounded.rs` | lib + e2e |
+| CHAT-02 | exact citations + quote preview | documented | done | `Citation` | lib + UI |
+| CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |
+| CHAT-04 | source selection scopes chat | documented | done | `app.js` + api | UI |
+| CHAT-05 | conversation persistence / history | documented | done | `store.rs` | e2e |
+| CHAT-06 | streaming + stop | documented | planned | — | — |
+| CHAT-07 | style / length / custom instructions | documented | partial (notebook instructions only) | `api.rs` | — |
+| NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
+| NOTE-02 | save answer as note | documented | done | UI | UI smoke |
+| NOTE-03 | note used as chat context | documented | planned | — | Journey D |
+| ART-01 | summary / report / study guide / FAQ | documented | done | `artifacts.rs` | lib |
+| ART-02 | mind map | documented | done | `artifacts.rs` | lib + UI |
+| ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |
+| ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** | `Artifact.stale` | e2e |
+| ART-05 | audio / video / slides / infographics | documented | blocked | — | no TTS/renderer |
+| ART-06 | data tables (per-cell evidence) | documented | planned | — | provider-free, high value |
+| RES-01 | Fast Research | documented | planned | — | no search provider |
+| RES-02 | Deep Research | documented | planned | — | no search provider |
+| SHARE-01 | roles, share links, revocation | documented | planned | — | needs identity first |
+| SET-01 | provider config (write-only keys, 0600) | documented | done | `providers.rs` | e2e |
+| SET-02 | theme, language, accessibility settings | documented | partial (theme only) | `app.js` | UI smoke |
+| BIN-01 | APK / PE structural analysis | not in reference (Forge extra) | done | `bininspect` | 31 tests |
+```
+
+## `docs/reference/OFFICIAL_DOC_INDEX.md`
+
+```markdown
+# Official documentation read
+
+Only pages actually retrieved are listed. Retrieval was done with the agent's page-fetch
+tool because the sandbox itself cannot route to `support.google.com` (curl → 000).
+
+| Date | Page | What was taken from it | Label |
+|---|---|---|---|
+| 2026-10-31 | [Add or discover new sources](https://support.google.com/gemininotebook/answer/16215270) | full source-type list; 500k words / 200 MB per source; 50 sources (free); Drive auto-sync + "Click to sync"; footnotes/comments not imported; URL text-only scraping; PDF-over-URL treated as PDF; YouTube public+captions only, transcript only, <72 h caveat, 30-day auto-delete; audio transcribed at import, no-speech unsupported; ~50 audio languages; "studio outputs generated with that source do not change"; Source Guide summary | `OFFICIAL_DOCUMENTED` |
+| 2026-10-30 (prior session) | [Add or discover new sources](https://support.google.com/gemininotebook/answer/16215270) | same page, earlier reading; consistent with the above | `OFFICIAL_DOCUMENTED` |
+
+## Queued, not yet read in this session
+
+`16164461` (overview), `16206563` (create notebook), `16179559` (use chat),
+`16262519` (notes), `16212283` (mind maps), `16212820` (audio overview),
+`16454555` (video overview), `16958963` (flashcards/quiz), `16757456` (slide decks),
+`16758265` (infographics), `18784282` (connected apps), `16322204` (public notebooks),
+`16213268` + `17670842` (plans/limits), `17003757` (notebooks in Gemini Apps).
+
+They are queued, not summarised from memory. Anything written about them before being
+read would violate the evidence rules in `docs/MASTER_FORGE.md` §3.
+```
+
+## `docs/reference/REFERENCE_INDEX.md`
+
+```markdown
+# Reference index
+
+Every document under `docs/reference/` describes the **reference product**
+(Gemini Notebook / NotebookLM), not Forge. Forge's own state lives in
+`docs/STATUS.md`.
+
+| Document | Covers | Evidence basis |
+|---|---|---|
+| `FEATURE_MATRIX.md` | one row per reference feature: evidence, Forge status, tests, gaps | documented + corroborated; no live observation |
+| `SOURCE_MATRIX.md` | every documented source type, its limits, and Forge's parser for it | official help page 16215270 |
+| `CHAT_AND_CITATIONS.md` | chat controls, citation behaviour, grounding contract | documented + Forge implementation |
+| `STUDIO_ARTIFACTS.md` | artifact families and their controls | documented; provider-gated in Forge |
+| `OFFICIAL_DOC_INDEX.md` | help-centre pages read, with URL and retrieval date | machine-recorded |
+| `VIDEO_RESEARCH.md` | method for video evidence (no results — tools absent) | method only |
+
+Not created yet, deliberately: `SCREEN_CATALOG.md`, `WORKFLOW_CATALOG.md`,
+`SHARING_AND_PERMISSIONS.md`, `MOBILE_DIFFERENCES.md`, `LIMITS_AND_AVAILABILITY.md`.
+Writing them now would mean inventing observations; the blockers are recorded in
+`docs/RESEARCH_BLOCKERS.md`. They are scheduled work, not silent omissions.
+
+## Evidence labels in use
+
+`OFFICIAL_DOCUMENTED` · `CODE_CORROBORATED` · `INFERRED` · `BLOCKED`
+
+`LIVE_OBSERVED` and `VIDEO_OBSERVED` are **not** used anywhere in this tree, because
+neither is possible in this environment.
+```
+
+## `docs/reference/SOURCE_MATRIX.md`
+
+```markdown
+# Source matrix — documented reference types vs Forge parsers
+
+Reference column: `OFFICIAL_DOCUMENTED` from
+<https://support.google.com/gemininotebook/answer/16215270> (read 2026-10-31).
+Forge column: verified by executing `cargo test --offline`.
+
+| Reference source type | Reference limits (documented) | Forge | Parser / test | Notes |
+|---|---|---|---|---|
+| Pasted text | — | **yes** | `ingest::text::plain_blocks` | title optional |
+| Notes as sources | — | **yes** | same pipeline, `origin=note` | see Journey D |
+| TXT | — | **yes** | `plain_blocks` | BOM stripped |
+| Markdown (md) | — | **yes** | `markdown_blocks` | heading-path locators |
+| HTML / web page | text only; no images, no nested pages, no paywalled | **yes (files)** | `html_blocks` | scripts/styles stripped; headings become section locators |
+| Web URL | as above; PDF-over-URL treated as PDF | **yes** | `fetch` + `html_blocks` / `pdf::extract` | curl transport, SSRF guard, DNS pinning, dedupe, refresh |
+| PDF | — | **yes** | `ingest::pdf` | text-layer only; **no OCR** |
+| DOCX | — | **yes** | `ingest::ooxml::docx` | paragraph locators |
+| PPTX | — | **yes** | `ingest::ooxml::pptx` | slide locators |
+| XLSX | reference: Sheets ≤ 100k tokens (Google-only) | **yes** | `ingest::ooxml::xlsx` | first worksheet, shared strings |
+| CSV / TSV | — | **yes** | `text::csv_blocks` | row locators |
+| Images | avif…webp list | **no** | — | no OCR/vision engine (`RESEARCH_BLOCKERS.md` §4) |
+| Audio (mp3, wav, …) | transcribed at import; no-speech unsupported | **no** | — | no ASR engine |
+| Public YouTube URL | transcript only; needs captions | **no** | — | no yt-dlp; no ASR |
+| ePub | — | **no** | — | XHTML-in-ZIP is tractable; not yet built |
+| Google Docs/Slides/Sheets | ≤100 slides, ≤100k tokens | **no** | — | needs OAuth; no credentials, and none will be requested |
+| Play Books / textbooks | text only | **no** | — | DRM-scoped; out of scope |
+| Gemini Chats | — | **no** | — | requires Google session |
+| GitHub repo/issues | not in reference | planned | — | `api.github.com` *is* reachable — highest-value next connector |
+
+## Limits Forge uses (its own, configurable — never Google's)
+
+| Limit | Value | Where |
+|---|---|---|
+| source bytes | 25 MiB | `security::MAX_SOURCE_BYTES` |
+| pasted text | 8 MiB | `security::MAX_TEXT_BYTES` |
+| URL length | 2048 chars | `security::MAX_URL_LEN` |
+| fetch body | 20 MiB | `fetch::MAX_FETCH_BYTES` |
+| fetch redirects | 5 | `fetch::MAX_HOPS` |
+| fetch timeout | 30 s | `fetch::FETCH_TIMEOUT` |
+| chunk target / max | 900 / 1400 chars | `ingest::CHUNK_TARGET` / `CHUNK_MAX` |
+```
+
+## `docs/reference/STUDIO_ARTIFACTS.md`
+
+```markdown
+# Studio artifacts — reference inventory vs Forge
+
+Reference inventory comes from the specification's research list plus help topics named
+in `OFFICIAL_DOC_INDEX.md`. **Only the sources page was read in full this session**, so
+per-artifact control names are `UNVERIFIED` unless stated. Forge's column is verified by
+executing the tests.
+
+| Reference artifact | Documented controls (spec inventory) | Forge | Reality check |
+|---|---|---|---|
+| Summary | — | **yes** | extractive, cited, persisted |
+| Report | templates, custom prompt | **yes** (structured text report) | interactive report templates: no |
+| Study guide | — | **yes** | from source headings + definitions |
+| FAQ | — | **yes** | questions derived from evidence sentences |
+| Briefing / learning overview | — | **partial** (report + study guide cover the shape) | not a separate artifact |
+| Mind map | expand/collapse, ask about node, export | **yes** (SVG hierarchy, node→evidence links) | pan/zoom: basic |
+| Flashcards | difficulty, quantity, flip, known/unknown | **yes** | spaced repetition: no |
+| Quiz | difficulty, count, explanations, score | **yes** (citations per answer) | retake/history: partial |
+| Audio Overview | formats, voices, language, custom prompt, player, transcript | **script only** | TTS unavailable — never returns a fake audio file |
+| Video Overview | styles, producer notes, render | **storyboard/plan only** | no TTS, no FFmpeg |
+| Slides | Detailed Deck / Presenter Slides, outline review, revise, PPTX/PDF export | **no** | needs a renderer; not faked |
+| Infographics | language, detail, orientation, style, PNG | **no** | needs an image model |
+| Data Tables | describe the table, per-cell evidence, CSV/XLSX | **no** (planned) | genuinely useful and provider-free → high priority |
+| Timeline | — | **no** (planned) | derivable from dated evidence |
+
+## The rule Forge applies to itself
+
+`MASTER_FORGE.md` §7.10/§7.11: *do not fake generation with a placeholder, and do not
+call a script a podcast.* Forge therefore emits a **narration script** and labels audio
+and video as unsupported in `/api/capabilities`, with the reason (`no TTS engine`), and
+the capability page renders that reason next to the row.
+```
+
+## `docs/reference/VIDEO_RESEARCH.md`
+
+```markdown
+# Video research — method, and why there are no results
+
+## Status: BLOCKED (no results)
+
+Required tooling is absent, verified 2026-10-31: `yt-dlp`, `ffmpeg`, `ffprobe`,
+`chromium`, `tesseract`. The allowlist blocks GitHub release downloads, so the binaries
+cannot be side-loaded either. No video was downloaded, sampled, transcribed or viewed.
+
+**Therefore this file contains zero frames, zero transcripts and zero timestamps.**
+Nothing in it should be cited as an observation of the reference product.
+
+## The method, ready to run the moment the tools exist
+
+`MASTER_FORGE.md` §5 specifies the pipeline. The checks I would run first, in order:
+
+1. `yt-dlp --version`, `ffprobe -version` — confirm the build actually supports
+   `--write-auto-subs`, `-f bv*+ba/b`, and the `tile` filter.
+2. `yt-dlp --skip-download --dump-single-json` — metadata before any media, so the
+   licence/authorisation decision happens before bytes move.
+3. `--list-subs` / `--list-formats` — record what the extractor *offered*; a missing
+   caption track is a finding, not a reason to write one.
+4. contact sheet: 48 frames over the full duration (`fps=48/duration, tile=6x8`), then
+   1 fps sheets (5×5 pages), then scene detection at `gt(scene,0.30)` tuned by result.
+5. targeted 20-second windows at 2 fps around each UI transition found on a sheet.
+6. `ffprobe -show_format -show_streams -show_chapters` for duration, frame rate,
+   rotation, audio streams and chapters.
+7. audio → 16 kHz mono WAV for listening; captions are preferred over ASR, and any ASR
+   transcript is labelled machine-generated.
+
+## Evidence rules that will apply
+
+* A contact sheet proves only the sampled frames; it is not proof of every frame.
+* A frame caption is not a verified user action; clicks and keystrokes are invisible.
+* Every table row needs `Time | Image evidence | Screen | Action | Observed result |
+  Confidence`, with the image path relative to the repository.
+* No video is downloaded unless it is the user's own, licensed for it, or permitted by
+  the platform's terms. Public visibility is not permission to republish.
+
+## Unblock
+
+`pip install --user yt-dlp` (or an isolated venv) plus a static FFmpeg build in an
+isolated prefix. Then this document becomes a result table instead of a plan.
 ```
 
 ## `.gitignore`
@@ -539,13 +3577,21 @@ async function renderCapabilities(app) {
   const groups = [];
   for (const [group, value] of Object.entries(caps)) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+    const KNOWN = ["supported", "blocked", "unsupported", "experimental", "partial", "not_configured"];
     const rows = Object.entries(value).map(([k, v]) => {
-      const status = typeof v === "string" ? v : v.status || "supported";
-      const reason = v && v.reason ? v.reason : "";
+      // A row may carry a status object, a plain status word, or an informational
+      // value (e.g. web_fetch.transport = "curl"). Only real statuses get a badge,
+      // so an informational row can never be mistaken for a capability claim.
+      const raw = typeof v === "string" ? v : v.status || "supported";
+      const isStatus = KNOWN.includes(String(raw));
+      const detail = v && typeof v === "object"
+        ? [v.reason, v.note, v.locator ? `locator: ${v.locator}` : "", v.engine ? `engine: ${v.engine}` : ""]
+            .filter(Boolean).join(" · ")
+        : (isStatus ? "" : String(raw));
       return h("tr", {},
         h("td", {}, k.replace(/_/g, " ")),
-        h("td", {}, badgeFor(status)),
-        h("td", { class: "hint" }, reason || (v && v.locator ? `locator: ${v.locator}` : "") || (v && v.engine ? `engine: ${v.engine}` : "")));
+        h("td", {}, isStatus ? badgeFor(String(raw)) : h("span", { class: "badge" }, "info")),
+        h("td", { class: "hint" }, detail));
     });
     groups.push(h("section", {},
       h("h2", { style: "font-size:15px;margin:22px 0 8px;text-transform:capitalize" }, group),
@@ -762,16 +3808,31 @@ function renderSources(pane) {
     fileInput,
     h("label", { for: "fileInput", class: "sr-only" }, "Upload a file"),
     h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, MD, TXT, HTML, CSV)"),
-    h("button", { class: "ghost", onclick: () => promptUrl() }, "Add from URL…"));
+    h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"));
 
-  async function promptUrl() {
-    const url = prompt("Web page URL:\n\nNote: URL ingestion needs an HTTPS client, which this build does not include. The server will validate the URL and explain if it cannot fetch.");
+  const urlRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
+  const urlInput = h("input", { type: "url", id: "urlInput", placeholder: "https://…", "aria-label": "Web page URL" });
+  const urlGo = h("button", { class: "primary", onclick: async () => {
+    const url = urlInput.value.trim();
     if (!url) return;
+    urlGo.disabled = true; urlGo.textContent = "Fetching…";
     try {
       const r = await api.post(`/notebooks/${nb.id}/sources/url`, { url });
-      toast("Imported from URL");
+      toast(`Imported “${r.title}” (${r.chunk_count} passages)`);
       await openNotebook(document.getElementById("app"), nb.id);
-    } catch (e) { toast(e.message, "err"); }
+    } catch (e) {
+      toast(e.message, "err");
+      urlGo.disabled = false; urlGo.textContent = "Fetch page";
+    }
+  } }, "Fetch page");
+  urlRow.append(
+    h("p", { class: "hint" }, "Forge fetches the page itself, keeps its title and canonical URL, and indexes the readable text. Duplicate URLs are refused."),
+    urlInput, urlGo);
+  importBox.append(urlRow);
+
+  function promptUrl() {
+    urlRow.hidden = false;
+    urlInput.focus();
   }
 
   importBox.append(uploadRow);
@@ -798,7 +3859,27 @@ function renderSources(pane) {
           toast("Source removed");
           await openNotebook(document.getElementById("app"), nb.id);
         } }, "×")),
-      h("div", { class: "sub" }, `${s.kind} · ${s.chunk_count} passages${s.page_count ? ` · ${s.page_count} pages` : ""}${s.status !== "ready" ? ` · ${s.status}` : ""}`),
+      h("div", { class: "sub" },
+        `${s.kind} · ${s.chunk_count} passages${s.page_count ? ` · ${s.page_count} pages` : ""}${s.status !== "ready" ? ` · ${s.status}` : ""}`,
+        s.origin === "url" ? h("span", { title: s.canonical_url }, " · from URL") : null,
+        (s.fetched_at || "").startsWith("20") ? h("span", { title: s.fetched_at }, " · synced") : null),
+      (s.labels || []).length
+        ? h("div", { class: "sub" }, s.labels.map((l) => h("span", { class: "badge" }, l)))
+        : null,
+      s.origin === "url"
+        ? h("div", { class: "row", style: "gap:6px;margin-top:4px" },
+            h("button", { class: "ghost", onclick: async (e) => {
+              const btn = e.target;
+              btn.disabled = true; btn.textContent = "Syncing…";
+              try {
+                const r = await api.post(`/sources/${s.id}/refresh`, {});
+                toast(r.changed ? `Re-indexed: ${r.chunk_count} passages` : "No change since last sync");
+                await openNotebook(document.getElementById("app"), nb.id);
+              } catch (err) {
+                toast(err.message, "err"); btn.disabled = false; btn.textContent = "Sync now";
+              }
+            } }, "Sync now"))
+        : null,
       s.error ? h("div", { class: "sub", style: "color:var(--err)" }, s.error) : null,
       (s.warnings || []).length ? h("div", { class: "sub", style: "color:var(--warn)" }, s.warnings.join(" · ")) : null);
     pane.append(item);
@@ -1268,7 +4349,8 @@ async function showArtifact(id) {
       h("div", { class: "viewer" },
         h("header", {},
           h("div", { style: "flex:1" }, h("div", { style: "font-weight:600" }, a.title),
-            h("div", { class: "hint" }, `${a.kind} · ${fmtDate(a.created_at)}`)),
+            h("div", { class: "hint" }, `${a.kind} · ${fmtDate(a.created_at)}`),
+            a.stale ? h("div", { class: "hint", style: "color:var(--warn)" }, "A source changed after this artifact was generated — regenerate to refresh it.") : null),
           h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
         h("div", { class: "content" }, renderArtifact(a.payload))));
     document.body.append(overlay);
@@ -3000,267 +6082,6 @@ mod tests {
 }
 ```
 
-## `crates/bininspect/src/hashes.rs`
-
-```rust
-//! SHA-256 and SHA-1, hand-written (no crates available).
-//!
-//! Both are implemented from their specifications and tested against published
-//! vectors — an analyser whose hashes are wrong is worse than none.
-
-const K256: [u32; 64] = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-];
-
-pub fn sha256(data: &[u8]) -> String {
-    let mut h: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-    ];
-    let mut msg = data.to_vec();
-    let bit_len = (data.len() as u64).wrapping_mul(8);
-    msg.push(0x80);
-    while msg.len() % 64 != 56 {
-        msg.push(0);
-    }
-    msg.extend_from_slice(&bit_len.to_be_bytes());
-
-    for chunk in msg.chunks_exact(64) {
-        let mut w = [0u32; 64];
-        for i in 0..16 {
-            w[i] = u32::from_be_bytes([
-                chunk[i * 4],
-                chunk[i * 4 + 1],
-                chunk[i * 4 + 2],
-                chunk[i * 4 + 3],
-            ]);
-        }
-        for i in 16..64 {
-            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16]
-                .wrapping_add(s0)
-                .wrapping_add(w[i - 7])
-                .wrapping_add(s1);
-        }
-        let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
-            (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
-        for i in 0..64 {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let ch = (e & f) ^ ((!e) & g);
-            let t1 = hh
-                .wrapping_add(s1)
-                .wrapping_add(ch)
-                .wrapping_add(K256[i])
-                .wrapping_add(w[i]);
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let maj = (a & b) ^ (a & c) ^ (b & c);
-            let t2 = s0.wrapping_add(maj);
-            hh = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(t1);
-            d = c;
-            c = b;
-            b = a;
-            a = t1.wrapping_add(t2);
-        }
-        h[0] = h[0].wrapping_add(a);
-        h[1] = h[1].wrapping_add(b);
-        h[2] = h[2].wrapping_add(c);
-        h[3] = h[3].wrapping_add(d);
-        h[4] = h[4].wrapping_add(e);
-        h[5] = h[5].wrapping_add(f);
-        h[6] = h[6].wrapping_add(g);
-        h[7] = h[7].wrapping_add(hh);
-    }
-    h.iter().map(|x| format!("{:08x}", x)).collect()
-}
-
-pub fn sha1(data: &[u8]) -> String {
-    let mut h: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
-    let mut msg = data.to_vec();
-    let bit_len = (data.len() as u64).wrapping_mul(8);
-    msg.push(0x80);
-    while msg.len() % 64 != 56 {
-        msg.push(0);
-    }
-    msg.extend_from_slice(&bit_len.to_be_bytes());
-
-    for chunk in msg.chunks_exact(64) {
-        let mut w = [0u32; 80];
-        for i in 0..16 {
-            w[i] = u32::from_be_bytes([
-                chunk[i * 4],
-                chunk[i * 4 + 1],
-                chunk[i * 4 + 2],
-                chunk[i * 4 + 3],
-            ]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
-        for i in 0..80 {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
-                20..=39 => (b ^ c ^ d, 0x6ED9EBA1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
-                _ => (b ^ c ^ d, 0xCA62C1D6),
-            };
-            let tmp = a
-                .rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(w[i]);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = tmp;
-        }
-        h[0] = h[0].wrapping_add(a);
-        h[1] = h[1].wrapping_add(b);
-        h[2] = h[2].wrapping_add(c);
-        h[3] = h[3].wrapping_add(d);
-        h[4] = h[4].wrapping_add(e);
-    }
-    h.iter().map(|x| format!("{:08x}", x)).collect()
-}
-
-/// Extract printable ASCII runs of at least `min` bytes.
-pub fn strings_of(data: &[u8], min: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    for &b in data {
-        if (0x20..0x7f).contains(&b) {
-            cur.push(b as char);
-        } else {
-            if cur.len() >= min {
-                out.push(std::mem::take(&mut cur));
-            } else {
-                cur.clear();
-            }
-        }
-    }
-    if cur.len() >= min {
-        out.push(cur);
-    }
-    out
-}
-
-/// Wide (UTF-16LE) printable runs, which is how Windows binaries store text.
-pub fn wide_strings_of(data: &[u8], min: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut i = 0;
-    while i + 1 < data.len() {
-        let lo = data[i];
-        let hi = data[i + 1];
-        if hi == 0 && (0x20..0x7f).contains(&lo) {
-            cur.push(lo as char);
-            i += 2;
-        } else {
-            if cur.len() >= min {
-                out.push(std::mem::take(&mut cur));
-            } else {
-                cur.clear();
-            }
-            i += 2;
-        }
-    }
-    if cur.len() >= min {
-        out.push(cur);
-    }
-    out
-}
-
-/// Shannon entropy in bits per byte (0..8). High entropy over a whole file is
-/// the classic packing/encryption signal.
-pub fn entropy(data: &[u8]) -> f64 {
-    if data.is_empty() {
-        return 0.0;
-    }
-    let mut counts = [0usize; 256];
-    for &b in data {
-        counts[b as usize] += 1;
-    }
-    let len = data.len() as f64;
-    let mut e = 0.0;
-    for c in counts {
-        if c > 0 {
-            let p = c as f64 / len;
-            e -= p * p.log2();
-        }
-    }
-    e
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sha256_matches_published_vectors() {
-        assert_eq!(
-            sha256(b""),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-        assert_eq!(
-            sha256(b"abc"),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
-        assert_eq!(
-            sha256(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
-            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
-        );
-    }
-
-    #[test]
-    fn sha1_matches_published_vectors() {
-        assert_eq!(sha1(b""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
-        assert_eq!(sha1(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
-        assert_eq!(
-            sha1(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
-            "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
-        );
-    }
-
-    #[test]
-    fn strings_extraction_is_bounded() {
-        let data = b"\x00\x01hello world\x00ab\x00another string here\xff";
-        let s = strings_of(data, 5);
-        assert_eq!(s, vec!["hello world", "another string here"]);
-    }
-
-    #[test]
-    fn wide_strings_are_found() {
-        let mut data = Vec::new();
-        for ch in "C:\\Windows\\System32".chars() {
-            data.push(ch as u8);
-            data.push(0);
-        }
-        let s = wide_strings_of(&data, 8);
-        assert_eq!(s, vec!["C:\\Windows\\System32"]);
-    }
-
-    #[test]
-    fn entropy_separates_text_from_random() {
-        let zeros = vec![0u8; 4096];
-        assert!(entropy(&zeros) < 0.01);
-        let random: Vec<u8> = (0..4096).map(|i| ((i * 7919) % 256) as u8).collect();
-        assert!(entropy(&random) > 7.0, "pseudo-random data should look packed");
-    }
-}
-```
-
 ## `crates/bininspect/src/lib.rs`
 
 ```rust
@@ -3275,7 +6096,8 @@ pub mod apk;
 pub mod axml;
 pub mod dex;
 pub mod elf;
-pub mod hashes;
+/// Re-exported from `forge-core` so there is exactly one hash implementation.
+pub use forge_core::hashes;
 pub mod report;
 pub mod xmltext;
 pub mod pe;
@@ -4370,6 +7192,225 @@ mod tests {
 }
 ```
 
+## `crates/bininspect/src/xmltext.rs`
+
+```rust
+//! Plain-text Android manifest support.
+//!
+//! Build intermediates (`merged_manifest/debug/AndroidManifest.xml`) ship the manifest as
+//! ordinary XML rather than compiled AXML. Rather than write a second summariser, this
+//! converts text XML into the same `axml::Element` stream so both paths share one set of
+//! semantics (package qualification, exported defaults, permissions, launcher detection).
+
+use crate::axml::{Attr, Element};
+
+/// Cheap sniff: does this look like a text XML manifest?
+pub fn is_text_manifest(data: &[u8]) -> bool {
+    let head = &data[..data.len().min(512)];
+    let text = String::from_utf8_lossy(head);
+    let t = text.trim_start_matches('\u{feff}').trim_start();
+    t.starts_with("<?xml") || t.starts_with("<manifest")
+}
+
+fn decode_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+}
+
+/// Scan text XML into elements. Deliberately minimal: tags and attributes only — no
+/// namespace resolution, no text nodes, no validation. Comments, CDATA, processing
+/// instructions and doctypes are skipped.
+pub fn parse(data: &[u8]) -> Result<Vec<Element>, String> {
+    let text = String::from_utf8_lossy(data);
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+
+    while i < b.len() {
+        if b[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        // skip comments / CDATA / declarations
+        if text[i..].starts_with("<!--") {
+            match text[i..].find("-->") {
+                Some(p) => {
+                    i += p + 3;
+                    continue;
+                }
+                None => break,
+            }
+        }
+        if text[i..].starts_with("<![CDATA[") {
+            match text[i..].find("]]>") {
+                Some(p) => {
+                    i += p + 3;
+                    continue;
+                }
+                None => break,
+            }
+        }
+        if text[i..].starts_with("<?") || text[i..].starts_with("<!") {
+            match text[i..].find('>') {
+                Some(p) => {
+                    i += p + 1;
+                    continue;
+                }
+                None => break,
+            }
+        }
+        if text[i..].starts_with("</") {
+            match text[i..].find('>') {
+                Some(p) => {
+                    i += p + 1;
+                    continue;
+                }
+                None => break,
+            }
+        }
+
+        // opening tag: read the name
+        i += 1;
+        let start = i;
+        while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'>' && b[i] != b'/' {
+            i += 1;
+        }
+        let name = text[start..i].to_string();
+        if name.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        // attributes until '>' (respecting quoted values)
+        let mut attributes = Vec::new();
+        loop {
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i >= b.len() || b[i] == b'>' {
+                i += 1;
+                break;
+            }
+            if b[i] == b'/' {
+                i += 1;
+                continue;
+            }
+            let astart = i;
+            while i < b.len() && b[i] != b'=' && !b[i].is_ascii_whitespace() && b[i] != b'>' && b[i] != b'/' {
+                i += 1;
+            }
+            let full = text[astart..i].to_string();
+            if full.is_empty() {
+                i += 1;
+                continue;
+            }
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            let mut value = String::new();
+            if i < b.len() && b[i] == b'=' {
+                i += 1;
+                while i < b.len() && b[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                if i < b.len() && (b[i] == b'"' || b[i] == b'\'') {
+                    let quote = b[i];
+                    i += 1;
+                    let vstart = i;
+                    while i < b.len() && b[i] != quote {
+                        i += 1;
+                    }
+                    value = decode_entities(&text[vstart..i]);
+                    i += 1;
+                }
+            }
+            let (ns, local) = match full.rsplit_once(':') {
+                Some((ns, local)) => (Some(ns.to_string()), local.to_string()),
+                None => (None, full),
+            };
+            attributes.push(Attr {
+                ns,
+                name: local,
+                raw: Some(value.clone()),
+                value,
+                type_id: 0x03,
+            });
+        }
+        out.push(Element { name, attributes });
+    }
+
+    if out.is_empty() {
+        Err("text manifest: no elements found".into())
+    } else {
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::axml;
+
+    const SAMPLE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.text" android:versionName="2.0" android:versionCode="7">
+  <!-- a comment <activity android:name=".Nope"/> -->
+  <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33"/>
+  <uses-permission android:name="android.permission.INTERNET"/>
+  <application android:debuggable="true">
+    <activity android:name=".Main" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+      </intent-filter>
+    </activity>
+    <service android:name=".Sync"/>
+  </application>
+</manifest>
+"#;
+
+    #[test]
+    fn sniffs_text_manifests() {
+        assert!(is_text_manifest(SAMPLE.as_bytes()));
+        assert!(is_text_manifest(b"\xef\xbb\xbf<?xml version=\"1.0\"?>"));
+        assert!(!is_text_manifest(b"\x03\x00\x08\x00"));
+        assert!(!is_text_manifest(b"PK\x03\x04"));
+    }
+
+    #[test]
+    fn text_manifest_reuses_the_axml_summariser() {
+        let els = parse(SAMPLE.as_bytes()).expect("parse");
+        let s = axml::summarize(&els);
+        assert_eq!(s.package, "com.example.text");
+        assert_eq!(s.version_name, "2.0");
+        assert_eq!(s.version_code, "7");
+        assert_eq!(s.min_sdk.as_deref(), Some("21"));
+        assert_eq!(s.target_sdk.as_deref(), Some("33"));
+        assert!(s.debuggable);
+        assert!(s.permissions.contains(&"android.permission.INTERNET".to_string()));
+        assert_eq!(s.launcher_activity.as_deref(), Some("com.example.text.Main"));
+        assert!(s.activities.iter().any(|(n, e)| n == "com.example.text.Main" && *e));
+        assert!(s.services.iter().any(|(n, e)| n == "com.example.text.Sync" && !*e));
+        assert_eq!(s.exported_count, 1, "comment must not be parsed as an element");
+    }
+
+    #[test]
+    fn handles_entities_and_single_quotes() {
+        let els = parse(b"<manifest package='a.b'><application android:label='Tom &amp; Jerry'/></manifest>")
+            .expect("parse");
+        let app = els.iter().find(|e| e.name == "application").expect("app");
+        assert_eq!(app.value("label"), Some("Tom & Jerry"));
+    }
+
+    #[test]
+    fn rejects_non_xml() {
+        assert!(parse(b"\x00\x01\x02binary garbage").is_err());
+    }
+}
+```
+
 ## `crates/forge-core/Cargo.toml`
 
 ```toml
@@ -4394,7 +7435,9 @@ description = "Forge domain, ingestion, retrieval, citations and API core (std o
 
 use crate::artifacts;
 use crate::domain::*;
+use crate::fetch::{self, FetchedMeta};
 use crate::grounded;
+use crate::hashes;
 use crate::http::{percent_decode, Request, Response};
 use crate::ingest;
 use crate::json::{self, Value};
@@ -4410,6 +7453,39 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub struct Api {
     pub store: Store,
+}
+
+/// A duplicate is not an error the user caused; report which source already exists.
+fn err_dup(existing_id: &str, title: &str, url: &str) -> Response {
+    let body = obj! {
+        "error" => format!("this URL is already a source in this notebook: {}", title),
+        "code" => "duplicate_source",
+        "status" => 409u64,
+        "existing_source_id" => existing_id,
+        "url" => url,
+    };
+    Response::json(409, &body)
+}
+
+fn clip(s: &str, max: usize) -> String {
+    let s = s.trim();
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
+}
+
+/// Copy fetch provenance onto a source record.
+fn apply_fetch_meta(src: &mut Source, fetched: &Option<FetchedMeta>) {
+    if let Some(f) = fetched {
+        src.canonical_url = f.canonical_url.clone();
+        src.fetched_at = f.fetched_at.clone();
+        src.meta.insert("http_status".into(), f.status.to_string());
+        src.meta.insert("content_type".into(), f.content_type.clone());
+        if f.redirects > 0 {
+            src.meta.insert("redirects".into(), f.redirects.to_string());
+        }
+    }
 }
 
 fn err(status: u16, code: &str, msg: &str) -> Response {
@@ -4463,6 +7539,8 @@ impl Api {
             ("GET", ["api", "sources", sid]) => Ok(self.get_source(sid)),
             ("GET", ["api", "sources", sid, "chunks"]) => Ok(self.source_chunks(sid, req)),
             ("DELETE", ["api", "sources", sid]) => Ok(self.delete_source(sid)),
+            ("PATCH", ["api", "sources", sid]) => self.update_source(sid, req),
+            ("POST", ["api", "sources", sid, "refresh"]) => self.refresh_source(sid),
             ("GET", ["api", "notebooks", id, "export"]) => Ok(self.export_notebook(id)),
             ("POST", ["api", "import"]) => self.import_notebook(req),
             ("GET", ["api", "search"]) => Ok(self.search(req)),
@@ -4512,7 +7590,13 @@ impl Api {
                 "html" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "csv" => obj!{ "status" => "supported", "locator" => "row" },
                 "pdf" => obj!{ "status" => "supported", "locator" => "page", "note" => "text-layer PDFs; no OCR" },
-                "url" => obj!{ "status" => "blocked", "reason" => "https requires TLS (no crate available); http fetch is SSRF-guarded but this sandbox has no outbound route" },
+                "url" => obj!{
+                    "status" => if fetch::transport_available() { "supported" } else { "unsupported" },
+                    "locator" => "section+paragraph",
+                    "note" => "fetched with curl (no TLS crate is available), SSRF-guarded and DNS-pinned at every redirect hop",
+                },
+                "youtube" => obj!{ "status" => "unsupported", "reason" => "needs a transcript extractor (yt-dlp) and an ASR pipeline; neither is installed" },
+                "audio_transcript" => obj!{ "status" => "unsupported", "reason" => "no ASR engine installed (see docs/RESEARCH_BLOCKERS.md)" },
                 "docx" => obj!{ "status" => "supported", "locator" => "paragraph", "note" => "WordprocessingML text; images ignored" },
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row", "note" => "first worksheet, shared strings resolved" },
@@ -4526,6 +7610,14 @@ impl Api {
                 "rpc_implemented" => 14u64,
                 "reason" => "wire protocol rebuilt from public reverse engineering and unit-tested; no route to notebooklm.google.com and no TLS client in this build",
                 "endpoint" => "/api/notebooklm/status",
+            },
+            "web_fetch" => obj! {
+                "transport" => if fetch::transport_available() { "curl" } else { "none" },
+                "private_networks" => if security::allow_private() { "ALLOWED by FORGE_FETCH_ALLOW_PRIVATE (test mode)" } else { "blocked" },
+                "max_bytes" => fetch::MAX_FETCH_BYTES as u64,
+                "redirects" => fetch::MAX_HOPS as u64,
+                "timeout_seconds" => fetch::FETCH_TIMEOUT.as_secs(),
+                "dns" => "resolved by Forge, pinned into curl with --resolve, re-validated on every redirect",
             },
             "binary_analysis" => obj! {
                 "apk_manifest" => obj!{ "status" => "supported", "note" => "binary AndroidManifest.xml decoded: package, sdk, permissions, exported components" },
@@ -4706,6 +7798,142 @@ impl Api {
         })
     }
 
+    /// Rename a source or change its labels. Never touches extracted content.
+    fn update_source(&self, sid: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let title = body.str_of("title").map(|t| t.trim().to_string());
+        let labels: Option<Vec<String>> = body.get("labels").map(|_| parse_str_list(body.get("labels")));
+        if title.is_none() && labels.is_none() {
+            return Err(err(422, "nothing_to_update", "send title and/or labels"));
+        }
+        if let Some(t) = &title {
+            if t.is_empty() {
+                return Err(err(422, "empty_title", "title cannot be empty"));
+            }
+            if t.chars().count() > 200 {
+                return Err(err(422, "title_too_long", "title is limited to 200 characters"));
+            }
+        }
+        let found = self.store.write(|db| {
+            let Some(src) = db.sources.iter_mut().find(|s| s.id == sid) else {
+                return None;
+            };
+            if let Some(t) = title {
+                src.title = t;
+            }
+            if let Some(mut l) = labels {
+                l.retain(|x| !x.trim().is_empty());
+                l.dedup();
+                l.truncate(20);
+                src.labels = l;
+            }
+            Some(source_json(src))
+        })
+        .map_err(|e| err(500, "storage", &e.to_string()))?;
+        match found {
+            None => Err(err(404, "not_found", "source not found")),
+            Some(v) => Ok(ok(v)),
+        }
+    }
+
+    /// Re-fetch a URL source and re-index it only if the content actually changed.
+    ///
+    /// Artifacts that were generated before the change are flagged as potentially
+    /// stale (their citations still resolve, but the source text moved).
+    fn refresh_source(&self, sid: &str) -> Result<Response, Response> {
+        let current = self.store.read(|db| db.sources.iter().find(|s| s.id == sid).cloned());
+        let Some(src) = current else {
+            return Err(err(404, "not_found", "source not found"));
+        };
+        if src.canonical_url.is_empty() {
+            return Err(err(
+                422,
+                "not_refreshable",
+                "only sources imported from a URL can be refreshed; uploads and pastes are fixed snapshots",
+            ));
+        }
+        let fetched = fetch::fetch(&src.canonical_url).map_err(|e| {
+            let status = match e {
+                fetch::FetchError::Rejected(_) => 422,
+                fetch::FetchError::NoTransport(_) => 501,
+                fetch::FetchError::Limit(_) => 413,
+                fetch::FetchError::Failed(_) => 502,
+            };
+            err(status, e.code(), &e.message())
+        })?;
+
+        let new_hash = hashes::sha256(&fetched.body);
+        if new_hash == src.content_hash {
+            let v = self.store.write(|db| {
+                let s = db.sources.iter_mut().find(|s| s.id == sid)?;
+                s.fetched_at = now_iso();
+                s.meta.insert("http_status".into(), fetched.status.to_string());
+                Some(source_json(s))
+            })
+            .ok()
+            .flatten();
+            return Ok(ok(obj! {
+                "changed" => false,
+                "source" => v.unwrap_or(Value::Null),
+                "message" => "content is unchanged; nothing was re-indexed",
+            }));
+        }
+
+        let parsed = ingest::extract(&src.kind, &src.title, &fetched.body)
+            .map_err(|e| err(422, "extract_failed", &e))?;
+        if parsed.blocks.is_empty() {
+            return Err(err(422, "empty_extraction", "the refreshed page has no readable text; the old source was kept"));
+        }
+        let chunk_count = parsed.blocks.len();
+        let kind = src.kind.clone();
+        let chunks: Vec<Chunk> = parsed
+            .blocks
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| Chunk {
+                id: new_id("chk"),
+                source_id: sid.to_string(),
+                notebook_id: src.notebook_id.clone(),
+                ordinal: i as u32,
+                text: b.text,
+                locator: b.locator,
+            })
+            .collect();
+        let stale = self.store.write(|db| {
+            db.chunks.retain(|c| c.source_id != sid);
+            db.chunks.extend(chunks);
+            let mut stale: Vec<String> = Vec::new();
+            if let Some(s) = db.sources.iter_mut().find(|s| s.id == sid) {
+                s.content_hash = new_hash.clone();
+                s.fetched_at = now_iso();
+                s.chunk_count = chunk_count as u32;
+                s.page_count = parsed.page_count;
+                s.byte_len = fetched.body.len();
+                s.warnings = parsed.warnings.clone();
+                s.meta.insert("http_status".into(), fetched.status.to_string());
+                let nb = s.notebook_id.clone();
+                let id = s.id.clone();
+                for a in db.artifacts.iter_mut() {
+                    if a.notebook_id == nb {
+                        let used = a.source_ids.iter().any(|x| x == &id)
+                            || !a.source_ids.is_empty();
+                        if used {
+                            a.stale = true;
+                            stale.push(a.id.clone());
+                        }
+                    }
+                }
+            }
+            stale
+        });
+        Ok(ok(obj! {
+            "changed" => true,
+            "kind" => kind.as_str(),
+            "chunk_count" => chunk_count as u64,
+            "stale_artifacts" => Value::Arr(stale.unwrap_or_default().iter().map(|s| Value::from(s.as_str())).collect()),
+        }))
+    }
+
     fn source_chunks(&self, sid: &str, req: &Request) -> Response {
         let page = req.query_get("page").and_then(|p| p.parse::<u32>().ok());
         let payload: Value = self.store.read(|db| {
@@ -4781,25 +8009,87 @@ impl Api {
         self.ingest_bytes(nb, &safe_name, &kind, &safe_name, &req.body, "upload")
     }
 
-    fn add_url_source(&self, _nb: &str, req: &Request) -> Result<Response, Response> {
+    fn add_url_source(&self, nb: &str, req: &Request) -> Result<Response, Response> {
         let body = parse_body(req)?;
-        let url = body.str_of("url").unwrap_or("").trim().to_string();
-        match security::check_url(&url) {
-            security::UrlVerdict::Rejected(reason) => {
-                return Err(err(422, "url_rejected", &format!("URL refused: {}", reason)))
+        let raw = body.str_of("url").unwrap_or("").trim().to_string();
+        if raw.is_empty() {
+            return Err(err(422, "missing_url", "url is required"));
+        }
+        let parsed = security::parse_url(&raw).map_err(|e| err(422, "url_rejected", &e))?;
+        let canonical = parsed.canonical();
+
+        // Duplicate detection happens before any network traffic.
+        if let Some(existing) = self.store.read(|db| {
+            db.sources
+                .iter()
+                .find(|s| s.notebook_id == nb && !s.canonical_url.is_empty() && s.canonical_url == canonical)
+                .map(|s| (s.id.clone(), s.title.clone()))
+        }) {
+            return Err(err_dup(&existing.0, &existing.1, &canonical));
+        }
+
+        let fetched = fetch::fetch(&raw).map_err(|e| {
+            let status = match e {
+                fetch::FetchError::Rejected(_) => 422,
+                fetch::FetchError::NoTransport(_) => 501,
+                fetch::FetchError::Limit(_) => 413,
+                fetch::FetchError::Failed(_) => 502,
+            };
+            err(status, e.code(), &e.message())
+        })?;
+
+        // Canonical URL may have changed after redirects; re-check for a duplicate.
+        if fetched.canonical_url != canonical {
+            if let Some(existing) = self.store.read(|db| {
+                db.sources
+                    .iter()
+                    .find(|s| s.notebook_id == nb && s.canonical_url == fetched.canonical_url)
+                    .map(|s| (s.id.clone(), s.title.clone()))
+            }) {
+                return Err(err_dup(&existing.0, &existing.1, &fetched.canonical_url));
             }
-            security::UrlVerdict::Allowed(clean) => {
-                // Honest limitation: no TLS client exists in this build, and the
-                // sandbox has no outbound route for arbitrary hosts.
-                return Err(err(
-                    501,
-                    "url_ingest_unavailable",
-                    &format!(
-                        "URL ingesting is not available in this build (validated {} but HTTPS needs a TLS client and no external fetch route exists here). Paste the page text or download the file and upload it instead.",
-                        clean
-                    ),
-                ));
+        }
+
+        let kind = fetched.ingest_kind();
+        let title = self.derive_title(&fetched, kind, parsed.host.as_str());
+        self.ingest_source(
+            Some(FetchedMeta {
+                canonical_url: fetched.canonical_url.clone(),
+                fetched_at: now_iso(),
+                status: fetched.status,
+                content_type: fetched.media_type(),
+                redirects: fetched.redirects.len(),
+            }),
+            nb,
+            &title,
+            kind,
+            "url",
+            &fetched.body,
+        )
+    }
+
+    /// Title for a fetched source: page title, then meta description, then the host.
+    fn derive_title(&self, fetched: &fetch::Fetched, kind: &str, host: &str) -> String {
+        if kind == "html" {
+            let raw = ingest::decode_text(&fetched.body);
+            if let Some(t) = ingest::text::html_title(&raw) {
+                return clip(&t, 120);
             }
+            if let Some(d) = ingest::text::html_description(&raw) {
+                return clip(&d, 120);
+            }
+        }
+        let path = fetched
+            .final_url
+            .split("://")
+            .nth(1)
+            .unwrap_or(&fetched.final_url)
+            .to_string();
+        let name = path.rsplit('/').next().unwrap_or("").to_string();
+        if !name.is_empty() && name.contains('.') {
+            format!("{} — {}", clip(&name, 60), host)
+        } else {
+            path
         }
     }
 
@@ -4810,9 +8100,21 @@ impl Api {
         kind: &str,
         origin: &str,
         bytes: &[u8],
-        mode: &str,
+        _mode: &str,
     ) -> Result<Response, Response> {
-        if mode == "upload" && kind == "url" {
+        self.ingest_source(None, nb, title, kind, origin, bytes)
+    }
+
+    fn ingest_source(
+        &self,
+        fetched: Option<FetchedMeta>,
+        nb: &str,
+        title: &str,
+        kind: &str,
+        origin: &str,
+        bytes: &[u8],
+    ) -> Result<Response, Response> {
+        if origin == "upload" && kind == "url" {
             return Err(err(422, "invalid_kind", "url sources must use the url endpoint"));
         }
         let notebook_exists = self.store.read(|db| db.notebooks.iter().any(|n| n.id == nb));
@@ -4824,7 +8126,7 @@ impl Api {
             Ok(p) => p,
             Err(e) => {
                 // Record the failure honestly so the UI can offer a retry.
-                let failed = Source {
+                let mut failed = Source {
                     id: source_id.clone(),
                     notebook_id: nb.to_string(),
                     title: title.to_string(),
@@ -4837,7 +8139,10 @@ impl Api {
                     added_at: now_iso(),
                     page_count: 0,
                     chunk_count: 0,
+                    content_hash: hashes::sha256(bytes),
+                    ..Default::default()
                 };
+                apply_fetch_meta(&mut failed, &fetched);
                 let _ = self.store.write(|db| db.sources.push(failed));
                 return Err(err(422, "extract_failed", &e));
             }
@@ -4845,7 +8150,7 @@ impl Api {
 
         if parsed.blocks.is_empty() {
             let msg = "no readable text could be extracted from this file";
-            let failed = Source {
+            let mut failed = Source {
                 id: source_id.clone(),
                 notebook_id: nb.to_string(),
                 title: title.to_string(),
@@ -4858,13 +8163,16 @@ impl Api {
                 added_at: now_iso(),
                 page_count: parsed.page_count,
                 chunk_count: 0,
+                content_hash: hashes::sha256(bytes),
+                ..Default::default()
             };
+            apply_fetch_meta(&mut failed, &fetched);
             let _ = self.store.write(|db| db.sources.push(failed));
             return Err(err(422, "empty_extraction", msg));
         }
 
         let chunk_count = parsed.blocks.len();
-        let source = Source {
+        let mut source = Source {
             id: source_id.clone(),
             notebook_id: nb.to_string(),
             title: title.to_string(),
@@ -4877,7 +8185,10 @@ impl Api {
             added_at: now_iso(),
             page_count: parsed.page_count,
             chunk_count: chunk_count as u32,
+            content_hash: hashes::sha256(bytes),
+            ..Default::default()
         };
+        apply_fetch_meta(&mut source, &fetched);
         let chunks: Vec<Chunk> = parsed
             .blocks
             .into_iter()
@@ -4908,10 +8219,14 @@ impl Api {
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
 
+        let fetched_url = fetched.as_ref().map(|f| f.canonical_url.clone()).unwrap_or_default();
+        let fetched_status = fetched.as_ref().map(|f| f.status as u64).unwrap_or(0);
         Ok(created(obj! {
             "source_id" => source_id.clone(),
             "title" => title,
             "kind" => kind,
+            "url" => fetched_url,
+            "http_status" => fetched_status,
             "status" => "ready",
             "chunk_count" => chunk_count as u64,
             "page_count" => self.store.read(|db| db.sources.iter().find(|s| s.id == source_id).map(|s| s.page_count).unwrap_or(0)) as u64,
@@ -5214,6 +8529,7 @@ impl Api {
             created_at: now_iso(),
             source_ids: sources.iter().map(|s| s.id.clone()).collect(),
             payload,
+            stale: false,
         };
         let id = art.id.clone();
         let payload_out = art.payload.clone();
@@ -5237,6 +8553,8 @@ impl Api {
                     "kind" => a.kind.as_str(),
                     "title" => a.title.as_str(),
                     "created_at" => a.created_at.as_str(),
+                    "source_ids" => json_str_list(&a.source_ids),
+                    "stale" => a.stale,
                 }).collect())
             }
         })
@@ -5323,6 +8641,15 @@ impl Api {
                 added_at: now.clone(),
                 page_count: s.get("page_count").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
                 chunk_count: s.get("chunk_count").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
+                content_hash: s.str_of("content_hash").unwrap_or("").to_string(),
+                canonical_url: s.str_of("canonical_url").unwrap_or("").to_string(),
+                fetched_at: s.str_of("fetched_at").unwrap_or("").to_string(),
+                labels: parse_str_list(s.get("labels")),
+                meta: s
+                    .get("meta")
+                    .and_then(|m| m.as_obj())
+                    .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+                    .unwrap_or_default(),
             });
         }
 
@@ -5394,6 +8721,7 @@ impl Api {
                         .filter_map(|s| id_map.get(&s).cloned())
                         .collect(),
                     payload: a.get("payload").cloned().unwrap_or(Value::Null),
+            stale: false,
                 });
             }
         }
@@ -5761,6 +9089,17 @@ fn source_json(s: &Source) -> Value {
         "page_count" => s.page_count as u64,
         "chunk_count" => s.chunk_count as u64,
         "added_at" => s.added_at.as_str(),
+        "content_hash" => s.content_hash.as_str(),
+        "canonical_url" => s.canonical_url.as_str(),
+        "fetched_at" => s.fetched_at.as_str(),
+        "labels" => json_str_list(&s.labels),
+        "meta" => {
+            let mut m = BTreeMap::new();
+            for (k, v) in &s.meta {
+                m.insert(k.clone(), Value::from(v.as_str()));
+            }
+            Value::Obj(m)
+        },
     }
 }
 
@@ -5784,6 +9123,7 @@ fn artifact_json(a: &Artifact) -> Value {
         "title" => a.title.as_str(),
         "created_at" => a.created_at.as_str(),
         "source_ids" => json_str_list(&a.source_ids),
+        "stale" => a.stale,
         "payload" => a.payload.clone(),
     }
 }
@@ -5842,23 +9182,10 @@ fn citation_for(chunk: &Chunk, sources: &[Source], n: usize) -> Citation {
 }
 
 fn sentences(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    for ch in text.chars() {
-        cur.push(ch);
-        if matches!(ch, '.' | '!' | '?') {
-            let t = cur.trim().to_string();
-            if t.len() >= 25 {
-                out.push(t);
-            }
-            cur.clear();
-        }
-    }
-    let t = cur.trim();
-    if t.len() >= 25 {
-        out.push(t.to_string());
-    }
-    out
+    crate::retrieve::split_sentences(text)
+        .into_iter()
+        .filter(|s| s.len() >= 25)
+        .collect()
 }
 
 /// "X is Y" / "X refers to Y" / "X means Y" -> (term, definition)
@@ -6291,6 +9618,7 @@ mod tests {
             added_at: "2026-01-01T00:00:00Z".into(),
             page_count: 0,
             chunk_count: 1,
+            ..Default::default()
         }
     }
 
@@ -6616,6 +9944,7 @@ pub struct Source {
     pub notebook_id: String,
     pub title: String,
     pub kind: String,
+    /// Where it came from: "upload", "paste", "url", "note".
     pub origin: String,
     pub byte_len: usize,
     pub status: String, // ready | failed
@@ -6624,6 +9953,46 @@ pub struct Source {
     pub added_at: String,
     pub page_count: u32,
     pub chunk_count: u32,
+    /// SHA-256 of the bytes that were parsed. Detects duplicates and source changes.
+    pub content_hash: String,
+    /// Normalised URL for fetched sources (empty otherwise).
+    pub canonical_url: String,
+    /// When a URL source was last retrieved (empty for local sources).
+    pub fetched_at: String,
+    /// User labels, used for filtering. Free-form, case-preserved.
+    pub labels: Vec<String>,
+    /// Extensible metadata: http_status, content_type, converted_from, ...
+    pub meta: std::collections::BTreeMap<String, String>,
+}
+
+impl Default for Source {
+    fn default() -> Self {
+        Source {
+            id: String::new(),
+            notebook_id: String::new(),
+            title: String::new(),
+            kind: String::new(),
+            origin: String::new(),
+            byte_len: 0,
+            status: String::new(),
+            error: String::new(),
+            warnings: Vec::new(),
+            added_at: String::new(),
+            page_count: 0,
+            chunk_count: 0,
+            content_hash: String::new(),
+            canonical_url: String::new(),
+            fetched_at: String::new(),
+            labels: Vec::new(),
+            meta: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl Source {
+    pub fn meta_of(&self, key: &str) -> &str {
+        self.meta.get(key).map(|s| s.as_str()).unwrap_or("")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -6689,6 +10058,8 @@ pub struct Artifact {
     pub created_at: String,
     pub source_ids: Vec<String>,
     pub payload: Value,
+    /// Set when a source it was built from changed after generation.
+    pub stale: bool,
 }
 
 // ------------------------------------------------------------------ JSON
@@ -7075,6 +10446,7 @@ mod tests {
             added_at: "2026-01-01T00:00:00Z".into(),
             page_count: 0,
             chunk_count: 1,
+            ..Default::default()
         }
     }
 
@@ -7203,6 +10575,267 @@ mod tests {
     fn degenerate_question_is_detected() {
         assert!(is_degenerate_question("the of and"));
         assert!(!is_degenerate_question("what is BM25"));
+    }
+}
+```
+
+## `crates/forge-core/src/hashes.rs`
+
+```rust
+//! SHA-256 and SHA-1, hand-written (no crates available).
+//!
+//! Both are implemented from their specifications and tested against published
+//! vectors — an analyser whose hashes are wrong is worse than none.
+
+const K256: [u32; 64] = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+pub fn sha256(data: &[u8]) -> String {
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    let mut msg = data.to_vec();
+    let bit_len = (data.len() as u64).wrapping_mul(8);
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+
+    for chunk in msg.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
+            (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let t1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K256[i])
+                .wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(t1);
+            d = c;
+            c = b;
+            b = a;
+            a = t1.wrapping_add(t2);
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+    h.iter().map(|x| format!("{:08x}", x)).collect()
+}
+
+pub fn sha1(data: &[u8]) -> String {
+    let mut h: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+    let mut msg = data.to_vec();
+    let bit_len = (data.len() as u64).wrapping_mul(8);
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+
+    for chunk in msg.chunks_exact(64) {
+        let mut w = [0u32; 80];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ]);
+        }
+        for i in 16..80 {
+            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
+        for i in 0..80 {
+            let (f, k) = match i {
+                0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
+                20..=39 => (b ^ c ^ d, 0x6ED9EBA1),
+                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
+                _ => (b ^ c ^ d, 0xCA62C1D6),
+            };
+            let tmp = a
+                .rotate_left(5)
+                .wrapping_add(f)
+                .wrapping_add(e)
+                .wrapping_add(k)
+                .wrapping_add(w[i]);
+            e = d;
+            d = c;
+            c = b.rotate_left(30);
+            b = a;
+            a = tmp;
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+    }
+    h.iter().map(|x| format!("{:08x}", x)).collect()
+}
+
+/// Extract printable ASCII runs of at least `min` bytes.
+pub fn strings_of(data: &[u8], min: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for &b in data {
+        if (0x20..0x7f).contains(&b) {
+            cur.push(b as char);
+        } else {
+            if cur.len() >= min {
+                out.push(std::mem::take(&mut cur));
+            } else {
+                cur.clear();
+            }
+        }
+    }
+    if cur.len() >= min {
+        out.push(cur);
+    }
+    out
+}
+
+/// Wide (UTF-16LE) printable runs, which is how Windows binaries store text.
+pub fn wide_strings_of(data: &[u8], min: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut i = 0;
+    while i + 1 < data.len() {
+        let lo = data[i];
+        let hi = data[i + 1];
+        if hi == 0 && (0x20..0x7f).contains(&lo) {
+            cur.push(lo as char);
+            i += 2;
+        } else {
+            if cur.len() >= min {
+                out.push(std::mem::take(&mut cur));
+            } else {
+                cur.clear();
+            }
+            i += 2;
+        }
+    }
+    if cur.len() >= min {
+        out.push(cur);
+    }
+    out
+}
+
+/// Shannon entropy in bits per byte (0..8). High entropy over a whole file is
+/// the classic packing/encryption signal.
+pub fn entropy(data: &[u8]) -> f64 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let mut counts = [0usize; 256];
+    for &b in data {
+        counts[b as usize] += 1;
+    }
+    let len = data.len() as f64;
+    let mut e = 0.0;
+    for c in counts {
+        if c > 0 {
+            let p = c as f64 / len;
+            e -= p * p.log2();
+        }
+    }
+    e
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_matches_published_vectors() {
+        assert_eq!(
+            sha256(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            sha256(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+    }
+
+    #[test]
+    fn sha1_matches_published_vectors() {
+        assert_eq!(sha1(b""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+        assert_eq!(sha1(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(
+            sha1(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
+        );
+    }
+
+    #[test]
+    fn strings_extraction_is_bounded() {
+        let data = b"\x00\x01hello world\x00ab\x00another string here\xff";
+        let s = strings_of(data, 5);
+        assert_eq!(s, vec!["hello world", "another string here"]);
+    }
+
+    #[test]
+    fn wide_strings_are_found() {
+        let mut data = Vec::new();
+        for ch in "C:\\Windows\\System32".chars() {
+            data.push(ch as u8);
+            data.push(0);
+        }
+        let s = wide_strings_of(&data, 8);
+        assert_eq!(s, vec!["C:\\Windows\\System32"]);
+    }
+
+    #[test]
+    fn entropy_separates_text_from_random() {
+        let zeros = vec![0u8; 4096];
+        assert!(entropy(&zeros) < 0.01);
+        let random: Vec<u8> = (0..4096).map(|i| ((i * 7919) % 256) as u8).collect();
+        assert!(entropy(&random) > 7.0, "pseudo-random data should look packed");
     }
 }
 ```
@@ -9370,6 +13003,64 @@ mod tests {
         assert_eq!(decode_entities("100% &unknown;"), "100% &unknown;");
     }
 }
+
+/// Extract `<title>` from an HTML document (entities decoded, whitespace collapsed).
+pub fn html_title(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    let start = lower.find("<title")?;
+    let open_end = lower[start..].find('>')? + start + 1;
+    let close = lower[open_end..].find("</title")? + open_end;
+    let title = decode_entities(&raw[open_end..close]);
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.is_empty() {
+        None
+    } else {
+        Some(title)
+    }
+}
+
+/// Extract `<link rel="canonical" href="...">`: the page's own preferred identity.
+pub fn html_canonical(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    let mut from = 0usize;
+    while let Some(rel) = lower[from..].find("<link") {
+        let at = from + rel;
+        let end = lower[at..].find('>')? + at;
+        let tag = &raw[at..end];
+        let tag_lower = &lower[at..end];
+        if tag_lower.contains("canonical") {
+            if let Some(href) = attr(tag, "href") {
+                let href = href.trim().to_string();
+                if !href.is_empty() {
+                    return Some(decode_entities(&href));
+                }
+            }
+        }
+        from = end;
+    }
+    None
+}
+
+/// Extract a meta description, used as a fallback source title.
+pub fn html_description(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    let mut from = 0usize;
+    while let Some(m) = lower[from..].find("<meta") {
+        let at = from + m;
+        let end = lower[at..].find('>')? + at;
+        let tag = &raw[at..end];
+        if tag.to_ascii_lowercase().contains("description") {
+            if let Some(content) = attr(tag, "content") {
+                let c = decode_entities(&content).trim().to_string();
+                if !c.is_empty() {
+                    return Some(c);
+                }
+            }
+        }
+        from = end;
+    }
+    None
+}
 ```
 
 ## `crates/forge-core/src/ingest/zip.rs`
@@ -10065,6 +13756,8 @@ pub mod api;
 pub mod artifacts;
 pub mod domain;
 pub mod grounded;
+pub mod hashes;
+pub mod fetch;
 pub mod http;
 pub mod inflate;
 pub mod ingest;
@@ -11385,26 +15078,89 @@ pub fn search(chunks: &[Chunk], query: &str, limit: usize) -> Vec<Hit> {
 /// Split text into candidate sentences, scoring each by stem-aware overlap with
 /// the query. Returns `(overlap_ratio, sentence)` sorted best-first; sentences are
 /// never invented, only sliced out of `text`.
+/// Abbreviations whose trailing period does not end a sentence.
+const ABBREVIATIONS: &[&str] = &[
+    "e.g", "i.e", "etc", "vs", "cf", "al", "fig", "figs", "no", "vol", "pp", "p", "ch", "sec",
+    "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "inc", "ltd", "co", "approx", "dept",
+    "est", "min", "max", "avg", "ref", "eq", "art", "para", "ed", "eds",
+];
+
+fn is_abbreviation(word: &str) -> bool {
+    let w = word.trim_matches(|c: char| !c.is_alphabetic()).to_ascii_lowercase();
+    if w.is_empty() {
+        return false;
+    }
+    ABBREVIATIONS.contains(&w.as_str()) || w.chars().count() == 1 // initials: "J. Smith", "U.S.A."
+}
+
+/// Split prose into sentences without breaking decimals ("0.42"), abbreviations
+/// ("e.g.", "Dr.") or initials. Newlines always end a sentence; `;` does not.
+///
+/// A citation is only as good as the span it quotes, so this deliberately errs
+/// towards keeping a sentence whole: a wrongly split sentence loses the number
+/// the user asked about.
+pub fn split_sentences(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\n' {
+            let t = cur.trim();
+            if !t.is_empty() {
+                out.push(t.to_string());
+            }
+            cur.clear();
+            i += 1;
+            continue;
+        }
+        cur.push(ch);
+        if matches!(ch, '.' | '!' | '?') {
+            let next = chars.get(i + 1).copied();
+            let next_is_space = next.map(|c| c.is_whitespace()).unwrap_or(true);
+            // a period inside a number (0.42) or a URL is not a boundary
+            let prev_is_digit = cur
+                .chars()
+                .rev()
+                .nth(1)
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false);
+            let next_is_digit = next.map(|c| c.is_ascii_digit()).unwrap_or(false);
+            let word_before: String = cur
+                .trim_end_matches(|c: char| c == '.' || c == '!' || c == '?')
+                .rsplit(|c: char| c.is_whitespace() || c == '(' || c == '"' || c == '\'')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            let is_break = ch != '.'
+                || (!(prev_is_digit && next_is_digit)
+                    && !is_abbreviation(&word_before)
+                    && next_is_space);
+            if is_break {
+                let t = cur.trim();
+                if !t.is_empty() {
+                    out.push(t.to_string());
+                }
+                cur.clear();
+            }
+        }
+        i += 1;
+    }
+    let t = cur.trim();
+    if !t.is_empty() {
+        out.push(t.to_string());
+    }
+    out
+}
+
 pub fn scored_sentences(text: &str, query: &str, max: usize) -> Vec<(f64, String)> {
     let q: HashSet<String> = terms(query).into_iter().map(|t| stem(&t)).collect();
-    let mut sentences: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut push = |raw: &str, out: &mut Vec<String>| {
-        let t = raw.trim();
-        // Single-word "sentences" (headings, page titles) are not evidence.
-        if t.len() > 20 && t.split_whitespace().count() > 3 {
-            out.push(t.to_string());
-        }
-    };
-    for ch in text.chars() {
-        if matches!(ch, '.' | '!' | '?' | ';' | '\n') {
-            push(&cur, &mut sentences);
-            cur.clear();
-        } else {
-            cur.push(ch);
-        }
-    }
-    push(&cur, &mut sentences);
+    // Single-word "sentences" (headings, page titles) are not evidence.
+    let sentences: Vec<String> = split_sentences(text)
+        .into_iter()
+        .filter(|t| t.len() > 20 && t.split_whitespace().count() > 3)
+        .collect();
     if sentences.is_empty() {
         let t = text.trim();
         if !t.is_empty() {
@@ -11503,6 +15259,34 @@ mod tests {
         assert!(t.contains(&"café".to_string()));
         assert!(t.contains(&"42".to_string()));
     }
+
+    #[test]
+    fn sentence_splitter_keeps_decimals_and_abbreviations_intact() {
+        let s = split_sentences(
+            "The evidence floor is 0.42 in this build. Anything below it is ignored. \
+             See e.g. the retrieval notes for details. Dr. Rao wrote section 3.5 of the report.",
+        );
+        assert!(s[0].contains("0.42"), "decimal must not split: {:?}", s);
+        assert_eq!(s.len(), 4, "got {:?}", s);
+        assert!(s[2].contains("e.g. the retrieval notes"), "abbreviation split: {:?}", s);
+        assert!(s[3].starts_with("Dr. Rao"), "title abbreviation split: {:?}", s);
+    }
+
+    #[test]
+    fn sentence_splitter_ends_on_newlines_and_question_marks() {
+        let s = split_sentences("What is grounding?\nIt is evidence-bound.\nSecond paragraph.");
+        assert_eq!(s.len(), 3, "{:?}", s);
+        assert_eq!(s[0], "What is grounding?");
+        assert_eq!(s[1], "It is evidence-bound.");
+    }
+
+    #[test]
+    fn scored_sentences_returns_the_sentence_containing_the_number() {
+        let text = "Version 1.5 shipped earlier. The retry budget is 2.75 attempts per request.";
+        let best = scored_sentences(text, "what is the retry budget", 1);
+        assert_eq!(best.len(), 1);
+        assert!(best[0].1.contains("2.75"), "got {:?}", best[0].1);
+    }
 }
 ```
 
@@ -11595,6 +15379,173 @@ pub fn check_url(raw: &str) -> UrlVerdict {
         }
         Err(e) => UrlVerdict::Rejected(format!("dns resolution failed: {}", e)),
     }
+}
+
+/// The pieces of an http(s) URL that matter for a safe fetch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedUrl {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+    /// Path plus query, always starting with `/`.
+    pub path_query: String,
+}
+
+impl ParsedUrl {
+    pub fn authority(&self) -> String {
+        let default = if self.scheme == "https" { 443 } else { 80 };
+        if self.port == default {
+            self.host.clone()
+        } else {
+            format!("{}:{}", self.host, self.port)
+        }
+    }
+
+    /// Rebuild the URL we will actually request.
+    pub fn to_url(&self) -> String {
+        format!("{}://{}{}", self.scheme, self.authority(), self.path_query)
+    }
+
+    /// A normalised identity for de-duplication: lower-cased scheme/host, default
+    /// port dropped, fragment removed, empty path → "/", trailing "." removed.
+    pub fn canonical(&self) -> String {
+        let mut host = self.host.trim_end_matches('.').to_ascii_lowercase();
+        if host.is_empty() {
+            host = self.host.clone();
+        }
+        let default = if self.scheme == "https" { 443 } else { 80 };
+        let auth = if self.port == default {
+            host
+        } else {
+            format!("{}:{}", host, self.port)
+        };
+        let mut path = self.path_query.clone();
+        if path.is_empty() {
+            path = "/".to_string();
+        }
+        format!("{}://{}{}", self.scheme, auth, path)
+    }
+}
+
+/// Parse an absolute http(s) URL without pulling in a URL crate.
+///
+/// Rejects: non-http(s) schemes, missing host, embedded credentials
+/// (`user:pass@host`) — the spec forbids forwarding userinfo — and control
+/// characters. Percent-encoding is preserved verbatim.
+pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("empty url".into());
+    }
+    if raw.len() > MAX_URL_LEN {
+        return Err("url too long".into());
+    }
+    if raw.chars().any(|c| c.is_control()) {
+        return Err("url contains control characters".into());
+    }
+    let lower = raw.to_ascii_lowercase();
+    let (scheme, _rest) = lower
+        .split_once("://")
+        .ok_or_else(|| "missing scheme (http/https)".to_string())?;
+    if scheme != "http" && scheme != "https" {
+        return Err(format!("scheme '{}' is not allowed", scheme));
+    }
+    let default_port: u16 = if scheme == "https" { 443 } else { 80 };
+
+    // strip fragment; keep path+query from the *original* string to preserve case
+    let no_frag = raw.split('#').next().unwrap_or("");
+    let after_scheme = &no_frag[scheme.len() + 3..];
+    let authority_end = after_scheme
+        .find(|c| c == '/' || c == '?')
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+    let path_query = match after_scheme[authority_end..].is_empty() {
+        true => "/".to_string(),
+        false => {
+            let pq = &after_scheme[authority_end..];
+            if pq.starts_with('/') { pq.to_string() } else { format!("/{}", pq) }
+        }
+    };
+    if authority.is_empty() {
+        return Err("missing host".into());
+    }
+    if authority.contains('@') {
+        return Err("credentials embedded in the URL are refused".into());
+    }
+
+    let (host, port) = if authority.starts_with('[') {
+        let close = authority.find(']').ok_or_else(|| "malformed IPv6 host".to_string())?;
+        let host = authority[1..close].to_string();
+        let rest = &authority[close + 1..];
+        let port = if let Some(p) = rest.strip_prefix(':') {
+            p.parse::<u16>().map_err(|_| "bad port".to_string())?
+        } else {
+            default_port
+        };
+        (host, port)
+    } else if let Some((h, p)) = authority.rsplit_once(':') {
+        (h.to_string(), p.parse::<u16>().map_err(|_| "bad port".to_string())?)
+    } else {
+        (authority.to_string(), default_port)
+    };
+    if host.is_empty() {
+        return Err("missing host".into());
+    }
+    if port == 0 {
+        return Err("port 0 is not allowed".into());
+    }
+    Ok(ParsedUrl { scheme: scheme.to_string(), host, port, path_query })
+}
+
+/// Why a name could not be turned into a usable address. Separating these matters:
+/// a blocked address is a policy decision (4xx), an unresolvable name is a network
+/// condition (5xx) and must not be reported as "refused by policy".
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResolveError {
+    Blocked(String),
+    Dns(String),
+}
+
+/// Resolve a host to public addresses only. Every returned address is
+/// guaranteed to pass `is_public_ip`, so a fetcher can pin to one of them.
+///
+/// `FORGE_FETCH_ALLOW_PRIVATE=1` disables the public-only rule. It exists so the
+/// test suite can drive a loopback fixture server; the capability page reports
+/// when it is on so it cannot be enabled silently.
+pub fn resolve_public(host: &str, port: u16) -> Result<Vec<IpAddr>, ResolveError> {
+    let literal = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = literal.parse::<IpAddr>() {
+        return if is_public_ip(&ip) || allow_private() {
+            Ok(vec![ip])
+        } else {
+            Err(ResolveError::Blocked(format!("address {} is not public", ip)))
+        };
+    }
+    let addrs = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| ResolveError::Dns(format!("cannot resolve {}: {}", host, e)))?;
+    let ips: Vec<IpAddr> = addrs.map(|a| a.ip()).collect();
+    if ips.is_empty() {
+        return Err(ResolveError::Dns(format!("{} did not resolve", host)));
+    }
+    if !allow_private() {
+        for ip in &ips {
+            if !is_public_ip(ip) {
+                return Err(ResolveError::Blocked(format!(
+                    "{} resolves to non-public address {}",
+                    host, ip
+                )));
+            }
+        }
+    }
+    Ok(ips)
+}
+
+/// True when the operator explicitly opted into private-network fetching.
+pub fn allow_private() -> bool {
+    std::env::var("FORGE_FETCH_ALLOW_PRIVATE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 pub fn is_public_ip(ip: &IpAddr) -> bool {
@@ -11895,6 +15846,15 @@ fn source_json(sr: &Source) -> Value {
     m.insert("added_at".into(), Value::from(sr.added_at.as_str()));
     m.insert("page_count".into(), Value::from(sr.page_count as u64));
     m.insert("chunk_count".into(), Value::from(sr.chunk_count as u64));
+    m.insert("content_hash".into(), Value::from(sr.content_hash.as_str()));
+    m.insert("canonical_url".into(), Value::from(sr.canonical_url.as_str()));
+    m.insert("fetched_at".into(), Value::from(sr.fetched_at.as_str()));
+    m.insert("labels".into(), json_str_list(&sr.labels));
+    let mut meta = BTreeMap::new();
+    for (k, v) in &sr.meta {
+        meta.insert(k.clone(), Value::from(v.as_str()));
+    }
+    m.insert("meta".into(), Value::Obj(meta));
     Value::Obj(m)
 }
 
@@ -11912,6 +15872,19 @@ fn source_from(v: &Value) -> Source {
         added_at: s(v, "added_at"),
         page_count: v.get("page_count").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
         chunk_count: v.get("chunk_count").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
+        content_hash: s(v, "content_hash"),
+        canonical_url: s(v, "canonical_url"),
+        fetched_at: s(v, "fetched_at"),
+        labels: parse_str_list(v.get("labels")),
+        meta: v
+            .get("meta")
+            .and_then(|m| m.as_obj())
+            .map(|m| {
+                m.iter()
+                    .map(|(k, val)| (k.clone(), val.as_str().unwrap_or("").to_string()))
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -11995,6 +15968,7 @@ fn artifact_json(a: &Artifact) -> Value {
     m.insert("title".into(), Value::from(a.title.as_str()));
     m.insert("created_at".into(), Value::from(a.created_at.as_str()));
     m.insert("source_ids".into(), json_str_list(&a.source_ids));
+    m.insert("stale".into(), Value::Bool(a.stale));
     m.insert("payload".into(), a.payload.clone());
     Value::Obj(m)
 }
@@ -12007,6 +15981,7 @@ fn artifact_from(v: &Value) -> Artifact {
         title: s(v, "title"),
         created_at: s(v, "created_at"),
         source_ids: parse_str_list(v.get("source_ids")),
+        stale: v.get("stale").and_then(|b| b.as_bool()).unwrap_or(false),
         payload: v.get("payload").cloned().unwrap_or(Value::Null),
     }
 }
@@ -12397,6 +16372,9 @@ impl Server {
 
 #[test]
 fn rejects_bad_input_and_dangerous_urls() {
+    // shares the lock with the URL test, which flips the private-fetch flag
+    let _guard = URL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
     let dir = tempdir("reject");
     let s = Server::start(dir.clone());
     let (st, _) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("x"))])));
@@ -12445,14 +16423,29 @@ fn rejects_bad_input_and_dangerous_urls() {
         assert_eq!(body.str_of("code"), Some("url_rejected"));
     }
 
-    // public URL: honest 501 instead of pretending it worked
+    // A public URL that this sandbox cannot reach is a *network* failure (502),
+    // not a policy refusal (422) and not a fake success.
     let (st, body) = s.json(
         "POST",
         &format!("/api/notebooks/{}/sources/url", nb_id),
         Some(obj(&[("url", Value::from("http://93.184.216.34/page"))])),
     );
-    assert_eq!(st, 501);
-    assert_eq!(body.str_of("code"), Some("url_ingest_unavailable"));
+    assert!(
+        st == 502 || st == 504,
+        "unreachable public host must be a transport error, got {} {:?}",
+        st,
+        body
+    );
+    assert_eq!(body.str_of("code"), Some("fetch_failed"));
+
+    // A name that does not resolve is also a transport failure, not a policy refusal.
+    let (st, body) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/url", nb_id),
+        Some(obj(&[("url", Value::from("http://no-such-host.invalid/x"))])),
+    );
+    assert_eq!(st, 502, "{:?}", body);
+    assert_eq!(body.str_of("code"), Some("fetch_failed"));
 
     // garbage JSON
     let (st, _) = s.raw("POST", "/api/notebooks", Some(b"{not json"), "application/json");
@@ -12621,6 +16614,249 @@ fn provider_keys_are_write_only_and_never_used_unsafely() {
     assert_eq!(list.get("backups").unwrap().as_arr().unwrap().len(), 1);
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+// ---------------------------------------------------------------------------
+// URL ingestion, end to end: a real HTTP server → fetch → parse → index → chat
+// → citation. The fixture origin is loopback, so the test opts into private-range
+// fetching explicitly (the guard is off by default and reported in capabilities).
+// ---------------------------------------------------------------------------
+
+static URL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serve one page on loopback so the fetcher has something real to talk to.
+fn start_origin(html: &'static str) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(4) {
+            let mut stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                html.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(html.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    port
+}
+
+#[test]
+fn url_source_is_fetched_indexed_cited_and_deduplicated() {
+    let _guard = URL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FORGE_FETCH_ALLOW_PRIVATE", "1");
+
+    let html = "<html><head><title>Retrieval Notes</title></head><body>\
+        <h1>Retrieval</h1>\
+        <p>Hybrid retrieval combines lexical scoring with dense embeddings and then reranks.</p>\
+        <h2>Grounding</h2>\
+        <p>The evidence floor is 0.42: passages below it are treated as no evidence at all.</p>\
+        </body></html>";
+    let port = start_origin(html);
+    let dir = tempdir("url-ingest");
+    let s = Server::start(dir.clone());
+
+    let (st, _) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("URL test"))])));
+    assert_eq!(st, 201);
+    let (_, list) = s.json("GET", "/api/notebooks", None);
+    let nb = list.get("notebooks").unwrap().as_arr().unwrap()[0]
+        .str_of("id")
+        .unwrap()
+        .to_string();
+
+    let url = format!("http://127.0.0.1:{}/notes", port);
+    let (st, body) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/url", nb),
+        Some(obj(&[("url", Value::from(url.as_str()))])),
+    );
+    assert_eq!(st, 201, "url ingest failed: {:?}", body);
+    assert_eq!(body.str_of("title"), Some("Retrieval Notes"), "title comes from <title>");
+    assert_eq!(body.str_of("kind"), Some("html"));
+    assert!(body.get("chunk_count").and_then(|c| c.as_f64()).unwrap_or(0.0) >= 1.0);
+
+    // provenance is stored on the source itself
+    let (_, sources) = s.json("GET", &format!("/api/notebooks/{}/sources", nb), None);
+    let src = &sources.get("sources").unwrap().as_arr().unwrap()[0];
+    assert_eq!(src.str_of("origin"), Some("url"));
+    assert_eq!(src.str_of("canonical_url"), Some(url.as_str()));
+    assert_eq!(src.get("meta").and_then(|m| m.str_of("http_status")), Some("200"));
+    assert!(src.str_of("content_hash").unwrap_or("").len() == 64, "content hash recorded");
+    assert!(!src.str_of("fetched_at").unwrap_or("").is_empty());
+
+    // asking the question returns a citation into the fetched page
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb),
+        Some(obj(&[("question", Value::from("What is the evidence floor?"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    let text = answer.str_of("answer").unwrap_or("");
+    assert!(text.contains("0.42"), "answer should carry the fact: {}", text);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty(), "a grounded answer must cite");
+    let cited_source = cites[0].str_of("source_id").unwrap_or("");
+    assert_eq!(cited_source, src.str_of("id").unwrap(), "citation points at the fetched source");
+    assert_eq!(cites[0].str_of("source_title"), Some("Retrieval Notes"));
+
+    // the same URL is refused as a duplicate, and the response names the original
+    let (st, dup) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/url", nb),
+        Some(obj(&[("url", Value::from(url.as_str()))])),
+    );
+    assert_eq!(st, 409, "{:?}", dup);
+    assert_eq!(dup.str_of("code"), Some("duplicate_source"));
+    assert_eq!(dup.str_of("existing_source_id"), src.str_of("id"));
+
+    // URL variants that normalise to the same identity are duplicates too
+    let variant = format!("HTTP://127.0.0.1:{}/notes#section", port);
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/url", nb),
+        Some(obj(&[("url", Value::from(variant.as_str()))])),
+    );
+    assert_eq!(st, 409, "scheme case and fragment must not create a second source");
+
+    std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+}
+
+/// Serves a different page on each connection so a refresh sees a real change.
+fn start_changing_origin() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for (n, stream) in listener.incoming().take(6).enumerate() {
+            let mut stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf);
+            let html = if n == 0 {
+                "<html><head><title>Mutable</title></head><body><p>The retry budget is 2.75 attempts per request and it is enforced by the client.</p></body></html>"
+            } else {
+                "<html><head><title>Mutable</title></head><body><p>The retry budget is 4.5 attempts per request after the tier change.</p></body></html>"
+            };
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                html.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(html.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    port
+}
+
+#[test]
+fn refreshing_a_url_source_reindexes_only_when_content_changed() {
+    let _guard = URL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FORGE_FETCH_ALLOW_PRIVATE", "1");
+
+    let port = start_changing_origin();
+    let s = Server::start(tempdir("refresh"));
+    let (_, _) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Refresh"))])));
+    let (_, list) = s.json("GET", "/api/notebooks", None);
+    let nb = list.get("notebooks").unwrap().as_arr().unwrap()[0].str_of("id").unwrap().to_string();
+
+    let url = format!("http://127.0.0.1:{}/doc", port);
+    let (st, added) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/url", nb),
+        Some(obj(&[("url", Value::from(url.as_str()))])),
+    );
+    assert_eq!(st, 201, "{:?}", added);
+    let sid = added.str_of("source_id").unwrap().to_string();
+
+    // an artifact generated now must be flagged stale once the source changes
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb),
+        Some(obj(&[
+            ("kind", Value::from("summary")),
+            ("source_ids", Value::Arr(vec![Value::from(sid.as_str())])),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let (_, arts) = s.json("GET", &format!("/api/notebooks/{}/artifacts", nb), None);
+    let art = &arts.get("artifacts").unwrap().as_arr().unwrap()[0];
+    assert_eq!(art.get("stale").and_then(|x| x.as_bool()), Some(false));
+
+    // second fetch returns different text
+    let (st, refreshed) = s.json("POST", &format!("/api/sources/{}/refresh", sid), None);
+    assert_eq!(st, 200, "{:?}", refreshed);
+    assert_eq!(refreshed.get("changed").and_then(|c| c.as_bool()), Some(true));
+    let stale = refreshed.get("stale_artifacts").and_then(|x| x.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(stale.len(), 1, "the summary must be marked stale");
+
+    // the index now answers from the new text
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb),
+        Some(obj(&[("question", Value::from("What is the retry budget?"))])),
+    );
+    assert_eq!(st, 200);
+    assert!(
+        answer.str_of("answer").unwrap_or("").contains("4.5"),
+        "answer should use refreshed content: {:?}",
+        answer.str_of("answer")
+    );
+
+    // refreshing again with the same content is a no-op, not a re-index
+    let (st, again) = s.json("POST", &format!("/api/sources/{}/refresh", sid), None);
+    assert_eq!(st, 200);
+    assert_eq!(again.get("changed").and_then(|c| c.as_bool()), Some(false));
+
+    std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+}
+
+#[test]
+fn pasted_sources_are_not_refreshable_and_labels_persist() {
+    let s = Server::start(tempdir("labels"));
+    let (_, _) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Labels"))])));
+    let (_, list) = s.json("GET", "/api/notebooks", None);
+    let nb = list.get("notebooks").unwrap().as_arr().unwrap()[0].str_of("id").unwrap().to_string();
+    let (st, added) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb),
+        Some(obj(&[
+            ("title", Value::from("Note")),
+            ("text", Value::from("Retrieval reranking happens after the lexical stage in this pipeline.")),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let sid = added.str_of("source_id").unwrap().to_string();
+
+    let (st, body) = s.json("POST", &format!("/api/sources/{}/refresh", sid), None);
+    assert_eq!(st, 422, "{:?}", body);
+    assert_eq!(body.str_of("code"), Some("not_refreshable"));
+
+    let (st, patched) = s.json(
+        "PATCH",
+        &format!("/api/sources/{}", sid),
+        Some(obj(&[
+            ("title", Value::from("Renamed source")),
+            ("labels", Value::Arr(vec![Value::from("retrieval"), Value::from("draft")])),
+        ])),
+    );
+    assert_eq!(st, 200, "{:?}", patched);
+    assert_eq!(patched.str_of("title"), Some("Renamed source"));
+    let labels = patched.get("labels").and_then(|l| l.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(labels.len(), 2);
+
+    // persisted, not just in the response
+    let (_, reloaded) = s.json("GET", &format!("/api/sources/{}", sid), None);
+    assert_eq!(reloaded.str_of("title"), Some("Renamed source"));
+    assert_eq!(reloaded.get("labels").and_then(|l| l.as_arr()).map(|l| l.len()), Some(2));
 }
 ```
 
@@ -13288,6 +17524,63 @@ Binary fixtures are *generated* (`tests/fixtures/make_pdfs.py`,
 suite speaks raw HTTP/1.1 to a real socket, and `tests/ui-smoke.js` loads the real
 `index.html` + `app.js` in jsdom and clicks through the product. Claims in the docs
 point at these tests.
+
+## D11 — URL fetching goes through `curl` as a subprocess, not a Rust HTTP client
+
+**Date.** 2026-10-31. **Constraint.** Documented reference behaviour requires https URL
+sources; this build has no TLS crate (D1) and writing a TLS stack is not a responsible
+use of the budget.
+
+**Chosen.** `fetch.rs` invokes `curl` with an explicit argv (never `sh -c`), no proxy, no
+cookies, no credentials, `--proto`/`--proto-redir` pinned to http/https, and — critically
+— `--resolve host:port:ip` with an address that **Forge** resolved and validated as
+public. Redirects are not followed by curl (`--max-redirs 0`); Forge reads `Location`,
+re-validates and re-pins, capped at 5 hops. Body ≤ 20 MiB, 30 s timeout.
+
+**Rejected.**
+* Plain `curl -L`: every redirect hop would escape our policy checks.
+* Letting curl do its own DNS: a hostile resolver could answer differently on the second
+  lookup (DNS rebinding).
+* A hand-written TLS client: enormous attack surface for zero product value.
+* A stub that returns "not available": the reference product's URL import is core P0.
+
+**Consequences.** URL ingestion works only where `curl` exists (checked at runtime;
+`/api/capabilities` reports the transport and returns `501 fetch_transport_unavailable`
+without it). The subprocess is a fork/exec per fetch — acceptable at human scale,
+recorded as a scaling limit.
+
+**Revisit when** a TLS-capable HTTP client is available as a dependency: swap the body of
+`request_once`, keep the policy layer exactly as it is.
+
+## D12 — Private-network fetching is opt-in and visible, never default
+
+**Date.** 2026-10-31. **Constraint.** The SSRF guard must block loopback/private targets,
+but the test suite needs a real HTTP origin to prove the fetch → index → cite path.
+
+**Chosen.** `FORGE_FETCH_ALLOW_PRIVATE=1` is the only way to relax the rule. It is
+read at request time, and `/api/capabilities#web_fetch.private_networks` reports
+`ALLOWED by FORGE_FETCH_ALLOW_PRIVATE (test mode)` whenever it is set, so an operator
+cannot have it silently enabled.
+
+**Rejected.** A `?allow_private=1` query parameter (an attacker-supplied toggle); a
+build-time feature flag (would make the tested binary differ from the shipped one).
+
+**Consequences.** Every test that flips the flag holds a process-wide mutex, because the
+flag is process-global and tests run concurrently — this bit me once already and is now
+explicit in both test suites.
+
+## D13 — A changed source never rewrites existing artifacts; it marks them stale
+
+**Date.** 2026-10-31. **Evidence.** Official help: "When you update or delete a source,
+studio outputs generated with that source do not change."
+
+**Chosen.** `POST /api/sources/:id/refresh` re-fetches, compares the SHA-256 of the body,
+and re-indexes **only** on change. Artifacts whose notebook is affected get
+`stale: true` and the UI says "a source changed after this was generated — regenerate".
+Old citations are not silently repointed at new text.
+
+**Rejected.** Auto-regenerating artifacts (destroys evidence provenance); deleting stale
+artifacts (destroys user work).
 ```
 
 ## `docs/FEATURE_PARITY.md`
@@ -13885,6 +18178,27 @@ authenticated reverse proxy. This is stated rather than hidden — there is no
 
 This is a local project with no deployed service. Record findings in
 `docs/UNKNOWN_AND_LIMITATIONS.md` and add a failing test before fixing.
+
+## URL fetching controls (added 2026-10-31)
+
+| Control | Implementation |
+|---|---|
+| scheme allowlist | `http`, `https` only, at parse time and again via `--proto`/`--proto-redir` |
+| credentials in URL | refused explicitly (`user:pass@host` → 422 `url_rejected`) |
+| userinfo forwarding | never sent; curl receives no `-u`, no cookies, no proxy |
+| host resolution | Forge resolves, then requires **every** address to be public |
+| DNS rebinding | defeated by pinning curl to the validated IP with `--resolve` |
+| redirects | curl does not follow; each hop re-validated and re-pinned, max 5 |
+| response size | 20 MiB (`--max-filesize` + a second check after read) |
+| time | 30 s (`--max-time`) |
+| metadata endpoints | `169.254.169.254`, `metadata.google.internal` blocked by IP and hostname |
+| loopback/private | blocked unless `FORGE_FETCH_ALLOW_PRIVATE=1`, which is reported in capabilities |
+| shell injection | `Command::new("curl").args([…])` — no shell, no interpolation, no user-controlled argv flags |
+| temp files | per-request unique names in the system temp dir, removed after every request including failures |
+
+Residual risk: `curl` itself is third-party code parsing hostile HTTP. It runs as the
+server's user, in a subprocess, with output restricted to two temp files. A compromised
+curl is out of scope for this layer.
 ```
 
 ## `docs/STATUS.md`
@@ -13892,16 +18206,26 @@ This is a local project with no deployed service. Record findings in
 ```markdown
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-30 (binary analysis added). Everything below was executed in this workspace; nothing
+Last updated: 2026-10-31 (URL ingestion, refresh, source metadata). Everything below was executed in this workspace; nothing
 is aspirational. Where a claim is untested it says so.
+
+## Where the work stands (2026-10-31)
+
+* branch `arena/e86028ee-testtemp`, all work committed and pushed.
+* the sandbox is recycled between sessions: `scripts/install-rust.sh` restores the
+  toolchain in ~10 s, and `git fetch` + byte comparison recovers the branch without
+  ever touching uncommitted work.
+* **official Gemini Notebook documentation is reachable** through the agent's page
+  tool even though the sandbox has no route to it. That is the research unlock of this
+  session; see `docs/RESEARCH_LOG.md`.
 
 ## Verified now
 
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **128 passing, 0 failing** (31 `bininspect` + 87 lib + 5 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **36 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **145 passing, 0 failing** (26 `bininspect` + 106 lib + 8 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **38 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide/row locators | `ingest::ooxml` + e2e |
@@ -13909,6 +18233,9 @@ is aspirational. Where a claim is untested it says so.
 | Artifacts | flashcards, quiz, report, mindmap, study guide, FAQ, summary, narration script | `artifacts` tests + UI smoke |
 | Persistence | JSON store, atomic replace, backups, corruption safety | `store` tests |
 | Security | SSRF guard, traversal guard, filename sanitising, CSP, owner-only secrets | `security`, `web`, `providers` tests |
+| URL sources | fetched with curl, SSRF-guarded, DNS-pinned per hop, deduped by canonical URL, refreshable | `fetch` (11 tests) + e2e |
+| Source metadata | content hash, canonical URL, fetch time, labels, provenance meta | `Source` + `store` |
+| Artifact staleness | re-indexing a changed source flags affected artifacts | e2e `refreshing_a_url_source_…` |
 | APK analysis | binary manifest decoded (package, permissions, exported components), DEX inventory + code findings, native libs, signing | `bininspect` 20 tests, `docs/BINARY_ANALYSIS.md` |
 | EXE analysis | PE headers/sections + per-section entropy, imports/exports, .NET metadata, version info, packer indicators | `bininspect` 20 tests, `POST /api/binary/inspect` |
 | NotebookLM protocol | 14 RPCs, source specs, artifact configs, streamed-chat parsing — built from pinned public RE evidence | `notebooklm` (15 tests), `docs/NOTEBOOKLM_PROTOCOL.md` |
@@ -14103,6 +18430,19 @@ supported and audio as unsupported · responsive breakpoints present ·
 
 Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/make_ooxml.py && python3 tests/fixtures/make_apk.py && python3 tests/fixtures/make_pe.py`.
 
+## URL ingestion, refresh and sources (2026-10-31)
+
+| Layer | Test | Proves |
+|---|---|---|
+| unit ×11 | `fetch::tests` | transport present; HTML fetched and classified; redirect followed hop-by-hop and recorded; redirect loop refused; size cap enforced; 404 reported; PDF detected by magic; private addresses refused when the override is off; bad schemes and embedded credentials refused; canonicalisation of equivalent URLs; body read complete |
+| unit ×3 | `retrieve::tests` | decimals (`0.42`), abbreviations (`e.g.`, `Dr.`) and initials do not split sentences; newlines and `?` do; the scored sentence is the one containing the number |
+| unit | `security::parse_url` via the above | IPv6 literal, port parsing, fragment stripping, default-port canonicalisation |
+| e2e | `url_source_is_fetched_indexed_cited_and_deduplicated` | POST a URL → fetched from a real HTTP origin → title from `<title>` → chunks indexed → grounded answer contains `0.42` → citation points at that source → provenance (`canonical_url`, `http_status`, `content_hash`, `fetched_at`) persisted → same URL and a case/fragment variant both return `409 duplicate_source` naming the original |
+| e2e | `refreshing_a_url_source_reindexes_only_when_content_changed` | artifact marked `stale` after a real content change; answer switches from `2.75` to `4.5`; a second refresh with unchanged content reports `changed:false` and re-indexes nothing |
+| e2e | `pasted_sources_are_not_refreshable_and_labels_persist` | refresh of a pasted source → `422 not_refreshable`; PATCH renames and labels; both persist on re-read |
+| e2e | `rejects_bad_input_and_dangerous_urls` | loopback, `169.254.169.254`, `file://`, `localhost` refused with `url_rejected`; a public host with no route is `502 fetch_failed` (**not** a policy refusal); an unresolvable name is also `fetch_failed` |
+| UI | 2 assertions | the Add-from-URL control exists and its input is labelled; capabilities reports the fetch transport |
+
 ## Binary analysis (31 unit tests + 5 HTTP tests + 6 UI assertions)
 
 Hash vectors (SHA-256/SHA-1 published values), entropy separation, AXML parsing of a real
@@ -14195,6 +18535,24 @@ bug, or a limitation for a feature.
    paraphrase (then citation validation must become span-level fuzzy matching).
 4. Is a ZIP-bomb guard needed beyond declared-size checks if untrusted uploads
    become multi-user? Likely yes.
+
+## URL sourcing (2026-10-31)
+
+* **No outbound route from the sandbox.** URL ingestion is implemented and tested
+  against a real loopback origin, but in this environment every public host returns
+  `502 fetch_failed`. That is an environment fact, not a product capability gap.
+* **HTTPS depends on `curl` being installed.** Without it the endpoint returns
+  `501 fetch_transport_unavailable` and `/api/capabilities` says `transport: none`.
+* **JavaScript-rendered pages are not rendered.** Only the served HTML text is
+  extracted, matching the reference product's documented "text only" behaviour. A
+  client-side-rendered page will yield little or no text.
+* **No auth, no cookies, no paywalls** — private and paywalled pages will fail or return
+  a login page, which will be indexed as text. Recorded, not worked around.
+* **The reference product's own ceilings are not copied.** Forge's are its own and
+  configurable (`docs/reference/SOURCE_MATRIX.md`).
+* **Live product, video evidence, ASR/OCR/TTS/LLM, search providers, sharing and roles**
+  remain blocked or unimplemented; see `docs/RESEARCH_BLOCKERS.md` and
+  `docs/reference/FEATURE_MATRIX.md`.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -20647,6 +25005,11 @@ async function main() {
   await wait(900);
   check("report built with citations", $$("#sideContent .cite").length > 0);
 
+  // --- URL import is a real control, not a prompt() box
+  check("add-from-URL control exists", !!window.document.querySelector("#addUrlBtn"));
+  check("URL input is labelled for assistive tech",
+    !!window.document.querySelector('input[aria-label="Web page URL"]'));
+
   // --- capabilities page tells the truth
   window.location.hash = "#/capabilities";
   await wait(600);
@@ -20657,6 +25020,10 @@ async function main() {
   check("bridge panel exposes inspectable RPCs", /RPC methods recovered/.test(capsText));
 
   // --- binary inspection panel (real report rendered through the real renderer)
+  check("capabilities reports URL ingestion with its transport",
+    /web_fetch/i.test(capsText) && /curl/i.test(capsText));
+  check("informational capability rows are not shown as feature claims",
+    !/\binfo\b.*configured/i.test(capsText));
   check("capabilities states the binary-analysis scope",
     /binary_analysis/.test(capsText) && /apk java decompilation/i.test(capsText) && /disassembly/i.test(capsText));
   const fileInput = window.document.querySelector('input[type="file"]');

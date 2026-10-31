@@ -1,15 +1,25 @@
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-30 (binary analysis added). Everything below was executed in this workspace; nothing
+Last updated: 2026-10-31 (URL ingestion, refresh, source metadata). Everything below was executed in this workspace; nothing
 is aspirational. Where a claim is untested it says so.
+
+## Where the work stands (2026-10-31)
+
+* branch `arena/e86028ee-testtemp`, all work committed and pushed.
+* the sandbox is recycled between sessions: `scripts/install-rust.sh` restores the
+  toolchain in ~10 s, and `git fetch` + byte comparison recovers the branch without
+  ever touching uncommitted work.
+* **official Gemini Notebook documentation is reachable** through the agent's page
+  tool even though the sandbox has no route to it. That is the research unlock of this
+  session; see `docs/RESEARCH_LOG.md`.
 
 ## Verified now
 
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **128 passing, 0 failing** (31 `bininspect` + 87 lib + 5 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **36 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **145 passing, 0 failing** (26 `bininspect` + 106 lib + 8 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **38 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide/row locators | `ingest::ooxml` + e2e |
@@ -17,6 +27,9 @@ is aspirational. Where a claim is untested it says so.
 | Artifacts | flashcards, quiz, report, mindmap, study guide, FAQ, summary, narration script | `artifacts` tests + UI smoke |
 | Persistence | JSON store, atomic replace, backups, corruption safety | `store` tests |
 | Security | SSRF guard, traversal guard, filename sanitising, CSP, owner-only secrets | `security`, `web`, `providers` tests |
+| URL sources | fetched with curl, SSRF-guarded, DNS-pinned per hop, deduped by canonical URL, refreshable | `fetch` (11 tests) + e2e |
+| Source metadata | content hash, canonical URL, fetch time, labels, provenance meta | `Source` + `store` |
+| Artifact staleness | re-indexing a changed source flags affected artifacts | e2e `refreshing_a_url_source_…` |
 | APK analysis | binary manifest decoded (package, permissions, exported components), DEX inventory + code findings, native libs, signing | `bininspect` 20 tests, `docs/BINARY_ANALYSIS.md` |
 | EXE analysis | PE headers/sections + per-section entropy, imports/exports, .NET metadata, version info, packer indicators | `bininspect` 20 tests, `POST /api/binary/inspect` |
 | NotebookLM protocol | 14 RPCs, source specs, artifact configs, streamed-chat parsing — built from pinned public RE evidence | `notebooklm` (15 tests), `docs/NOTEBOOKLM_PROTOCOL.md` |

@@ -375,3 +375,61 @@ mod tests {
         assert_eq!(decode_entities("100% &unknown;"), "100% &unknown;");
     }
 }
+
+/// Extract `<title>` from an HTML document (entities decoded, whitespace collapsed).
+pub fn html_title(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    let start = lower.find("<title")?;
+    let open_end = lower[start..].find('>')? + start + 1;
+    let close = lower[open_end..].find("</title")? + open_end;
+    let title = decode_entities(&raw[open_end..close]);
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.is_empty() {
+        None
+    } else {
+        Some(title)
+    }
+}
+
+/// Extract `<link rel="canonical" href="...">`: the page's own preferred identity.
+pub fn html_canonical(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    let mut from = 0usize;
+    while let Some(rel) = lower[from..].find("<link") {
+        let at = from + rel;
+        let end = lower[at..].find('>')? + at;
+        let tag = &raw[at..end];
+        let tag_lower = &lower[at..end];
+        if tag_lower.contains("canonical") {
+            if let Some(href) = attr(tag, "href") {
+                let href = href.trim().to_string();
+                if !href.is_empty() {
+                    return Some(decode_entities(&href));
+                }
+            }
+        }
+        from = end;
+    }
+    None
+}
+
+/// Extract a meta description, used as a fallback source title.
+pub fn html_description(raw: &str) -> Option<String> {
+    let lower = raw.to_ascii_lowercase();
+    let mut from = 0usize;
+    while let Some(m) = lower[from..].find("<meta") {
+        let at = from + m;
+        let end = lower[at..].find('>')? + at;
+        let tag = &raw[at..end];
+        if tag.to_ascii_lowercase().contains("description") {
+            if let Some(content) = attr(tag, "content") {
+                let c = decode_entities(&content).trim().to_string();
+                if !c.is_empty() {
+                    return Some(c);
+                }
+            }
+        }
+        from = end;
+    }
+    None
+}

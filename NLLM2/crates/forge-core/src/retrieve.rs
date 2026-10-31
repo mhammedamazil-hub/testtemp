@@ -146,26 +146,89 @@ pub fn search(chunks: &[Chunk], query: &str, limit: usize) -> Vec<Hit> {
 /// Split text into candidate sentences, scoring each by stem-aware overlap with
 /// the query. Returns `(overlap_ratio, sentence)` sorted best-first; sentences are
 /// never invented, only sliced out of `text`.
+/// Abbreviations whose trailing period does not end a sentence.
+const ABBREVIATIONS: &[&str] = &[
+    "e.g", "i.e", "etc", "vs", "cf", "al", "fig", "figs", "no", "vol", "pp", "p", "ch", "sec",
+    "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "inc", "ltd", "co", "approx", "dept",
+    "est", "min", "max", "avg", "ref", "eq", "art", "para", "ed", "eds",
+];
+
+fn is_abbreviation(word: &str) -> bool {
+    let w = word.trim_matches(|c: char| !c.is_alphabetic()).to_ascii_lowercase();
+    if w.is_empty() {
+        return false;
+    }
+    ABBREVIATIONS.contains(&w.as_str()) || w.chars().count() == 1 // initials: "J. Smith", "U.S.A."
+}
+
+/// Split prose into sentences without breaking decimals ("0.42"), abbreviations
+/// ("e.g.", "Dr.") or initials. Newlines always end a sentence; `;` does not.
+///
+/// A citation is only as good as the span it quotes, so this deliberately errs
+/// towards keeping a sentence whole: a wrongly split sentence loses the number
+/// the user asked about.
+pub fn split_sentences(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\n' {
+            let t = cur.trim();
+            if !t.is_empty() {
+                out.push(t.to_string());
+            }
+            cur.clear();
+            i += 1;
+            continue;
+        }
+        cur.push(ch);
+        if matches!(ch, '.' | '!' | '?') {
+            let next = chars.get(i + 1).copied();
+            let next_is_space = next.map(|c| c.is_whitespace()).unwrap_or(true);
+            // a period inside a number (0.42) or a URL is not a boundary
+            let prev_is_digit = cur
+                .chars()
+                .rev()
+                .nth(1)
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false);
+            let next_is_digit = next.map(|c| c.is_ascii_digit()).unwrap_or(false);
+            let word_before: String = cur
+                .trim_end_matches(|c: char| c == '.' || c == '!' || c == '?')
+                .rsplit(|c: char| c.is_whitespace() || c == '(' || c == '"' || c == '\'')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            let is_break = ch != '.'
+                || (!(prev_is_digit && next_is_digit)
+                    && !is_abbreviation(&word_before)
+                    && next_is_space);
+            if is_break {
+                let t = cur.trim();
+                if !t.is_empty() {
+                    out.push(t.to_string());
+                }
+                cur.clear();
+            }
+        }
+        i += 1;
+    }
+    let t = cur.trim();
+    if !t.is_empty() {
+        out.push(t.to_string());
+    }
+    out
+}
+
 pub fn scored_sentences(text: &str, query: &str, max: usize) -> Vec<(f64, String)> {
     let q: HashSet<String> = terms(query).into_iter().map(|t| stem(&t)).collect();
-    let mut sentences: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut push = |raw: &str, out: &mut Vec<String>| {
-        let t = raw.trim();
-        // Single-word "sentences" (headings, page titles) are not evidence.
-        if t.len() > 20 && t.split_whitespace().count() > 3 {
-            out.push(t.to_string());
-        }
-    };
-    for ch in text.chars() {
-        if matches!(ch, '.' | '!' | '?' | ';' | '\n') {
-            push(&cur, &mut sentences);
-            cur.clear();
-        } else {
-            cur.push(ch);
-        }
-    }
-    push(&cur, &mut sentences);
+    // Single-word "sentences" (headings, page titles) are not evidence.
+    let sentences: Vec<String> = split_sentences(text)
+        .into_iter()
+        .filter(|t| t.len() > 20 && t.split_whitespace().count() > 3)
+        .collect();
     if sentences.is_empty() {
         let t = text.trim();
         if !t.is_empty() {
@@ -263,5 +326,33 @@ mod tests {
         let t = tokenize("Café, naïve — 42% done");
         assert!(t.contains(&"café".to_string()));
         assert!(t.contains(&"42".to_string()));
+    }
+
+    #[test]
+    fn sentence_splitter_keeps_decimals_and_abbreviations_intact() {
+        let s = split_sentences(
+            "The evidence floor is 0.42 in this build. Anything below it is ignored. \
+             See e.g. the retrieval notes for details. Dr. Rao wrote section 3.5 of the report.",
+        );
+        assert!(s[0].contains("0.42"), "decimal must not split: {:?}", s);
+        assert_eq!(s.len(), 4, "got {:?}", s);
+        assert!(s[2].contains("e.g. the retrieval notes"), "abbreviation split: {:?}", s);
+        assert!(s[3].starts_with("Dr. Rao"), "title abbreviation split: {:?}", s);
+    }
+
+    #[test]
+    fn sentence_splitter_ends_on_newlines_and_question_marks() {
+        let s = split_sentences("What is grounding?\nIt is evidence-bound.\nSecond paragraph.");
+        assert_eq!(s.len(), 3, "{:?}", s);
+        assert_eq!(s[0], "What is grounding?");
+        assert_eq!(s[1], "It is evidence-bound.");
+    }
+
+    #[test]
+    fn scored_sentences_returns_the_sentence_containing_the_number() {
+        let text = "Version 1.5 shipped earlier. The retry budget is 2.75 attempts per request.";
+        let best = scored_sentences(text, "what is the retry budget", 1);
+        assert_eq!(best.len(), 1);
+        assert!(best[0].1.contains("2.75"), "got {:?}", best[0].1);
     }
 }

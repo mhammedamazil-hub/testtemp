@@ -27,23 +27,10 @@ fn citation_for(chunk: &Chunk, sources: &[Source], n: usize) -> Citation {
 }
 
 fn sentences(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    for ch in text.chars() {
-        cur.push(ch);
-        if matches!(ch, '.' | '!' | '?') {
-            let t = cur.trim().to_string();
-            if t.len() >= 25 {
-                out.push(t);
-            }
-            cur.clear();
-        }
-    }
-    let t = cur.trim();
-    if t.len() >= 25 {
-        out.push(t.to_string());
-    }
-    out
+    crate::retrieve::split_sentences(text)
+        .into_iter()
+        .filter(|s| s.len() >= 25)
+        .collect()
 }
 
 /// "X is Y" / "X refers to Y" / "X means Y" -> (term, definition)
@@ -476,6 +463,7 @@ mod tests {
             added_at: "2026-01-01T00:00:00Z".into(),
             page_count: 0,
             chunk_count: 1,
+            ..Default::default()
         }
     }
 

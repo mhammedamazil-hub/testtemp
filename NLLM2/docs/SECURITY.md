@@ -44,3 +44,24 @@ authenticated reverse proxy. This is stated rather than hidden — there is no
 
 This is a local project with no deployed service. Record findings in
 `docs/UNKNOWN_AND_LIMITATIONS.md` and add a failing test before fixing.
+
+## URL fetching controls (added 2026-10-31)
+
+| Control | Implementation |
+|---|---|
+| scheme allowlist | `http`, `https` only, at parse time and again via `--proto`/`--proto-redir` |
+| credentials in URL | refused explicitly (`user:pass@host` → 422 `url_rejected`) |
+| userinfo forwarding | never sent; curl receives no `-u`, no cookies, no proxy |
+| host resolution | Forge resolves, then requires **every** address to be public |
+| DNS rebinding | defeated by pinning curl to the validated IP with `--resolve` |
+| redirects | curl does not follow; each hop re-validated and re-pinned, max 5 |
+| response size | 20 MiB (`--max-filesize` + a second check after read) |
+| time | 30 s (`--max-time`) |
+| metadata endpoints | `169.254.169.254`, `metadata.google.internal` blocked by IP and hostname |
+| loopback/private | blocked unless `FORGE_FETCH_ALLOW_PRIVATE=1`, which is reported in capabilities |
+| shell injection | `Command::new("curl").args([…])` — no shell, no interpolation, no user-controlled argv flags |
+| temp files | per-request unique names in the system temp dir, removed after every request including failures |
+
+Residual risk: `curl` itself is third-party code parsing hostile HTTP. It runs as the
+server's user, in a subprocess, with output restricted to two temp files. A compromised
+curl is out of scope for this layer.

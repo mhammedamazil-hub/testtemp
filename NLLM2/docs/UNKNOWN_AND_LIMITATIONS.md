@@ -72,3 +72,21 @@ bug, or a limitation for a feature.
    paraphrase (then citation validation must become span-level fuzzy matching).
 4. Is a ZIP-bomb guard needed beyond declared-size checks if untrusted uploads
    become multi-user? Likely yes.
+
+## URL sourcing (2026-10-31)
+
+* **No outbound route from the sandbox.** URL ingestion is implemented and tested
+  against a real loopback origin, but in this environment every public host returns
+  `502 fetch_failed`. That is an environment fact, not a product capability gap.
+* **HTTPS depends on `curl` being installed.** Without it the endpoint returns
+  `501 fetch_transport_unavailable` and `/api/capabilities` says `transport: none`.
+* **JavaScript-rendered pages are not rendered.** Only the served HTML text is
+  extracted, matching the reference product's documented "text only" behaviour. A
+  client-side-rendered page will yield little or no text.
+* **No auth, no cookies, no paywalls** — private and paywalled pages will fail or return
+  a login page, which will be indexed as text. Recorded, not worked around.
+* **The reference product's own ceilings are not copied.** Forge's are its own and
+  configurable (`docs/reference/SOURCE_MATRIX.md`).
+* **Live product, video evidence, ASR/OCR/TTS/LLM, search providers, sharing and roles**
+  remain blocked or unimplemented; see `docs/RESEARCH_BLOCKERS.md` and
+  `docs/reference/FEATURE_MATRIX.md`.

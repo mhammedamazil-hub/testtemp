@@ -140,6 +140,11 @@ async function main() {
   await wait(900);
   check("report built with citations", $$("#sideContent .cite").length > 0);
 
+  // --- URL import is a real control, not a prompt() box
+  check("add-from-URL control exists", !!window.document.querySelector("#addUrlBtn"));
+  check("URL input is labelled for assistive tech",
+    !!window.document.querySelector('input[aria-label="Web page URL"]'));
+
   // --- capabilities page tells the truth
   window.location.hash = "#/capabilities";
   await wait(600);
@@ -150,6 +155,10 @@ async function main() {
   check("bridge panel exposes inspectable RPCs", /RPC methods recovered/.test(capsText));
 
   // --- binary inspection panel (real report rendered through the real renderer)
+  check("capabilities reports URL ingestion with its transport",
+    /web_fetch/i.test(capsText) && /curl/i.test(capsText));
+  check("informational capability rows are not shown as feature claims",
+    !/\binfo\b.*configured/i.test(capsText));
   check("capabilities states the binary-analysis scope",
     /binary_analysis/.test(capsText) && /apk java decompilation/i.test(capsText) && /disassembly/i.test(capsText));
   const fileInput = window.document.querySelector('input[type="file"]');

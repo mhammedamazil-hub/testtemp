@@ -180,13 +180,21 @@ async function renderCapabilities(app) {
   const groups = [];
   for (const [group, value] of Object.entries(caps)) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+    const KNOWN = ["supported", "blocked", "unsupported", "experimental", "partial", "not_configured"];
     const rows = Object.entries(value).map(([k, v]) => {
-      const status = typeof v === "string" ? v : v.status || "supported";
-      const reason = v && v.reason ? v.reason : "";
+      // A row may carry a status object, a plain status word, or an informational
+      // value (e.g. web_fetch.transport = "curl"). Only real statuses get a badge,
+      // so an informational row can never be mistaken for a capability claim.
+      const raw = typeof v === "string" ? v : v.status || "supported";
+      const isStatus = KNOWN.includes(String(raw));
+      const detail = v && typeof v === "object"
+        ? [v.reason, v.note, v.locator ? `locator: ${v.locator}` : "", v.engine ? `engine: ${v.engine}` : ""]
+            .filter(Boolean).join(" · ")
+        : (isStatus ? "" : String(raw));
       return h("tr", {},
         h("td", {}, k.replace(/_/g, " ")),
-        h("td", {}, badgeFor(status)),
-        h("td", { class: "hint" }, reason || (v && v.locator ? `locator: ${v.locator}` : "") || (v && v.engine ? `engine: ${v.engine}` : "")));
+        h("td", {}, isStatus ? badgeFor(String(raw)) : h("span", { class: "badge" }, "info")),
+        h("td", { class: "hint" }, detail));
     });
     groups.push(h("section", {},
       h("h2", { style: "font-size:15px;margin:22px 0 8px;text-transform:capitalize" }, group),
@@ -403,16 +411,31 @@ function renderSources(pane) {
     fileInput,
     h("label", { for: "fileInput", class: "sr-only" }, "Upload a file"),
     h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, MD, TXT, HTML, CSV)"),
-    h("button", { class: "ghost", onclick: () => promptUrl() }, "Add from URL…"));
+    h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"));
 
-  async function promptUrl() {
-    const url = prompt("Web page URL:\n\nNote: URL ingestion needs an HTTPS client, which this build does not include. The server will validate the URL and explain if it cannot fetch.");
+  const urlRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
+  const urlInput = h("input", { type: "url", id: "urlInput", placeholder: "https://…", "aria-label": "Web page URL" });
+  const urlGo = h("button", { class: "primary", onclick: async () => {
+    const url = urlInput.value.trim();
     if (!url) return;
+    urlGo.disabled = true; urlGo.textContent = "Fetching…";
     try {
       const r = await api.post(`/notebooks/${nb.id}/sources/url`, { url });
-      toast("Imported from URL");
+      toast(`Imported “${r.title}” (${r.chunk_count} passages)`);
       await openNotebook(document.getElementById("app"), nb.id);
-    } catch (e) { toast(e.message, "err"); }
+    } catch (e) {
+      toast(e.message, "err");
+      urlGo.disabled = false; urlGo.textContent = "Fetch page";
+    }
+  } }, "Fetch page");
+  urlRow.append(
+    h("p", { class: "hint" }, "Forge fetches the page itself, keeps its title and canonical URL, and indexes the readable text. Duplicate URLs are refused."),
+    urlInput, urlGo);
+  importBox.append(urlRow);
+
+  function promptUrl() {
+    urlRow.hidden = false;
+    urlInput.focus();
   }
 
   importBox.append(uploadRow);
@@ -439,7 +462,27 @@ function renderSources(pane) {
           toast("Source removed");
           await openNotebook(document.getElementById("app"), nb.id);
         } }, "×")),
-      h("div", { class: "sub" }, `${s.kind} · ${s.chunk_count} passages${s.page_count ? ` · ${s.page_count} pages` : ""}${s.status !== "ready" ? ` · ${s.status}` : ""}`),
+      h("div", { class: "sub" },
+        `${s.kind} · ${s.chunk_count} passages${s.page_count ? ` · ${s.page_count} pages` : ""}${s.status !== "ready" ? ` · ${s.status}` : ""}`,
+        s.origin === "url" ? h("span", { title: s.canonical_url }, " · from URL") : null,
+        (s.fetched_at || "").startsWith("20") ? h("span", { title: s.fetched_at }, " · synced") : null),
+      (s.labels || []).length
+        ? h("div", { class: "sub" }, s.labels.map((l) => h("span", { class: "badge" }, l)))
+        : null,
+      s.origin === "url"
+        ? h("div", { class: "row", style: "gap:6px;margin-top:4px" },
+            h("button", { class: "ghost", onclick: async (e) => {
+              const btn = e.target;
+              btn.disabled = true; btn.textContent = "Syncing…";
+              try {
+                const r = await api.post(`/sources/${s.id}/refresh`, {});
+                toast(r.changed ? `Re-indexed: ${r.chunk_count} passages` : "No change since last sync");
+                await openNotebook(document.getElementById("app"), nb.id);
+              } catch (err) {
+                toast(err.message, "err"); btn.disabled = false; btn.textContent = "Sync now";
+              }
+            } }, "Sync now"))
+        : null,
       s.error ? h("div", { class: "sub", style: "color:var(--err)" }, s.error) : null,
       (s.warnings || []).length ? h("div", { class: "sub", style: "color:var(--warn)" }, s.warnings.join(" · ")) : null);
     pane.append(item);
@@ -909,7 +952,8 @@ async function showArtifact(id) {
       h("div", { class: "viewer" },
         h("header", {},
           h("div", { style: "flex:1" }, h("div", { style: "font-weight:600" }, a.title),
-            h("div", { class: "hint" }, `${a.kind} · ${fmtDate(a.created_at)}`)),
+            h("div", { class: "hint" }, `${a.kind} · ${fmtDate(a.created_at)}`),
+            a.stale ? h("div", { class: "hint", style: "color:var(--warn)" }, "A source changed after this artifact was generated — regenerate to refresh it.") : null),
           h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
         h("div", { class: "content" }, renderArtifact(a.payload))));
     document.body.append(overlay);

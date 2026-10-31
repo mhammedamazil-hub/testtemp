@@ -218,6 +218,7 @@ pub struct Source {
     pub notebook_id: String,
     pub title: String,
     pub kind: String,
+    /// Where it came from: "upload", "paste", "url", "note".
     pub origin: String,
     pub byte_len: usize,
     pub status: String, // ready | failed
@@ -226,6 +227,46 @@ pub struct Source {
     pub added_at: String,
     pub page_count: u32,
     pub chunk_count: u32,
+    /// SHA-256 of the bytes that were parsed. Detects duplicates and source changes.
+    pub content_hash: String,
+    /// Normalised URL for fetched sources (empty otherwise).
+    pub canonical_url: String,
+    /// When a URL source was last retrieved (empty for local sources).
+    pub fetched_at: String,
+    /// User labels, used for filtering. Free-form, case-preserved.
+    pub labels: Vec<String>,
+    /// Extensible metadata: http_status, content_type, converted_from, ...
+    pub meta: std::collections::BTreeMap<String, String>,
+}
+
+impl Default for Source {
+    fn default() -> Self {
+        Source {
+            id: String::new(),
+            notebook_id: String::new(),
+            title: String::new(),
+            kind: String::new(),
+            origin: String::new(),
+            byte_len: 0,
+            status: String::new(),
+            error: String::new(),
+            warnings: Vec::new(),
+            added_at: String::new(),
+            page_count: 0,
+            chunk_count: 0,
+            content_hash: String::new(),
+            canonical_url: String::new(),
+            fetched_at: String::new(),
+            labels: Vec::new(),
+            meta: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl Source {
+    pub fn meta_of(&self, key: &str) -> &str {
+        self.meta.get(key).map(|s| s.as_str()).unwrap_or("")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -291,6 +332,8 @@ pub struct Artifact {
     pub created_at: String,
     pub source_ids: Vec<String>,
     pub payload: Value,
+    /// Set when a source it was built from changed after generation.
+    pub stale: bool,
 }
 
 // ------------------------------------------------------------------ JSON

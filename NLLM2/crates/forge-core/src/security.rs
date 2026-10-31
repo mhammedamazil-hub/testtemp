@@ -86,6 +86,173 @@ pub fn check_url(raw: &str) -> UrlVerdict {
     }
 }
 
+/// The pieces of an http(s) URL that matter for a safe fetch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedUrl {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+    /// Path plus query, always starting with `/`.
+    pub path_query: String,
+}
+
+impl ParsedUrl {
+    pub fn authority(&self) -> String {
+        let default = if self.scheme == "https" { 443 } else { 80 };
+        if self.port == default {
+            self.host.clone()
+        } else {
+            format!("{}:{}", self.host, self.port)
+        }
+    }
+
+    /// Rebuild the URL we will actually request.
+    pub fn to_url(&self) -> String {
+        format!("{}://{}{}", self.scheme, self.authority(), self.path_query)
+    }
+
+    /// A normalised identity for de-duplication: lower-cased scheme/host, default
+    /// port dropped, fragment removed, empty path → "/", trailing "." removed.
+    pub fn canonical(&self) -> String {
+        let mut host = self.host.trim_end_matches('.').to_ascii_lowercase();
+        if host.is_empty() {
+            host = self.host.clone();
+        }
+        let default = if self.scheme == "https" { 443 } else { 80 };
+        let auth = if self.port == default {
+            host
+        } else {
+            format!("{}:{}", host, self.port)
+        };
+        let mut path = self.path_query.clone();
+        if path.is_empty() {
+            path = "/".to_string();
+        }
+        format!("{}://{}{}", self.scheme, auth, path)
+    }
+}
+
+/// Parse an absolute http(s) URL without pulling in a URL crate.
+///
+/// Rejects: non-http(s) schemes, missing host, embedded credentials
+/// (`user:pass@host`) — the spec forbids forwarding userinfo — and control
+/// characters. Percent-encoding is preserved verbatim.
+pub fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("empty url".into());
+    }
+    if raw.len() > MAX_URL_LEN {
+        return Err("url too long".into());
+    }
+    if raw.chars().any(|c| c.is_control()) {
+        return Err("url contains control characters".into());
+    }
+    let lower = raw.to_ascii_lowercase();
+    let (scheme, _rest) = lower
+        .split_once("://")
+        .ok_or_else(|| "missing scheme (http/https)".to_string())?;
+    if scheme != "http" && scheme != "https" {
+        return Err(format!("scheme '{}' is not allowed", scheme));
+    }
+    let default_port: u16 = if scheme == "https" { 443 } else { 80 };
+
+    // strip fragment; keep path+query from the *original* string to preserve case
+    let no_frag = raw.split('#').next().unwrap_or("");
+    let after_scheme = &no_frag[scheme.len() + 3..];
+    let authority_end = after_scheme
+        .find(|c| c == '/' || c == '?')
+        .unwrap_or(after_scheme.len());
+    let authority = &after_scheme[..authority_end];
+    let path_query = match after_scheme[authority_end..].is_empty() {
+        true => "/".to_string(),
+        false => {
+            let pq = &after_scheme[authority_end..];
+            if pq.starts_with('/') { pq.to_string() } else { format!("/{}", pq) }
+        }
+    };
+    if authority.is_empty() {
+        return Err("missing host".into());
+    }
+    if authority.contains('@') {
+        return Err("credentials embedded in the URL are refused".into());
+    }
+
+    let (host, port) = if authority.starts_with('[') {
+        let close = authority.find(']').ok_or_else(|| "malformed IPv6 host".to_string())?;
+        let host = authority[1..close].to_string();
+        let rest = &authority[close + 1..];
+        let port = if let Some(p) = rest.strip_prefix(':') {
+            p.parse::<u16>().map_err(|_| "bad port".to_string())?
+        } else {
+            default_port
+        };
+        (host, port)
+    } else if let Some((h, p)) = authority.rsplit_once(':') {
+        (h.to_string(), p.parse::<u16>().map_err(|_| "bad port".to_string())?)
+    } else {
+        (authority.to_string(), default_port)
+    };
+    if host.is_empty() {
+        return Err("missing host".into());
+    }
+    if port == 0 {
+        return Err("port 0 is not allowed".into());
+    }
+    Ok(ParsedUrl { scheme: scheme.to_string(), host, port, path_query })
+}
+
+/// Why a name could not be turned into a usable address. Separating these matters:
+/// a blocked address is a policy decision (4xx), an unresolvable name is a network
+/// condition (5xx) and must not be reported as "refused by policy".
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResolveError {
+    Blocked(String),
+    Dns(String),
+}
+
+/// Resolve a host to public addresses only. Every returned address is
+/// guaranteed to pass `is_public_ip`, so a fetcher can pin to one of them.
+///
+/// `FORGE_FETCH_ALLOW_PRIVATE=1` disables the public-only rule. It exists so the
+/// test suite can drive a loopback fixture server; the capability page reports
+/// when it is on so it cannot be enabled silently.
+pub fn resolve_public(host: &str, port: u16) -> Result<Vec<IpAddr>, ResolveError> {
+    let literal = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = literal.parse::<IpAddr>() {
+        return if is_public_ip(&ip) || allow_private() {
+            Ok(vec![ip])
+        } else {
+            Err(ResolveError::Blocked(format!("address {} is not public", ip)))
+        };
+    }
+    let addrs = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| ResolveError::Dns(format!("cannot resolve {}: {}", host, e)))?;
+    let ips: Vec<IpAddr> = addrs.map(|a| a.ip()).collect();
+    if ips.is_empty() {
+        return Err(ResolveError::Dns(format!("{} did not resolve", host)));
+    }
+    if !allow_private() {
+        for ip in &ips {
+            if !is_public_ip(ip) {
+                return Err(ResolveError::Blocked(format!(
+                    "{} resolves to non-public address {}",
+                    host, ip
+                )));
+            }
+        }
+    }
+    Ok(ips)
+}
+
+/// True when the operator explicitly opted into private-network fetching.
+pub fn allow_private() -> bool {
+    std::env::var("FORGE_FETCH_ALLOW_PRIVATE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 pub fn is_public_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {

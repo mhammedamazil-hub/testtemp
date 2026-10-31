@@ -111,3 +111,60 @@ Binary fixtures are *generated* (`tests/fixtures/make_pdfs.py`,
 suite speaks raw HTTP/1.1 to a real socket, and `tests/ui-smoke.js` loads the real
 `index.html` + `app.js` in jsdom and clicks through the product. Claims in the docs
 point at these tests.
+
+## D11 — URL fetching goes through `curl` as a subprocess, not a Rust HTTP client
+
+**Date.** 2026-10-31. **Constraint.** Documented reference behaviour requires https URL
+sources; this build has no TLS crate (D1) and writing a TLS stack is not a responsible
+use of the budget.
+
+**Chosen.** `fetch.rs` invokes `curl` with an explicit argv (never `sh -c`), no proxy, no
+cookies, no credentials, `--proto`/`--proto-redir` pinned to http/https, and — critically
+— `--resolve host:port:ip` with an address that **Forge** resolved and validated as
+public. Redirects are not followed by curl (`--max-redirs 0`); Forge reads `Location`,
+re-validates and re-pins, capped at 5 hops. Body ≤ 20 MiB, 30 s timeout.
+
+**Rejected.**
+* Plain `curl -L`: every redirect hop would escape our policy checks.
+* Letting curl do its own DNS: a hostile resolver could answer differently on the second
+  lookup (DNS rebinding).
+* A hand-written TLS client: enormous attack surface for zero product value.
+* A stub that returns "not available": the reference product's URL import is core P0.
+
+**Consequences.** URL ingestion works only where `curl` exists (checked at runtime;
+`/api/capabilities` reports the transport and returns `501 fetch_transport_unavailable`
+without it). The subprocess is a fork/exec per fetch — acceptable at human scale,
+recorded as a scaling limit.
+
+**Revisit when** a TLS-capable HTTP client is available as a dependency: swap the body of
+`request_once`, keep the policy layer exactly as it is.
+
+## D12 — Private-network fetching is opt-in and visible, never default
+
+**Date.** 2026-10-31. **Constraint.** The SSRF guard must block loopback/private targets,
+but the test suite needs a real HTTP origin to prove the fetch → index → cite path.
+
+**Chosen.** `FORGE_FETCH_ALLOW_PRIVATE=1` is the only way to relax the rule. It is
+read at request time, and `/api/capabilities#web_fetch.private_networks` reports
+`ALLOWED by FORGE_FETCH_ALLOW_PRIVATE (test mode)` whenever it is set, so an operator
+cannot have it silently enabled.
+
+**Rejected.** A `?allow_private=1` query parameter (an attacker-supplied toggle); a
+build-time feature flag (would make the tested binary differ from the shipped one).
+
+**Consequences.** Every test that flips the flag holds a process-wide mutex, because the
+flag is process-global and tests run concurrently — this bit me once already and is now
+explicit in both test suites.
+
+## D13 — A changed source never rewrites existing artifacts; it marks them stale
+
+**Date.** 2026-10-31. **Evidence.** Official help: "When you update or delete a source,
+studio outputs generated with that source do not change."
+
+**Chosen.** `POST /api/sources/:id/refresh` re-fetches, compares the SHA-256 of the body,
+and re-indexes **only** on change. Artifacts whose notebook is affected get
+`stale: true` and the UI says "a source changed after this was generated — regenerate".
+Old citations are not silently repointed at new text.
+
+**Rejected.** Auto-regenerating artifacts (destroys evidence provenance); deleting stale
+artifacts (destroys user work).

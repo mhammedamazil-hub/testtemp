@@ -146,6 +146,15 @@ fn source_json(sr: &Source) -> Value {
     m.insert("added_at".into(), Value::from(sr.added_at.as_str()));
     m.insert("page_count".into(), Value::from(sr.page_count as u64));
     m.insert("chunk_count".into(), Value::from(sr.chunk_count as u64));
+    m.insert("content_hash".into(), Value::from(sr.content_hash.as_str()));
+    m.insert("canonical_url".into(), Value::from(sr.canonical_url.as_str()));
+    m.insert("fetched_at".into(), Value::from(sr.fetched_at.as_str()));
+    m.insert("labels".into(), json_str_list(&sr.labels));
+    let mut meta = BTreeMap::new();
+    for (k, v) in &sr.meta {
+        meta.insert(k.clone(), Value::from(v.as_str()));
+    }
+    m.insert("meta".into(), Value::Obj(meta));
     Value::Obj(m)
 }
 
@@ -163,6 +172,19 @@ fn source_from(v: &Value) -> Source {
         added_at: s(v, "added_at"),
         page_count: v.get("page_count").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
         chunk_count: v.get("chunk_count").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
+        content_hash: s(v, "content_hash"),
+        canonical_url: s(v, "canonical_url"),
+        fetched_at: s(v, "fetched_at"),
+        labels: parse_str_list(v.get("labels")),
+        meta: v
+            .get("meta")
+            .and_then(|m| m.as_obj())
+            .map(|m| {
+                m.iter()
+                    .map(|(k, val)| (k.clone(), val.as_str().unwrap_or("").to_string()))
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -246,6 +268,7 @@ fn artifact_json(a: &Artifact) -> Value {
     m.insert("title".into(), Value::from(a.title.as_str()));
     m.insert("created_at".into(), Value::from(a.created_at.as_str()));
     m.insert("source_ids".into(), json_str_list(&a.source_ids));
+    m.insert("stale".into(), Value::Bool(a.stale));
     m.insert("payload".into(), a.payload.clone());
     Value::Obj(m)
 }
@@ -258,6 +281,7 @@ fn artifact_from(v: &Value) -> Artifact {
         title: s(v, "title"),
         created_at: s(v, "created_at"),
         source_ids: parse_str_list(v.get("source_ids")),
+        stale: v.get("stale").and_then(|b| b.as_bool()).unwrap_or(false),
         payload: v.get("payload").cloned().unwrap_or(Value::Null),
     }
 }

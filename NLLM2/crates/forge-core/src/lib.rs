@@ -7,6 +7,8 @@ pub mod api;
 pub mod artifacts;
 pub mod domain;
 pub mod grounded;
+pub mod hashes;
+pub mod fetch;
 pub mod http;
 pub mod inflate;
 pub mod ingest;

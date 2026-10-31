@@ -6,7 +6,9 @@
 
 use crate::artifacts;
 use crate::domain::*;
+use crate::fetch::{self, FetchedMeta};
 use crate::grounded;
+use crate::hashes;
 use crate::http::{percent_decode, Request, Response};
 use crate::ingest;
 use crate::json::{self, Value};
@@ -22,6 +24,39 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub struct Api {
     pub store: Store,
+}
+
+/// A duplicate is not an error the user caused; report which source already exists.
+fn err_dup(existing_id: &str, title: &str, url: &str) -> Response {
+    let body = obj! {
+        "error" => format!("this URL is already a source in this notebook: {}", title),
+        "code" => "duplicate_source",
+        "status" => 409u64,
+        "existing_source_id" => existing_id,
+        "url" => url,
+    };
+    Response::json(409, &body)
+}
+
+fn clip(s: &str, max: usize) -> String {
+    let s = s.trim();
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
+}
+
+/// Copy fetch provenance onto a source record.
+fn apply_fetch_meta(src: &mut Source, fetched: &Option<FetchedMeta>) {
+    if let Some(f) = fetched {
+        src.canonical_url = f.canonical_url.clone();
+        src.fetched_at = f.fetched_at.clone();
+        src.meta.insert("http_status".into(), f.status.to_string());
+        src.meta.insert("content_type".into(), f.content_type.clone());
+        if f.redirects > 0 {
+            src.meta.insert("redirects".into(), f.redirects.to_string());
+        }
+    }
 }
 
 fn err(status: u16, code: &str, msg: &str) -> Response {
@@ -75,6 +110,8 @@ impl Api {
             ("GET", ["api", "sources", sid]) => Ok(self.get_source(sid)),
             ("GET", ["api", "sources", sid, "chunks"]) => Ok(self.source_chunks(sid, req)),
             ("DELETE", ["api", "sources", sid]) => Ok(self.delete_source(sid)),
+            ("PATCH", ["api", "sources", sid]) => self.update_source(sid, req),
+            ("POST", ["api", "sources", sid, "refresh"]) => self.refresh_source(sid),
             ("GET", ["api", "notebooks", id, "export"]) => Ok(self.export_notebook(id)),
             ("POST", ["api", "import"]) => self.import_notebook(req),
             ("GET", ["api", "search"]) => Ok(self.search(req)),
@@ -124,7 +161,13 @@ impl Api {
                 "html" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "csv" => obj!{ "status" => "supported", "locator" => "row" },
                 "pdf" => obj!{ "status" => "supported", "locator" => "page", "note" => "text-layer PDFs; no OCR" },
-                "url" => obj!{ "status" => "blocked", "reason" => "https requires TLS (no crate available); http fetch is SSRF-guarded but this sandbox has no outbound route" },
+                "url" => obj!{
+                    "status" => if fetch::transport_available() { "supported" } else { "unsupported" },
+                    "locator" => "section+paragraph",
+                    "note" => "fetched with curl (no TLS crate is available), SSRF-guarded and DNS-pinned at every redirect hop",
+                },
+                "youtube" => obj!{ "status" => "unsupported", "reason" => "needs a transcript extractor (yt-dlp) and an ASR pipeline; neither is installed" },
+                "audio_transcript" => obj!{ "status" => "unsupported", "reason" => "no ASR engine installed (see docs/RESEARCH_BLOCKERS.md)" },
                 "docx" => obj!{ "status" => "supported", "locator" => "paragraph", "note" => "WordprocessingML text; images ignored" },
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row", "note" => "first worksheet, shared strings resolved" },
@@ -138,6 +181,14 @@ impl Api {
                 "rpc_implemented" => 14u64,
                 "reason" => "wire protocol rebuilt from public reverse engineering and unit-tested; no route to notebooklm.google.com and no TLS client in this build",
                 "endpoint" => "/api/notebooklm/status",
+            },
+            "web_fetch" => obj! {
+                "transport" => if fetch::transport_available() { "curl" } else { "none" },
+                "private_networks" => if security::allow_private() { "ALLOWED by FORGE_FETCH_ALLOW_PRIVATE (test mode)" } else { "blocked" },
+                "max_bytes" => fetch::MAX_FETCH_BYTES as u64,
+                "redirects" => fetch::MAX_HOPS as u64,
+                "timeout_seconds" => fetch::FETCH_TIMEOUT.as_secs(),
+                "dns" => "resolved by Forge, pinned into curl with --resolve, re-validated on every redirect",
             },
             "binary_analysis" => obj! {
                 "apk_manifest" => obj!{ "status" => "supported", "note" => "binary AndroidManifest.xml decoded: package, sdk, permissions, exported components" },
@@ -318,6 +369,142 @@ impl Api {
         })
     }
 
+    /// Rename a source or change its labels. Never touches extracted content.
+    fn update_source(&self, sid: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let title = body.str_of("title").map(|t| t.trim().to_string());
+        let labels: Option<Vec<String>> = body.get("labels").map(|_| parse_str_list(body.get("labels")));
+        if title.is_none() && labels.is_none() {
+            return Err(err(422, "nothing_to_update", "send title and/or labels"));
+        }
+        if let Some(t) = &title {
+            if t.is_empty() {
+                return Err(err(422, "empty_title", "title cannot be empty"));
+            }
+            if t.chars().count() > 200 {
+                return Err(err(422, "title_too_long", "title is limited to 200 characters"));
+            }
+        }
+        let found = self.store.write(|db| {
+            let Some(src) = db.sources.iter_mut().find(|s| s.id == sid) else {
+                return None;
+            };
+            if let Some(t) = title {
+                src.title = t;
+            }
+            if let Some(mut l) = labels {
+                l.retain(|x| !x.trim().is_empty());
+                l.dedup();
+                l.truncate(20);
+                src.labels = l;
+            }
+            Some(source_json(src))
+        })
+        .map_err(|e| err(500, "storage", &e.to_string()))?;
+        match found {
+            None => Err(err(404, "not_found", "source not found")),
+            Some(v) => Ok(ok(v)),
+        }
+    }
+
+    /// Re-fetch a URL source and re-index it only if the content actually changed.
+    ///
+    /// Artifacts that were generated before the change are flagged as potentially
+    /// stale (their citations still resolve, but the source text moved).
+    fn refresh_source(&self, sid: &str) -> Result<Response, Response> {
+        let current = self.store.read(|db| db.sources.iter().find(|s| s.id == sid).cloned());
+        let Some(src) = current else {
+            return Err(err(404, "not_found", "source not found"));
+        };
+        if src.canonical_url.is_empty() {
+            return Err(err(
+                422,
+                "not_refreshable",
+                "only sources imported from a URL can be refreshed; uploads and pastes are fixed snapshots",
+            ));
+        }
+        let fetched = fetch::fetch(&src.canonical_url).map_err(|e| {
+            let status = match e {
+                fetch::FetchError::Rejected(_) => 422,
+                fetch::FetchError::NoTransport(_) => 501,
+                fetch::FetchError::Limit(_) => 413,
+                fetch::FetchError::Failed(_) => 502,
+            };
+            err(status, e.code(), &e.message())
+        })?;
+
+        let new_hash = hashes::sha256(&fetched.body);
+        if new_hash == src.content_hash {
+            let v = self.store.write(|db| {
+                let s = db.sources.iter_mut().find(|s| s.id == sid)?;
+                s.fetched_at = now_iso();
+                s.meta.insert("http_status".into(), fetched.status.to_string());
+                Some(source_json(s))
+            })
+            .ok()
+            .flatten();
+            return Ok(ok(obj! {
+                "changed" => false,
+                "source" => v.unwrap_or(Value::Null),
+                "message" => "content is unchanged; nothing was re-indexed",
+            }));
+        }
+
+        let parsed = ingest::extract(&src.kind, &src.title, &fetched.body)
+            .map_err(|e| err(422, "extract_failed", &e))?;
+        if parsed.blocks.is_empty() {
+            return Err(err(422, "empty_extraction", "the refreshed page has no readable text; the old source was kept"));
+        }
+        let chunk_count = parsed.blocks.len();
+        let kind = src.kind.clone();
+        let chunks: Vec<Chunk> = parsed
+            .blocks
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| Chunk {
+                id: new_id("chk"),
+                source_id: sid.to_string(),
+                notebook_id: src.notebook_id.clone(),
+                ordinal: i as u32,
+                text: b.text,
+                locator: b.locator,
+            })
+            .collect();
+        let stale = self.store.write(|db| {
+            db.chunks.retain(|c| c.source_id != sid);
+            db.chunks.extend(chunks);
+            let mut stale: Vec<String> = Vec::new();
+            if let Some(s) = db.sources.iter_mut().find(|s| s.id == sid) {
+                s.content_hash = new_hash.clone();
+                s.fetched_at = now_iso();
+                s.chunk_count = chunk_count as u32;
+                s.page_count = parsed.page_count;
+                s.byte_len = fetched.body.len();
+                s.warnings = parsed.warnings.clone();
+                s.meta.insert("http_status".into(), fetched.status.to_string());
+                let nb = s.notebook_id.clone();
+                let id = s.id.clone();
+                for a in db.artifacts.iter_mut() {
+                    if a.notebook_id == nb {
+                        let used = a.source_ids.iter().any(|x| x == &id)
+                            || !a.source_ids.is_empty();
+                        if used {
+                            a.stale = true;
+                            stale.push(a.id.clone());
+                        }
+                    }
+                }
+            }
+            stale
+        });
+        Ok(ok(obj! {
+            "changed" => true,
+            "kind" => kind.as_str(),
+            "chunk_count" => chunk_count as u64,
+            "stale_artifacts" => Value::Arr(stale.unwrap_or_default().iter().map(|s| Value::from(s.as_str())).collect()),
+        }))
+    }
+
     fn source_chunks(&self, sid: &str, req: &Request) -> Response {
         let page = req.query_get("page").and_then(|p| p.parse::<u32>().ok());
         let payload: Value = self.store.read(|db| {
@@ -393,25 +580,87 @@ impl Api {
         self.ingest_bytes(nb, &safe_name, &kind, &safe_name, &req.body, "upload")
     }
 
-    fn add_url_source(&self, _nb: &str, req: &Request) -> Result<Response, Response> {
+    fn add_url_source(&self, nb: &str, req: &Request) -> Result<Response, Response> {
         let body = parse_body(req)?;
-        let url = body.str_of("url").unwrap_or("").trim().to_string();
-        match security::check_url(&url) {
-            security::UrlVerdict::Rejected(reason) => {
-                return Err(err(422, "url_rejected", &format!("URL refused: {}", reason)))
+        let raw = body.str_of("url").unwrap_or("").trim().to_string();
+        if raw.is_empty() {
+            return Err(err(422, "missing_url", "url is required"));
+        }
+        let parsed = security::parse_url(&raw).map_err(|e| err(422, "url_rejected", &e))?;
+        let canonical = parsed.canonical();
+
+        // Duplicate detection happens before any network traffic.
+        if let Some(existing) = self.store.read(|db| {
+            db.sources
+                .iter()
+                .find(|s| s.notebook_id == nb && !s.canonical_url.is_empty() && s.canonical_url == canonical)
+                .map(|s| (s.id.clone(), s.title.clone()))
+        }) {
+            return Err(err_dup(&existing.0, &existing.1, &canonical));
+        }
+
+        let fetched = fetch::fetch(&raw).map_err(|e| {
+            let status = match e {
+                fetch::FetchError::Rejected(_) => 422,
+                fetch::FetchError::NoTransport(_) => 501,
+                fetch::FetchError::Limit(_) => 413,
+                fetch::FetchError::Failed(_) => 502,
+            };
+            err(status, e.code(), &e.message())
+        })?;
+
+        // Canonical URL may have changed after redirects; re-check for a duplicate.
+        if fetched.canonical_url != canonical {
+            if let Some(existing) = self.store.read(|db| {
+                db.sources
+                    .iter()
+                    .find(|s| s.notebook_id == nb && s.canonical_url == fetched.canonical_url)
+                    .map(|s| (s.id.clone(), s.title.clone()))
+            }) {
+                return Err(err_dup(&existing.0, &existing.1, &fetched.canonical_url));
             }
-            security::UrlVerdict::Allowed(clean) => {
-                // Honest limitation: no TLS client exists in this build, and the
-                // sandbox has no outbound route for arbitrary hosts.
-                return Err(err(
-                    501,
-                    "url_ingest_unavailable",
-                    &format!(
-                        "URL ingesting is not available in this build (validated {} but HTTPS needs a TLS client and no external fetch route exists here). Paste the page text or download the file and upload it instead.",
-                        clean
-                    ),
-                ));
+        }
+
+        let kind = fetched.ingest_kind();
+        let title = self.derive_title(&fetched, kind, parsed.host.as_str());
+        self.ingest_source(
+            Some(FetchedMeta {
+                canonical_url: fetched.canonical_url.clone(),
+                fetched_at: now_iso(),
+                status: fetched.status,
+                content_type: fetched.media_type(),
+                redirects: fetched.redirects.len(),
+            }),
+            nb,
+            &title,
+            kind,
+            "url",
+            &fetched.body,
+        )
+    }
+
+    /// Title for a fetched source: page title, then meta description, then the host.
+    fn derive_title(&self, fetched: &fetch::Fetched, kind: &str, host: &str) -> String {
+        if kind == "html" {
+            let raw = ingest::decode_text(&fetched.body);
+            if let Some(t) = ingest::text::html_title(&raw) {
+                return clip(&t, 120);
             }
+            if let Some(d) = ingest::text::html_description(&raw) {
+                return clip(&d, 120);
+            }
+        }
+        let path = fetched
+            .final_url
+            .split("://")
+            .nth(1)
+            .unwrap_or(&fetched.final_url)
+            .to_string();
+        let name = path.rsplit('/').next().unwrap_or("").to_string();
+        if !name.is_empty() && name.contains('.') {
+            format!("{} — {}", clip(&name, 60), host)
+        } else {
+            path
         }
     }
 
@@ -422,9 +671,21 @@ impl Api {
         kind: &str,
         origin: &str,
         bytes: &[u8],
-        mode: &str,
+        _mode: &str,
     ) -> Result<Response, Response> {
-        if mode == "upload" && kind == "url" {
+        self.ingest_source(None, nb, title, kind, origin, bytes)
+    }
+
+    fn ingest_source(
+        &self,
+        fetched: Option<FetchedMeta>,
+        nb: &str,
+        title: &str,
+        kind: &str,
+        origin: &str,
+        bytes: &[u8],
+    ) -> Result<Response, Response> {
+        if origin == "upload" && kind == "url" {
             return Err(err(422, "invalid_kind", "url sources must use the url endpoint"));
         }
         let notebook_exists = self.store.read(|db| db.notebooks.iter().any(|n| n.id == nb));
@@ -436,7 +697,7 @@ impl Api {
             Ok(p) => p,
             Err(e) => {
                 // Record the failure honestly so the UI can offer a retry.
-                let failed = Source {
+                let mut failed = Source {
                     id: source_id.clone(),
                     notebook_id: nb.to_string(),
                     title: title.to_string(),
@@ -449,7 +710,10 @@ impl Api {
                     added_at: now_iso(),
                     page_count: 0,
                     chunk_count: 0,
+                    content_hash: hashes::sha256(bytes),
+                    ..Default::default()
                 };
+                apply_fetch_meta(&mut failed, &fetched);
                 let _ = self.store.write(|db| db.sources.push(failed));
                 return Err(err(422, "extract_failed", &e));
             }
@@ -457,7 +721,7 @@ impl Api {
 
         if parsed.blocks.is_empty() {
             let msg = "no readable text could be extracted from this file";
-            let failed = Source {
+            let mut failed = Source {
                 id: source_id.clone(),
                 notebook_id: nb.to_string(),
                 title: title.to_string(),
@@ -470,13 +734,16 @@ impl Api {
                 added_at: now_iso(),
                 page_count: parsed.page_count,
                 chunk_count: 0,
+                content_hash: hashes::sha256(bytes),
+                ..Default::default()
             };
+            apply_fetch_meta(&mut failed, &fetched);
             let _ = self.store.write(|db| db.sources.push(failed));
             return Err(err(422, "empty_extraction", msg));
         }
 
         let chunk_count = parsed.blocks.len();
-        let source = Source {
+        let mut source = Source {
             id: source_id.clone(),
             notebook_id: nb.to_string(),
             title: title.to_string(),
@@ -489,7 +756,10 @@ impl Api {
             added_at: now_iso(),
             page_count: parsed.page_count,
             chunk_count: chunk_count as u32,
+            content_hash: hashes::sha256(bytes),
+            ..Default::default()
         };
+        apply_fetch_meta(&mut source, &fetched);
         let chunks: Vec<Chunk> = parsed
             .blocks
             .into_iter()
@@ -520,10 +790,14 @@ impl Api {
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
 
+        let fetched_url = fetched.as_ref().map(|f| f.canonical_url.clone()).unwrap_or_default();
+        let fetched_status = fetched.as_ref().map(|f| f.status as u64).unwrap_or(0);
         Ok(created(obj! {
             "source_id" => source_id.clone(),
             "title" => title,
             "kind" => kind,
+            "url" => fetched_url,
+            "http_status" => fetched_status,
             "status" => "ready",
             "chunk_count" => chunk_count as u64,
             "page_count" => self.store.read(|db| db.sources.iter().find(|s| s.id == source_id).map(|s| s.page_count).unwrap_or(0)) as u64,
@@ -826,6 +1100,7 @@ impl Api {
             created_at: now_iso(),
             source_ids: sources.iter().map(|s| s.id.clone()).collect(),
             payload,
+            stale: false,
         };
         let id = art.id.clone();
         let payload_out = art.payload.clone();
@@ -849,6 +1124,8 @@ impl Api {
                     "kind" => a.kind.as_str(),
                     "title" => a.title.as_str(),
                     "created_at" => a.created_at.as_str(),
+                    "source_ids" => json_str_list(&a.source_ids),
+                    "stale" => a.stale,
                 }).collect())
             }
         })
@@ -935,6 +1212,15 @@ impl Api {
                 added_at: now.clone(),
                 page_count: s.get("page_count").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
                 chunk_count: s.get("chunk_count").and_then(|x| x.as_f64()).unwrap_or(0.0) as u32,
+                content_hash: s.str_of("content_hash").unwrap_or("").to_string(),
+                canonical_url: s.str_of("canonical_url").unwrap_or("").to_string(),
+                fetched_at: s.str_of("fetched_at").unwrap_or("").to_string(),
+                labels: parse_str_list(s.get("labels")),
+                meta: s
+                    .get("meta")
+                    .and_then(|m| m.as_obj())
+                    .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+                    .unwrap_or_default(),
             });
         }
 
@@ -1006,6 +1292,7 @@ impl Api {
                         .filter_map(|s| id_map.get(&s).cloned())
                         .collect(),
                     payload: a.get("payload").cloned().unwrap_or(Value::Null),
+            stale: false,
                 });
             }
         }
@@ -1373,6 +1660,17 @@ fn source_json(s: &Source) -> Value {
         "page_count" => s.page_count as u64,
         "chunk_count" => s.chunk_count as u64,
         "added_at" => s.added_at.as_str(),
+        "content_hash" => s.content_hash.as_str(),
+        "canonical_url" => s.canonical_url.as_str(),
+        "fetched_at" => s.fetched_at.as_str(),
+        "labels" => json_str_list(&s.labels),
+        "meta" => {
+            let mut m = BTreeMap::new();
+            for (k, v) in &s.meta {
+                m.insert(k.clone(), Value::from(v.as_str()));
+            }
+            Value::Obj(m)
+        },
     }
 }
 
@@ -1396,6 +1694,7 @@ fn artifact_json(a: &Artifact) -> Value {
         "title" => a.title.as_str(),
         "created_at" => a.created_at.as_str(),
         "source_ids" => json_str_list(&a.source_ids),
+        "stale" => a.stale,
         "payload" => a.payload.clone(),
     }
 }

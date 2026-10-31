@@ -138,6 +138,19 @@ supported and audio as unsupported · responsive breakpoints present ·
 
 Regenerate with `python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/make_ooxml.py && python3 tests/fixtures/make_apk.py && python3 tests/fixtures/make_pe.py`.
 
+## URL ingestion, refresh and sources (2026-10-31)
+
+| Layer | Test | Proves |
+|---|---|---|
+| unit ×11 | `fetch::tests` | transport present; HTML fetched and classified; redirect followed hop-by-hop and recorded; redirect loop refused; size cap enforced; 404 reported; PDF detected by magic; private addresses refused when the override is off; bad schemes and embedded credentials refused; canonicalisation of equivalent URLs; body read complete |
+| unit ×3 | `retrieve::tests` | decimals (`0.42`), abbreviations (`e.g.`, `Dr.`) and initials do not split sentences; newlines and `?` do; the scored sentence is the one containing the number |
+| unit | `security::parse_url` via the above | IPv6 literal, port parsing, fragment stripping, default-port canonicalisation |
+| e2e | `url_source_is_fetched_indexed_cited_and_deduplicated` | POST a URL → fetched from a real HTTP origin → title from `<title>` → chunks indexed → grounded answer contains `0.42` → citation points at that source → provenance (`canonical_url`, `http_status`, `content_hash`, `fetched_at`) persisted → same URL and a case/fragment variant both return `409 duplicate_source` naming the original |
+| e2e | `refreshing_a_url_source_reindexes_only_when_content_changed` | artifact marked `stale` after a real content change; answer switches from `2.75` to `4.5`; a second refresh with unchanged content reports `changed:false` and re-indexes nothing |
+| e2e | `pasted_sources_are_not_refreshable_and_labels_persist` | refresh of a pasted source → `422 not_refreshable`; PATCH renames and labels; both persist on re-read |
+| e2e | `rejects_bad_input_and_dangerous_urls` | loopback, `169.254.169.254`, `file://`, `localhost` refused with `url_rejected`; a public host with no route is `502 fetch_failed` (**not** a policy refusal); an unresolvable name is also `fetch_failed` |
+| UI | 2 assertions | the Add-from-URL control exists and its input is labelled; capabilities reports the fetch transport |
+
 ## Binary analysis (31 unit tests + 5 HTTP tests + 6 UI assertions)
 
 Hash vectors (SHA-256/SHA-1 published values), entropy separation, AXML parsing of a real

@@ -9,7 +9,8 @@ pub mod apk;
 pub mod axml;
 pub mod dex;
 pub mod elf;
-pub mod hashes;
+/// Re-exported from `forge-core` so there is exactly one hash implementation.
+pub use forge_core::hashes;
 pub mod report;
 pub mod xmltext;
 pub mod pe;

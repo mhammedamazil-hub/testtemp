@@ -233,6 +233,7 @@ mod tests {
             added_at: "2026-01-01T00:00:00Z".into(),
             page_count: 0,
             chunk_count: 1,
+            ..Default::default()
         }
     }
 
