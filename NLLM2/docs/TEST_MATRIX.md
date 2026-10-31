@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 197 tests: 152 lib + 14 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 200 tests: 154 lib + 15 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 72 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 79 assertions
 ```
 
-## Unit tests (152) — exact names from `cargo test --lib -- --list`
+## Unit tests (154) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -34,10 +34,15 @@ column 3, survives JSON, and a timestamp locator renders `01:15`).
 `corrupt_db_does_not_panic`, `tables_survive_a_restart_with_cells_intact` (grids, precision,
 formula text and the computed total are identical after a reopen).
 
-### `http` (6)
+### `http` (8)
 `parses_query_and_percent_encoding`, `encodes_response_with_content_length`,
 `rejects_malformed`, `rejects_oversized_body`, `mime_types`,
-`responses_carry_security_headers`.
+`responses_carry_security_headers`,
+`a_complete_stream_uses_chunked_framing_and_reports_delivery`,
+`an_aborted_stream_is_not_reported_as_delivered` — a real socket pair: chunk sizes, `\r\n`
+framing, the `0\r\n\r\n` terminator, and the delivery callback that decides whether a chat
+turn is stored. The abort case hangs up mid-stream and asserts the callback sees
+`complete = false`.
 
 ### `inflate` (2)
 `stored_block`, `rejects_garbage`. Fixed/dynamic Huffman are exercised indirectly by
@@ -112,7 +117,7 @@ them, because it is unreachable.
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
 
-## End-to-end HTTP tests (14, real sockets)
+## End-to-end HTTP tests (15, real sockets)
 
 | Test | Proves |
 |---|---|
@@ -122,6 +127,7 @@ them, because it is unreachable.
 | `imports_office_formats_over_http` | DOCX/PPTX/XLSX upload → correct `kind` and locator kind; a DOCX answer carries a `paragraph` citation |
 | `source_guide_quotes_the_source_and_refuses_when_empty` | guide is extractive (`model: null`); headline is a substring of a stored chunk; every summary line resolves to a real chunk + locator; unknown source 404; unextractable source 409 |
 | `chat_style_and_length_are_effective_and_validated` | `settings` echoed; brief → 1 citation; detailed shows per-quote source + locator; concise and detailed cite the same passages; unknown style/length → 422 and nothing stored |
+| `chat_streams_frames_and_only_persists_when_delivery_completes` | NDJSON frames in order (`start` → `delta`* → `citations` → `done`); every delta is a substring of the final answer, in order; `conversation_id` on a second stream appends instead of starting a new conversation; **a stream the client hangs up on is not stored** (message count unchanged after the abort); an invalid style returns `422` without opening a stream |
 | `media_metadata_is_read_without_decoding_frames` | `sample.mp4` → mp4, ~6200 ms, avc1 320×240 @ 10 fps, `decoded_frames: 0`, `transcript: "not produced"`; Matroska bytes → `matroska` with **no** invented tracks; empty body 400; GET 404 |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
@@ -305,6 +311,23 @@ compiled manifest, DEX inventory + finding categories, PE sections/imports/entro
 ELF identification, APK report assembly, format detection, base64 round-trip, and the HTTP
 endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
 
+## Chat streaming and Stop (2 unit tests + 1 e2e + 7 UI assertions)
+
+Transport: `http::StreamReply` + `write_stream`. The response is `Transfer-Encoding: chunked`
+with a `<hex>\r\n…\r\n` frame per event, `X-Accel-Buffering: no`, and a `0\r\n\r\n`
+terminator. `on_finish(complete)` fires exactly once; the API stores the turn **only** when
+`complete` is true, which is what makes Stop more than a UI gesture.
+
+Frames: `start` (question, engine, settings, and the sentence that says the answer is computed
+first), `delta` (substrings of the real answer, in order), `citations`, `done` (the same body the
+buffered route returns, plus `persisted_on_delivery: true`). `?pace_ms=` (≤1000) is a diagnostic
+that sleeps between frames; it adds delay only and no content depends on it.
+
+UI: `a Stop control appears while the answer streams`, `partial text is rendered before the
+answer finishes`, `stopping says the turn was not saved`, `stopped turn is marked, not presented
+as an answer`, `a stopped turn is not written to the conversation`, `a completed stream renders
+its citations`, `a completed stream is saved once`.
+
 ## Media metadata (10 unit tests + 1 e2e + 2 UI assertions)
 
 `media` module — a hand-written ISO base media (MP4/M4A/MOV) parser. No FFmpeg, no
@@ -355,7 +378,8 @@ unsupported with a reason`.
   LibreOffice was tested (no authorized sample), so merged cells, date serials, sheet-scoped
   named ranges and shared-formula groups remain unverified.
 * No `.xls`/ODS fixtures at all — those formats have no parser here.
-* No streaming test: there is no streaming implementation to test.
+* Streaming is *delivery* streaming, not generation: the extractive answer is complete before the first frame. There is no test — and cannot be one here — for token-by-token output, because there is no model.
+* The `?pace_ms=` diagnostic is exercised by tests; nothing asserts browser rendering smoothness under a slow network.
 * No decoded pixel, caption or transcript is produced by the product. Frame decoding was used
   **only** as research tooling on a fixture we encoded ourselves (`docs/reference/VIDEO_RESEARCH.md`);
   no vision model, no ASR, no authorized third-party footage.

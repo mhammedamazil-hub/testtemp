@@ -11,7 +11,7 @@ use crate::obj;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Default, Clone)]
 pub struct Db {
@@ -26,9 +26,13 @@ pub struct Db {
     pub tables: Vec<crate::tables::Table>,
 }
 
+/// `Clone` is cheap and shares the same in-memory database (`Arc<Mutex<Db>>`). It exists so a
+/// streaming response can take a handle it will use *after* the request handler returns, when
+/// the answer has actually reached the client (see `http::StreamReply::on_finish`).
+#[derive(Clone)]
 pub struct Store {
     pub dir: PathBuf,
-    inner: Mutex<Db>,
+    inner: Arc<Mutex<Db>>,
 }
 
 impl Store {
@@ -40,7 +44,7 @@ impl Store {
             Ok(text) => decode_db(&text).unwrap_or_default(),
             Err(_) => Db::default(),
         };
-        let s = Store { dir, inner: Mutex::new(db) };
+        let s = Store { dir, inner: Arc::new(Mutex::new(db)) };
         if !s.path().exists() {
             s.save()?;
         }

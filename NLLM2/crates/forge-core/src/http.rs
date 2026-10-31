@@ -1,8 +1,9 @@
 //! Small HTTP/1.1 server built on `std::net` (no hyper/axum: crates.io blocked).
 //!
-//! Scope is deliberate: one request per connection, `Connection: close`,
-//! hard limits on header size and body size, no chunked encoding. That is
-//! sufficient for a local single-user app and is fully covered by tests.
+//! Scope is deliberate: one request per connection, `Connection: close`, hard limits on
+//! header size and body size. Responses are either buffered (`Content-Length`) or streamed
+//! with **chunked transfer encoding** (`Reply::Stream`), which is what the chat stream uses.
+//! There is no request chunked decoding: request bodies must carry a `Content-Length`.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -87,6 +88,17 @@ impl Response {
         }
     }
 
+    fn common_headers() -> String {
+        let mut h = String::new();
+        h.push_str("X-Content-Type-Options: nosniff\r\n");
+        h.push_str("Cache-Control: no-store\r\n");
+        h.push_str("Referrer-Policy: no-referrer\r\n");
+        h.push_str(
+            "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'\r\n",
+        );
+        h
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut head = format!(
             "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -95,14 +107,7 @@ impl Response {
             self.content_type,
             self.body.len()
         );
-        head.push_str("X-Content-Type-Options: nosniff\r\n");
-        head.push_str("Cache-Control: no-store\r\n");
-        head.push_str("Referrer-Policy: no-referrer\r\n");
-        // No inline script is used by the app; inline *style attributes* are used
-        // by the renderer, hence style-src 'unsafe-inline'.
-        head.push_str(
-            "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'\r\n",
-        );
+        head.push_str(&Response::common_headers());
         for (k, v) in &self.headers {
             head.push_str(&format!("{}: {}\r\n", k, v));
         }
@@ -111,6 +116,133 @@ impl Response {
         out.extend_from_slice(&self.body);
         out
     }
+}
+
+
+/// What a handler returns. Most routes are `Full` (buffered, `Content-Length`); the chat
+/// stream is `Stream` (framed, `Transfer-Encoding: chunked`).
+pub enum Reply {
+    Full(Response),
+    Stream(StreamReply),
+}
+
+impl From<Response> for Reply {
+    fn from(r: Response) -> Reply {
+        Reply::Full(r)
+    }
+}
+
+/// A chunked response that is written frame by frame.
+///
+/// `on_finish` is called exactly once with `complete = true` only if the terminating
+/// zero-length chunk was accepted by the socket. That is what lets the API persist a chat
+/// turn **after** delivery: a stream the client aborted never becomes part of the
+/// conversation, so "Stop" has a real effect rather than a cosmetic one.
+pub struct StreamReply {
+    pub status: u16,
+    pub content_type: String,
+    pub headers: Vec<(String, String)>,
+    pub frames: Vec<Vec<u8>>,
+    /// Diagnostic pacing between frames (see `maybe_pace`). `None` means "as fast as the
+    /// socket accepts", which is what the UI uses.
+    pub pace: Option<Duration>,
+    pub on_finish: Option<Box<dyn FnOnce(bool) + Send + Sync>>,
+}
+
+impl StreamReply {
+    pub fn new(status: u16, content_type: &str, frames: Vec<Vec<u8>>) -> StreamReply {
+        StreamReply {
+            status,
+            content_type: content_type.to_string(),
+            headers: Vec::new(),
+            frames,
+            pace: None,
+            on_finish: None,
+        }
+    }
+
+    /// Diagnostic pacing between frames, in milliseconds. Off by default; it exists so a test
+    /// (or a person debugging the UI) can observe progressive delivery on a fast local answer.
+    /// It adds delay and nothing else — no content depends on it.
+    pub fn maybe_pace(mut self, pace: Option<Duration>) -> StreamReply {
+        self.pace = pace;
+        self
+    }
+
+    pub fn with_header(mut self, k: &str, v: &str) -> StreamReply {
+        self.headers.push((k.to_string(), v.to_string()));
+        self
+    }
+
+    pub fn on_finish(mut self, f: impl FnOnce(bool) + Send + Sync + 'static) -> StreamReply {
+        self.on_finish = Some(Box::new(f));
+        self
+    }
+
+    fn head(&self) -> Vec<u8> {
+        let mut head = format!(
+            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",
+            self.status,
+            Response::reason(self.status),
+            self.content_type
+        );
+        head.push_str(&Response::common_headers());
+        // Proxies must not buffer a stream; nothing between us and the browser is allowed
+        // to sit on frames until the answer is finished.
+        head.push_str("X-Accel-Buffering: no\r\n");
+        for (k, v) in &self.headers {
+            head.push_str(&format!("{}: {}\r\n", k, v));
+        }
+        head.push_str("\r\n");
+        head.into_bytes()
+    }
+}
+
+/// True when the peer has closed its side of the connection.
+///
+/// `read` on a socket whose peer sent FIN returns `Ok(0)`; a timeout (the normal case, since
+/// the request body is already consumed) returns an error and means "still connected".
+fn peer_gone(stream: &TcpStream) -> bool {
+    let mut probe = match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let _ = probe.set_read_timeout(Some(Duration::from_millis(1)));
+    let mut byte = [0u8; 1];
+    matches!(probe.read(&mut byte), Ok(0))
+}
+
+/// Write a chunked response. Returns true only if every frame and the terminator were
+/// accepted. Aborts (peer gone, EPIPE, write timeout) stop the loop immediately.
+pub fn write_stream(stream: &mut TcpStream, mut sr: StreamReply) -> bool {
+    let mut complete = stream.write_all(&sr.head()).is_ok() && stream.flush().is_ok();
+    if complete {
+        for (idx, frame) in sr.frames.iter().enumerate() {
+            if idx > 0 {
+                if let Some(p) = sr.pace {
+                    std::thread::sleep(p);
+                }
+            }
+            if peer_gone(stream) {
+                complete = false;
+                break;
+            }
+            let mut buf = format!("{:X}\r\n", frame.len()).into_bytes();
+            buf.extend_from_slice(frame);
+            buf.extend_from_slice(b"\r\n");
+            if stream.write_all(&buf).is_err() || stream.flush().is_err() {
+                complete = false;
+                break;
+            }
+        }
+        if complete && (stream.write_all(b"0\r\n\r\n").is_err() || stream.flush().is_err()) {
+            complete = false;
+        }
+    }
+    if let Some(f) = sr.on_finish.take() {
+        f(complete);
+    }
+    complete
 }
 
 pub fn parse_request(raw: &[u8], peer: &str, max_body: usize) -> Result<Request, (u16, String)> {
@@ -269,7 +401,7 @@ pub fn read_request(stream: &mut TcpStream, peer: &str, max_body: usize) -> Resu
 /// Serve forever, one thread per connection.
 pub fn serve<F>(listener: TcpListener, handler: F, max_body: usize) -> std::io::Result<()>
 where
-    F: Fn(&Request) -> Response + Send + Sync + 'static,
+    F: Fn(&Request) -> Reply + Send + Sync + 'static,
 {
     let handler = Arc::new(handler);
     for incoming in listener.incoming() {
@@ -287,20 +419,30 @@ where
     Ok(())
 }
 
-fn handle_conn(mut stream: TcpStream, handler: &dyn Fn(&Request) -> Response, max_body: usize) {
+fn handle_conn(mut stream: TcpStream, handler: &dyn Fn(&Request) -> Reply, max_body: usize) {
     let peer = stream
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".into());
-    let response = match read_request(&mut stream, &peer, max_body) {
-        Ok(req) => handler(&req),
-        Err((code, msg)) => Response::json(
-            code,
-            &crate::obj! { "error" => msg.as_str(), "status" => code as u64 },
-        ),
-    };
-    let _ = stream.write_all(&response.encode());
-    let _ = stream.flush();
+    match read_request(&mut stream, &peer, max_body) {
+        Ok(req) => match handler(&req) {
+            Reply::Full(response) => {
+                let _ = stream.write_all(&response.encode());
+                let _ = stream.flush();
+            }
+            Reply::Stream(sr) => {
+                write_stream(&mut stream, sr);
+            }
+        },
+        Err((code, msg)) => {
+            let response = Response::json(
+                code,
+                &crate::obj! { "error" => msg.as_str(), "status" => code as u64 },
+            );
+            let _ = stream.write_all(&response.encode());
+            let _ = stream.flush();
+        }
+    }
 }
 
 pub fn mime_for(path: &str) -> &'static str {
@@ -370,6 +512,84 @@ mod tests {
     fn rejects_malformed() {
         assert!(parse_request(b"garbage", "p", 100).is_err());
         assert!(parse_request(b"GET / HTTP/1.1\r\nBadHeader\r\n\r\n", "p", 100).is_err());
+    }
+
+    #[test]
+    fn a_complete_stream_uses_chunked_framing_and_reports_delivery() {
+        use std::io::Read as _;
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel::<bool>();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            s.write_all(b"GET /api/notebooks/x/chat/stream HTTP/1.1\r\nHost: x\r\n\r\n")
+                .unwrap();
+            let mut raw = Vec::new();
+            s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let _ = s.read_to_end(&mut raw);
+            raw
+        });
+
+        let mut server = listener.accept().unwrap().0;
+        let _ = read_request(&mut server, "test", 1024);
+        let ok = write_stream(
+            &mut server,
+            StreamReply::new(
+                200,
+                "application/x-ndjson",
+                vec![b"{\"event\":\"start\"}\n".to_vec(), b"{\"event\":\"done\"}\n".to_vec()],
+            )
+            .on_finish(move |c| {
+                let _ = tx.send(c);
+            }),
+        );
+        assert!(ok, "an accepted stream must report completion");
+        assert!(rx.recv().unwrap(), "on_finish must see complete = true");
+        std::mem::drop(server); // close, so the client's read_to_end returns
+
+        let raw = client.join().unwrap();
+        let text = String::from_utf8_lossy(&raw).to_string();
+        assert!(text.contains("Transfer-Encoding: chunked"));
+        assert!(!text.contains("Content-Length"));
+        // Each frame is its own chunk: hex length, CRLF, payload, CRLF.
+        let start = format!("{:X}\r\n{{\"event\":\"start\"}}\n\r\n", "{\"event\":\"start\"}\n".len());
+        let done = format!("{:X}\r\n{{\"event\":\"done\"}}\n\r\n", "{\"event\":\"done\"}\n".len());
+        assert!(text.contains(&start), "raw: {}", text);
+        assert!(text.contains(&done), "raw: {}", text);
+        assert!(text.ends_with("0\r\n\r\n"));
+    }
+
+    #[test]
+    fn an_aborted_stream_is_not_reported_as_delivered() {
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let s = std::net::TcpStream::connect(addr).unwrap();
+            std::mem::drop(s); // hang up without reading a byte
+        });
+
+        let mut server = listener.accept().unwrap().0;
+        server.set_write_timeout(Some(Duration::from_millis(200))).unwrap();
+        client.join().unwrap();
+        // let the FIN land before the writer starts probing
+        std::thread::sleep(Duration::from_millis(50));
+
+        let (tx, rx) = mpsc::channel::<bool>();
+        let ok = write_stream(
+            &mut server,
+            StreamReply::new(200, "application/x-ndjson", vec![b"{\"event\":\"x\"}\n".to_vec()])
+                .on_finish(move |c| {
+                    let _ = tx.send(c);
+                }),
+        );
+        assert!(!ok, "a hung-up client must not count as delivery");
+        assert!(!rx.recv().unwrap(), "on_finish must see complete = false");
     }
 
     #[test]

@@ -3,7 +3,7 @@
 mod binary;
 
 use forge_core::api::Api;
-use forge_core::http::{serve, Response};
+use forge_core::http::{serve, Reply};
 use forge_core::web::serve_static;
 use forge_core::store::Store;
 use std::net::TcpListener;
@@ -43,14 +43,14 @@ fn main() {
     let web = web_dir.canonicalize().unwrap_or(web_dir.clone());
     let web_for_handler = web.clone();
 
-    let handler = move |req: &forge_core::http::Request| -> Response {
+    let handler = move |req: &forge_core::http::Request| -> Reply {
         if req.path == "/api/binary/inspect" {
-            return binary::handle(req);
+            return Reply::Full(binary::handle(req));
         }
         if req.path.starts_with("/api") {
-            return api.handle(req);
+            return api.route(req);
         }
-        serve_static(&web_for_handler, &req.path)
+        Reply::Full(serve_static(&web_for_handler, &req.path))
     };
 
     if let Err(e) = serve(listener, handler, forge_core::http::DEFAULT_MAX_BODY) {

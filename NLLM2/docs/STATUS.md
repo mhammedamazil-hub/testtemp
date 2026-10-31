@@ -1,6 +1,6 @@
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length, media metadata).
+Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length, media metadata, chat streaming + Stop).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -19,13 +19,14 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **197 passing, 0 failing** (26 `bininspect` + 152 lib + 14 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **72 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **200 passing, 0 failing** (26 `bininspect` + 154 lib + 15 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **79 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
 | Chat style / length | `style` (evidence · concise · detailed) and `length` (brief · standard · thorough = 1/2/4 citations) are validated, echoed back, and change the rendered answer without ever changing which passages are cited | `grounded::AnswerOptions` + e2e `chat_style_and_length_are_effective_and_validated` |
 | Source Guide | per-source orientation: verbatim quoted headline + summary with locators, recurring terms (incl. two-word phrases), real outline (sections/sheets), suggested questions | `guide` (8 tests) + e2e `source_guide_quotes_the_source_and_refuses_when_empty` + UI smoke (9 assertions) |
+| Streaming answers + Stop | `POST /api/notebooks/:id/chat/stream` delivers the answer as NDJSON frames over real chunked transfer encoding; the UI renders each frame as it lands and shows a Stop control. Stop aborts the connection, the terminating chunk never arrives, and the server does **not** write the turn to the conversation | `http::StreamReply` (2 unit tests), e2e `chat_streams_frames_and_only_persists_when_delivery_completes` (aborts a live stream, asserts message count unchanged), 7 UI assertions |
 | Media metadata | MP4/M4A/MOV box tree parsed by hand: duration, per-track kind/codec/language/timescale/duration/sample count/fps/display size/rotation/channels/sample rate; truncation, missing `moov` and fragmented files produce warnings; unknown values are `null`, never `0` | `media` (10 tests) + e2e `media_metadata_is_read_without_decoding_frames`; cross-checked against `ffmpeg -i` on a fixture we encoded |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
@@ -91,15 +92,15 @@ total          186
 | `.xls` (BIFF), ODS, Google Sheets | no parser written; binary formats out of scope for now | upload is rejected by kind detection with a clear error, never half-indexed |
 | Data Tables artifact (schema-inferred extraction, charts) | not implemented | reported as `planned`; existing spreadsheets are queried directly instead |
 | Model-written source summaries | no reachable LLM (no TLS client, no key) | the Source Guide is **extractive**: every line is a quotation with its locator, and the payload says `generated_by: extractive`, `model: null` |
-| Streaming / stop | the HTTP layer is a hand-written buffered responder, so answers return whole | not claimed anywhere; `settings` states what was applied, and the answer is instant because it is extractive |
+| Token-by-token generation | there is no model to generate tokens; the extractive answer exists in full before the first frame | the stream is honest about it: the `start` frame says `delivery: "extractive answer computed first, then delivered in frames"`, and the transport is genuinely chunked. Frames carry real sentences, never placeholders |
 | Style / length for a remote provider | no provider is reachable | the citation budget is passed to a provider when one is used; the style vocabulary is documented as extractive-engine only |
 | Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps
 
-1. Streaming answers + stop (CHAT-06) — the responder is buffered today.
-2. EPUB ingestion — the ZIP reader already exists; needs XHTML container mapping.
-3. Conversation export as Markdown; artifact re-generation on source change.
+1. EPUB ingestion — the ZIP reader already exists; needs XHTML container mapping.
+2. Conversation export as Markdown; artifact re-generation on source change.
+3. Verify the §14 acceptance journeys A–K one by one and close the gaps (in progress).
 4. Wire an HTTPS client (requires a TLS-capable toolchain/route) to switch URL
    ingestion and remote providers from "configured but unavailable" to working.
 5. Optional: local embedding index once a model can be shipped offline.

@@ -500,6 +500,58 @@ function renderSources(pane) {
   }
 }
 
+// ---------------------------------------------------------------- chat streaming
+// The answer is computed by the server and delivered as NDJSON frames. We render each delta
+// as it lands, so the cited sentence appears before the rest of the answer. Aborting the
+// request is a real Stop: the server never sees the terminating chunk, so the turn is not
+// written to the conversation at all.
+async function streamAnswer(path, body, { onEvent, signal }) {
+  const res = await fetch("/api" + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    let data = null;
+    try { data = await res.json(); } catch { /* non-JSON error */ }
+    const err = new Error((data && data.error) || `HTTP ${res.status}`);
+    err.code = data && data.code;
+    err.status = res.status;
+    throw err;
+  }
+
+  const handleLine = (line) => {
+    const t = line.trim();
+    if (!t) return;
+    let ev;
+    try { ev = JSON.parse(t); } catch { return; }
+    onEvent(ev);
+  };
+
+  // Browsers (and Node) expose a byte stream; fall back to a single buffered read when the
+  // environment has no streaming support, so the UI still works — just not incrementally.
+  if (!res.body || typeof res.body.getReader !== "function") {
+    const text = await res.text();
+    for (const line of text.split("\n")) handleLine(line);
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = typeof TextDecoder !== "undefined" ? new TextDecoder() : null;
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder ? decoder.decode(value, { stream: true }) : String.fromCharCode.apply(null, value);
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      handleLine(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+    }
+  }
+  handleLine(buf);
+}
+
 // ---------------------------------------------------------------- chat
 function lengthHint(length) {
   if (length === "brief") return "cites 1 passage";
@@ -535,32 +587,69 @@ function renderChat(pane, onlyComposer = false) {
     state.busy = true;
     ta.value = "";
     scroll.append(messageEl({ role: "user", text: q }));
-    const pending = h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), spinner("Searching sources"));
+
+    // one live bubble that grows as frames arrive
+    const bodyEl = h("div", { class: "body streaming", "aria-live": "polite", "aria-busy": "true" });
+    const status = h("span", { class: "hint" }, "Searching sources…");
+    const stopBtn = h("button", { class: "stop", type: "button" }, "Stop");
+    const pending = h("div", { class: "msg assistant" },
+      h("div", { class: "who" }, "Forge"), bodyEl, h("div", { class: "row", style: "gap:8px;align-items:center;margin-top:6px" }, status, stopBtn));
     scroll.append(pending);
     scroll.scrollTop = scroll.scrollHeight;
+
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    let text = "";
+    let doneMsg = null;
+    stopBtn.onclick = () => { if (controller) controller.abort(); };
+
     try {
-      const r = await api.post(`/notebooks/${nb.id}/chat`, {
+      await streamAnswer(`/notebooks/${nb.id}/chat/stream`, {
         question: q,
         conversation_id: state.conversationId,
         source_ids: [...state.selected],
         style: state.style,
         length: state.length,
+      }, {
+        signal: controller ? controller.signal : undefined,
+        onEvent: (ev) => {
+          if (ev.event === "start") {
+            status.textContent = `Streaming · ${ev.settings.style}/${ev.settings.length}`;
+          } else if (ev.event === "delta") {
+            text += ev.text;
+            bodyEl.textContent = text;
+            scroll.scrollTop = scroll.scrollHeight;
+          } else if (ev.event === "done") {
+            doneMsg = {
+              role: "assistant", text: ev.answer, citations: ev.citations,
+              abstained: ev.abstained, coverage: ev.coverage, engine: ev.engine,
+              computed: ev.computed === true, problems: ev.citation_problems,
+              settings: ev.settings, streamed: true,
+            };
+          }
+        },
       });
-      state.conversationId = r.conversation_id;
-      const msg = {
-        role: "assistant", text: r.answer, citations: r.citations,
-        abstained: r.abstained, coverage: r.coverage, engine: r.engine,
-        computed: r.computed === true, problems: r.citation_problems,
-        settings: r.settings,
-      };
-      state.messages.push({ role: "user", text: q }, msg);
-      pending.replaceWith(messageEl(msg));
+      if (!doneMsg) throw new Error("the stream ended without a final frame");
+      state.conversationId = doneMsg.conversation_id || state.conversationId;
+      state.messages.push({ role: "user", text: q }, doneMsg);
+      pending.replaceWith(messageEl(doneMsg));
     } catch (e) {
-      pending.replaceWith(h("div", { class: "msg assistant" },
-        h("div", { class: "who" }, "Forge"),
-        h("div", { class: "body", style: "color:var(--err)" }, e.message)));
+      const aborted = e && (e.name === "AbortError" || controller?.signal.aborted);
+      if (aborted) {
+        // Stop is not a failure of the answer; it is a decision not to keep it.
+        pending.replaceWith(h("div", { class: "msg assistant stopped" },
+          h("div", { class: "who" }, "Forge"),
+          h("div", { class: "body" }, text
+            ? h("span", null, text)
+            : "Stopped before any evidence was returned."),
+          h("p", { class: "hint" }, "Stopped — this turn was not saved to the conversation.")));
+      } else {
+        pending.replaceWith(h("div", { class: "msg assistant" },
+          h("div", { class: "who" }, "Forge"),
+          h("div", { class: "body", style: "color:var(--err)" }, e.message)));
+      }
     } finally {
       state.busy = false;
+      stopBtn.onclick = null;
       scroll.scrollTop = scroll.scrollHeight;
     }
   }

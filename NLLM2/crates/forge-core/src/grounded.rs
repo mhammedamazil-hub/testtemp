@@ -249,10 +249,10 @@ fn answer_limited(
         }
         Style::Detailed => {
             text.push_str(&format!(
-                "{} passage{} bear on this question. Each is quoted below with its location; \
+                "{} passage{} on this question. Each is quoted below with its location; \
                  nothing is paraphrased.\n",
                 citations.len(),
-                if citations.len() == 1 { "" } else { "s" }
+                if citations.len() == 1 { " bears" } else { "s bear" }
             ));
             for (i, c) in citations.iter().enumerate() {
                 text.push_str(&format!(

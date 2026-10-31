@@ -9,14 +9,14 @@ use crate::domain::*;
 use crate::fetch::{self, FetchedMeta};
 use crate::grounded;
 use crate::hashes;
-use crate::http::{percent_decode, Request, Response};
+use crate::http::{percent_decode, Reply, Request, Response, StreamReply};
 use crate::ingest;
 use crate::json::{self, Value};
 use crate::notebooklm;
 use crate::providers::{self, ProviderConfig};
 use crate::obj;
 use crate::security;
-use crate::store::Store;
+use crate::store::{Db, Store};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -74,9 +74,121 @@ fn created(v: Value) -> Response {
     Response::json(201, &v)
 }
 
+/// One computed chat turn: everything needed to render the answer and, separately, to store
+/// it. `Clone` so a streaming reply can carry it into the post-delivery callback.
+#[derive(Clone)]
+struct ChatTurn {
+    notebook_id: String,
+    question: String,
+    user_msg: Message,
+    assistant_msg: Message,
+    engine: String,
+    engine_note: String,
+    coverage: usize,
+    problems: Vec<String>,
+    settings: grounded::AnswerOptions,
+    instructions: String,
+    conv_id: Option<String>,
+    sources_considered: usize,
+    chunks_considered: usize,
+    tables_considered: usize,
+}
+
+/// Append a turn to its conversation, creating the conversation when required. Pure with
+/// respect to the store, so it serves both the buffered route and the stream's callback.
+fn persist_into(db: &mut Db, turn: &ChatTurn) -> String {
+    let nb = turn.notebook_id.clone();
+    let cid = match turn.conv_id.clone() {
+        Some(c) if db.conversations.iter().any(|x| x.id == c && x.notebook_id == nb) => c,
+        _ => {
+            let c = new_id("conv");
+            db.conversations.push(Conversation {
+                id: c.clone(),
+                notebook_id: nb,
+                title: turn.question.chars().take(60).collect(),
+                messages: vec![],
+                created_at: turn.assistant_msg.created_at.clone(),
+                updated_at: turn.assistant_msg.created_at.clone(),
+            });
+            c
+        }
+    };
+    if let Some(conv) = db.conversations.iter_mut().find(|c| c.id == cid) {
+        conv.messages.push(turn.user_msg.clone());
+        conv.messages.push(turn.assistant_msg.clone());
+        conv.updated_at = now_iso();
+    }
+    cid
+}
+
+/// The JSON body shared by `POST .../chat` and the final frame of `POST .../chat/stream`.
+fn chat_json(turn: &ChatTurn, conversation_id: &str, persisted: bool) -> Value {
+    obj! {
+        "conversation_id" => conversation_id,
+        "message_id" => turn.assistant_msg.id.clone(),
+        "answer" => turn.assistant_msg.text.clone(),
+        "citations" => Value::Arr(turn.assistant_msg.citations.iter().map(|c| c.to_json()).collect()),
+        "abstained" => turn.assistant_msg.abstained,
+        "grounded" => true,
+        "engine" => turn.engine.clone(),
+        "engine_note" => turn.engine_note.clone(),
+        "settings" => obj! {
+            "style" => turn.settings.style.as_str(),
+            "length" => turn.settings.length.as_str(),
+            "max_citations" => turn.settings.length.max_citations() as u64,
+        },
+        "coverage" => turn.coverage as u64,
+        "citation_problems" => Value::Arr(turn.problems.iter().map(|p| Value::from(p.as_str())).collect()),
+        "sources_considered" => turn.sources_considered as u64,
+        "chunks_considered" => turn.chunks_considered as u64,
+        "tables_considered" => turn.tables_considered as u64,
+        "computed" => turn.engine == "table",
+        "note" => turn.assistant_msg.note.clone(),
+        "notebook_instructions" => turn.instructions.clone(),
+        "persisted" => persisted,
+    }
+}
+
+/// Split an answer into delivery frames at line and sentence boundaries. Every piece is a
+/// substring of the real answer, in order; nothing is added, dropped or reworded.
+fn answer_pieces(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.split_inclusive('\n') {
+        let mut cur = String::new();
+        for ch in line.chars() {
+            cur.push(ch);
+            if matches!(ch, '.' | '?' | '!' | ':' | '\n') && cur.trim().len() > 24 {
+                out.push(std::mem::take(&mut cur));
+            }
+        }
+        if !cur.trim().is_empty() {
+            out.push(cur);
+        }
+    }
+    out.into_iter().filter(|p| !p.trim().is_empty()).collect()
+}
+
 impl Api {
     pub fn new(store: Store) -> Api {
         Api { store }
+    }
+
+    /// Entry point for the server. Buffered for every route except the chat stream, which
+    /// needs chunked delivery (`Reply::Stream`). `handle()` stays available for tests and
+    /// callers that want the buffered shape.
+    pub fn route(&self, req: &Request) -> Reply {
+        let path = req.path.trim_end_matches('/').to_string();
+        let segs: Vec<&str> = path
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        if req.method == "POST" {
+            if let ["api", "notebooks", id, "chat", "stream"] = segs.as_slice() {
+                return self.chat_stream(id, req);
+            }
+        }
+        Reply::Full(self.handle(req))
     }
 
     pub fn handle(&self, req: &Request) -> Response {
@@ -956,7 +1068,10 @@ impl Api {
     }
 
     // -------------------------------------------------------------- chat
-    fn chat(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+    /// Everything a chat turn needs, computed but **not yet stored**. Splitting this out is
+    /// what makes streaming honest: the buffered route stores immediately, while the stream
+    /// stores only once the last frame reached the client (`http::StreamReply::on_finish`).
+    fn chat_turn(&self, nb: &str, req: &Request) -> Result<ChatTurn, Response> {
         let body = parse_body(req)?;
         let question = body.str_of("question").unwrap_or("").trim().to_string();
         if question.is_empty() {
@@ -1037,8 +1152,7 @@ impl Api {
         let key = configured
             .as_ref()
             .and_then(|c| providers::read_secret(&self.store.dir, &c.id));
-        let (engine, engine_note) =
-            providers::select(configured.as_ref(), key.as_deref());
+        let (engine, engine_note) = providers::select(configured.as_ref(), key.as_deref());
 
         // A structured question ("total revenue by region") is answered by computing over
         // real cells. This runs before text retrieval because the text path can only ever
@@ -1096,56 +1210,105 @@ impl Api {
             .str_of("conversation_id")
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty());
-        let mut out_conv = String::new();
-        self.store
-            .write(|db| {
-                let cid = match conv_id {
-                    Some(c) if db.conversations.iter().any(|x| x.id == c && x.notebook_id == nb) => c,
-                    _ => {
-                        let c = new_id("conv");
-                        db.conversations.push(Conversation {
-                            id: c.clone(),
-                            notebook_id: nb.to_string(),
-                            title: question.chars().take(60).collect(),
-                            messages: vec![],
-                            created_at: now.clone(),
-                            updated_at: now.clone(),
-                        });
-                        c
-                    }
-                };
-                if let Some(conv) = db.conversations.iter_mut().find(|c| c.id == cid) {
-                    conv.messages.push(user_msg);
-                    conv.messages.push(assistant_msg.clone());
-                    conv.updated_at = now.clone();
-                }
-                out_conv = cid;
-            })
-            .map_err(|e| err(500, "storage", &e.to_string()))?;
 
-        Ok(ok(obj! {
-            "conversation_id" => out_conv,
-            "message_id" => assistant_msg.id.clone(),
-            "answer" => assistant_msg.text.clone(),
-            "citations" => Value::Arr(assistant_msg.citations.iter().map(|c| c.to_json()).collect()),
-            "abstained" => assistant_msg.abstained,
-            "grounded" => true,
-            "engine" => answer.engine.clone(),
-            "engine_note" => engine_note.clone(),
+        Ok(ChatTurn {
+            notebook_id: nb.to_string(),
+            question,
+            user_msg,
+            assistant_msg,
+            engine: answer.engine.clone(),
+            engine_note,
+            coverage: answer.coverage,
+            problems,
+            settings: answer_opts,
+            instructions,
+            conv_id,
+            sources_considered: sources.len(),
+            chunks_considered: chunks.len(),
+            tables_considered: tables.len(),
+        })
+    }
+
+    /// Append the turn to a conversation (creating one when needed) and persist.
+    fn persist_turn(&self, turn: &ChatTurn) -> std::io::Result<String> {
+        self.store.write(|db| persist_into(db, turn))
+    }
+
+    fn chat(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+        let turn = self.chat_turn(nb, req)?;
+        let conv = self
+            .persist_turn(&turn)
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        Ok(ok(chat_json(&turn, &conv, true)))
+    }
+
+    /// `POST /api/notebooks/:id/chat/stream` — the same answer, delivered as NDJSON frames.
+    ///
+    /// The answer is extractive and computed before the first frame is written, so this is
+    /// **delivery** streaming, not token-by-token generation: the frames carry real sentences
+    /// that exist independently of the transport. What it buys is genuine: the user sees the
+    /// first cited sentence immediately, and pressing Stop aborts the connection, which means
+    /// the terminating chunk never lands, `on_finish` sees an incomplete stream, and the turn
+    /// is **not** written to the conversation. Stop therefore has a real effect.
+    fn chat_stream(&self, nb: &str, req: &Request) -> Reply {
+        let turn = match self.chat_turn(nb, req) {
+            Ok(t) => t,
+            Err(r) => return Reply::Full(r),
+        };
+        let mut frames: Vec<Vec<u8>> = Vec::new();
+        let mut frame = |v: Value| {
+            let mut line = json::to_string(&v).into_bytes();
+            line.push(b'\n');
+            frames.push(line);
+        };
+        frame(obj! {
+            "event" => "start",
+            "question" => turn.question.as_str(),
+            "engine" => turn.engine.as_str(),
             "settings" => obj! {
-                "style" => answer_opts.style.as_str(),
-                "length" => answer_opts.length.as_str(),
-                "max_citations" => answer_opts.length.max_citations() as u64,
+                "style" => turn.settings.style.as_str(),
+                "length" => turn.settings.length.as_str(),
+                "max_citations" => turn.settings.length.max_citations() as u64,
             },
-            "coverage" => answer.coverage as u64,
-            "citation_problems" => Value::Arr(problems.iter().map(|p| Value::from(p.as_str())).collect()),
-            "sources_considered" => sources.len() as u64,
-            "chunks_considered" => chunks.len() as u64,
-            "tables_considered" => tables.len() as u64,
-            "computed" => answer.engine == "table",
-            "note" => assistant_msg.note.clone(),
-            "notebook_instructions" => instructions,
-        }))
+            "delivery" => "extractive answer computed first, then delivered in frames",
+        });
+        for piece in answer_pieces(&turn.assistant_msg.text) {
+            frame(obj! { "event" => "delta", "text" => piece });
+        }
+        frame(obj! {
+            "event" => "citations",
+            "citations" => Value::Arr(turn.assistant_msg.citations.iter().map(|c| c.to_json()).collect()),
+        });
+        // The final frame repeats the buffered route's body and adds the delivery contract.
+        // `conversation_id` is deliberately empty here: it only exists once the store accepts
+        // the turn on a complete delivery, so announcing one now would be a guess.
+        let mut done = chat_json(&turn, "", false);
+        if let Value::Obj(map) = &mut done {
+            map.insert("event".into(), Value::from("done"));
+            map.insert("persisted_on_delivery".into(), Value::Bool(true));
+        }
+        frame(done);
+
+        let store = self.store.clone();
+        let turn_for_finish = turn.clone();
+        let pace = req
+            .query_get("pace_ms")
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|ms| *ms > 0 && *ms <= 1000)
+            .map(std::time::Duration::from_millis);
+        Reply::Stream(
+            StreamReply::new(200, "application/x-ndjson; charset=utf-8", frames)
+                .with_header("X-Forge-Stream", "chat/1")
+                .maybe_pace(pace)
+                .on_finish(move |complete| {
+                    if complete {
+                        // Delivery succeeded: only now does the turn become history.
+                        let _ = store.write(|db| {
+                            let _ = persist_into(db, &turn_for_finish);
+                        });
+                    }
+                }),
+        )
     }
 
     fn list_conversations(&self, nb: &str) -> Value {

@@ -316,3 +316,34 @@ WebM "a bit" — half a container parser produces confident nonsense.
 `video: unsupported` with the reason. Frame-based research stays possible and reproducible via
 the committed commands, and its limits (no vision model, no authorized footage) are stated in
 `VIDEO_RESEARCH.md` rather than papered over.
+
+## D19 — Streaming is delivery streaming; Stop cancels persistence, not computation
+
+**Date.** 2026-10-31. **Background.** §7.5 and CHAT-06 ask for streamed answers and a stop
+control. Forge's answer engine is extractive: the answer, its citations and its validation are
+all complete before anything is sent. A model provider is not reachable, so "token-by-token"
+would be a costume.
+
+**Chosen.** `POST /api/notebooks/:id/chat/stream` writes NDJSON frames over genuine chunked
+transfer encoding. The `start` frame states the delivery model in plain words
+(`"extractive answer computed first, then delivered in frames"`). The frames carry real
+substrings of the final answer, in order — no filler, no sleeps in production, no invented
+"thinking" events. The UI renders each delta as it lands, which is why the first cited sentence
+appears before the answer ends.
+
+**Stop.** The server calls `on_finish(complete)` after writing the terminating chunk. The turn is
+written to the conversation **only** when `complete` is true. A client that aborts (the Stop
+button, a closed tab, a dropped connection) therefore leaves no half-answer in history: the
+conversation shows exactly what the user kept. Two tests assert this, one at the socket level
+(`http::tests::an_aborted_stream_is_not_reported_as_delivered`) and one end-to-end that hangs up
+mid-stream and checks the message count (`chat_streams_frames_and_only_persists_when_delivery_completes`).
+
+**Rejected.** (a) Persisting first and deleting on abort — a crash between the two leaves a
+ghost answer the user explicitly stopped. (b) Fake pacing in production so the stream "feels"
+like a model. A diagnostic `?pace_ms=` exists for tests and debugging; it is documented, capped
+at 1 s, and never used by the client. (c) Server-sent events — no reason to add a second framing
+format when NDJSON over chunked encoding is simpler and scriptable with `curl -N`.
+
+**Consequences.** A network drop after the answer is fully written but before the client reads
+the last chunk loses that turn. That is the same trade-off the reference product's stop button
+makes, and it is stated in `UNKNOWN_AND_LIMITATIONS.md` rather than hidden.

@@ -194,3 +194,22 @@ Limits that are real, not hypothetical:
 * **Scene detection is luma-based and was observed to miss a cut.** On our clip the red→green
   transition scores 0.0 while green→blue scores 0.4 (`VIDEO_RESEARCH.md`). Any future
   frame-sampling pipeline must not trust `select='gt(scene,…)'` alone.
+
+## Chat streaming and Stop (2026-10-31)
+
+What was measured: `POST /api/notebooks/:id/chat/stream` returns `Transfer-Encoding: chunked`
+NDJSON frames, and the UI renders them as they arrive (jsdom drive-through with the transport
+slowed by `?pace_ms=`, then a real abort).
+
+Honest limits:
+
+* **This is delivery streaming, not generation.** The extractive answer is complete before the
+  first frame. If a model is ever wired in, this protocol can carry tokens, but today it cannot
+  and the `start` frame says so.
+* **A network drop after the last frame is written but before the client reads it loses the
+  turn.** The server commits to history only on a complete delivery (D19). A retry re-asks.
+* **No backpressure beyond the socket.** Frames are written as fast as the kernel accepts them;
+  a slow client is handled by TCP flow control and the 30 s write timeout, not by a queue.
+* **`?pace_ms=` exists for tests and debugging.** It sleeps between frames and changes nothing
+  else. It is capped at 1 s and rejected above that.
+* **No resume/replay.** An interrupted stream cannot be continued; the user asks again.

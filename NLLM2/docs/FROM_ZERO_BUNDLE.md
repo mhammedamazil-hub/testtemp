@@ -10,952 +10,6 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
-## `crates/forge-core/src/media.rs`
-
-```rust
-//! Container-level media probing (ISO base media / MP4 family), written here because
-//! crates.io is unreachable (`docs/DECISIONS.md` D1) and the sandbox has no `ffprobe`.
-//!
-//! What this does **not** do: decode pixels, read captions, or transcribe audio. It reads
-//! the boxes an MP4/M4A/MOV file declares, which is enough to answer "how long is this,
-//! what streams does it have, at what size and frame rate, and is the file damaged?" ‚Äî
-//! the fields `MASTER_FORGE.md` ¬ß7.12 asks for before anyone watches a frame.
-//!
-//! Every value reported is read from the file. Where a value cannot be read the field is
-//! `None` and a warning explains why; nothing is inferred from the file extension.
-
-use crate::json::Value;
-use crate::obj;
-
-const MAX_TRACKS: usize = 64;
-const MAX_DEPTH: u32 = 8;
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Track {
-    pub id: u32,
-    /// `video` | `audio` | `subtitle` | `hint` | `metadata` | the raw handler fourcc.
-    pub kind: String,
-    pub codec: String,
-    pub language: String,
-    pub timescale: u32,
-    pub duration_ms: u64,
-    pub sample_count: u32,
-    pub fps: Option<f64>,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-    /// Display rotation in degrees (0/90/180/270), read from the track matrix.
-    pub rotation: i32,
-    pub channels: Option<u16>,
-    pub sample_rate: Option<u32>,
-    pub sample_format: Option<u32>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct MediaInfo {
-    /// `mp4` | `matroska` | `mpeg-ts` | `unknown`
-    pub container: String,
-    pub brands: Vec<String>,
-    pub duration_ms: u64,
-    pub timescale: u32,
-    pub fragmented: bool,
-    pub tracks: Vec<Track>,
-    pub warnings: Vec<String>,
-}
-
-fn fourcc(b: &[u8]) -> String {
-    b.iter().map(|c| if c.is_ascii_graphic() { *c as char } else { '.' }).collect()
-}
-
-fn be32(b: &[u8]) -> u32 {
-    u32::from_be_bytes([b[0], b[1], b[2], b[3]])
-}
-fn be16(b: &[u8]) -> u16 {
-    u16::from_be_bytes([b[0], b[1]])
-}
-fn be64(b: &[u8]) -> u64 {
-    u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
-}
-
-/// One box: its fourcc and its payload (the bytes after the header).
-#[derive(Debug, Clone)]
-struct Box_<'a> {
-    kind: String,
-    payload: &'a [u8],
-    /// True when the declared size ran past the end of the buffer.
-    truncated: bool,
-}
-
-/// Split a buffer into boxes, tolerating (and reporting) truncation.
-fn split_boxes(buf: &[u8]) -> (Vec<Box_<'_>>, Vec<String>) {
-    let mut out = Vec::new();
-    let mut warnings = Vec::new();
-    let mut i = 0usize;
-    while i + 8 <= buf.len() {
-        let size32 = be32(&buf[i..]);
-        let kind = fourcc(&buf[i + 4..i + 8]);
-        let (header, mut size) = match size32 {
-            0 => (8usize, (buf.len() - i) as u64), // extends to end of file
-            1 => {
-                if i + 16 > buf.len() {
-                    warnings.push(format!("box {} is truncated before its 64-bit size", kind));
-                    break;
-                }
-                (16usize, be64(&buf[i + 8..]))
-            }
-            n => (8usize, n as u64),
-        };
-        if size < header as u64 {
-            warnings.push(format!("box {} declares an impossible size {}", kind, size));
-            break;
-        }
-        let body_start = i + header;
-        let body_end = i.saturating_add(size as usize);
-        let truncated = body_end > buf.len();
-        let payload = if body_start <= buf.len() {
-            &buf[body_start..body_end.min(buf.len())]
-        } else {
-            &buf[0..0]
-        };
-        if truncated {
-            warnings.push(format!(
-                "box {} is truncated: declares {} bytes, {} present",
-                kind,
-                size,
-                buf.len().saturating_sub(i)
-            ));
-        }
-        out.push(Box_ { kind, payload, truncated });
-        // A truncated last box ends parsing; anything after it cannot be trusted.
-        if truncated {
-            break;
-        }
-        i = body_end;
-        if out.len() > 10_000 {
-            warnings.push("too many boxes; stopped parsing".into());
-            break;
-        }
-        size = 0;
-        let _ = size;
-    }
-    (out, warnings)
-}
-
-fn find<'a>(boxes: &'a [Box_<'a>], kind: &str) -> Option<&'a Box_<'a>> {
-    boxes.iter().find(|b| b.kind == kind)
-}
-
-fn find_all<'a>(boxes: &'a [Box_<'a>], kind: &str) -> Vec<&'a Box_<'a>> {
-    boxes.iter().filter(|b| b.kind == kind).collect()
-}
-
-/// Parse `moov`/`trak`/`mdia`/`minf`/`stbl`/`udta` style containers one level down.
-fn children<'a>(b: &'a Box_<'a>) -> (Vec<Box_<'a>>, Vec<String>) {
-    split_boxes(b.payload)
-}
-
-fn is_container(kind: &str) -> bool {
-    matches!(
-        kind,
-        "moov" | "trak" | "mdia" | "minf" | "stbl" | "edts" | "udta" | "mvex" | "dinf" | "moof" | "traf"
-    )
-}
-
-// ---------------------------------------------------------------- header parsers
-
-fn parse_mvhd(p: &[u8]) -> Option<(u32, u64)> {
-    // version(1) flags(3) creation modification timescale duration
-    let version = *p.first()?;
-    if version == 1 {
-        if p.len() < 32 {
-            return None;
-        }
-        let timescale = be32(&p[20..]);
-        let duration = be64(&p[24..]);
-        Some((timescale, duration))
-    } else {
-        if p.len() < 20 {
-            return None;
-        }
-        let timescale = be32(&p[12..]);
-        let duration = be32(&p[16..]) as u64;
-        Some((timescale, duration))
-    }
-}
-
-fn parse_mdhd(p: &[u8]) -> Option<(u32, u64, String)> {
-    let version = *p.first()?;
-    let (ts_off, dur_off, dur_len) = if version == 1 { (20usize, 24usize, 8usize) } else { (12usize, 16usize, 4usize) };
-    if p.len() < dur_off + dur_len + 2 {
-        return None;
-    }
-    let timescale = be32(&p[ts_off..]);
-    let duration = if dur_len == 8 { be64(&p[dur_off..]) } else { be32(&p[dur_off..]) as u64 };
-    // packed ISO-639-2/T: three 5-bit letters, each offset by 0x60
-    let packed = be16(&p[dur_off + dur_len..]);
-    let lang: String = [(packed >> 10) & 0x1f, (packed >> 5) & 0x1f, packed & 0x1f]
-        .iter()
-        .map(|c| (0x60 + *c) as u8 as char)
-        .collect();
-    let language = if lang.chars().all(|c| c.is_ascii_lowercase()) { lang } else { "und".into() };
-    Some((timescale, duration, language))
-}
-
-fn parse_hdlr(p: &[u8]) -> Option<String> {
-    if p.len() < 12 {
-        return None;
-    }
-    Some(fourcc(&p[8..12]))
-}
-
-fn parse_tkhd(p: &[u8]) -> Option<(u32, u32, u32, i32)> {
-    // Layout (after the 4-byte version+flags):
-    //   v0: creation 4, modification 4, track_id 4, reserved 4, duration 4,
-    //       reserved 8, layer 2, alt_group 2, volume 2, reserved 2, matrix 36, width 4, height 4
-    //   v1: the two timestamps and the duration are 8 bytes wide (+12 bytes overall)
-    let version = *p.first()?;
-    let (id_off, matrix_off, size_off) = if version == 1 { (20usize, 52usize, 88usize) } else { (12usize, 40usize, 76usize) };
-    if p.len() < size_off + 8 {
-        return None;
-    }
-    let track_id = be32(&p[id_off..]);
-    let matrix = &p[matrix_off..matrix_off + 36];
-    let a = be32(&matrix[0..]) as i32;
-    let b = be32(&matrix[4..]) as i32;
-    let c = be32(&matrix[12..]) as i32;
-    let d = be32(&matrix[16..]) as i32;
-    let one = 0x0001_0000i32;
-    let rotation = if a == 0 && b == one && c == -one && d == 0 {
-        90
-    } else if a == -one && b == 0 && c == 0 && d == -one {
-        180
-    } else if a == 0 && b == -one && c == one && d == 0 {
-        270
-    } else {
-        0
-    };
-    // width/height are 16.16 fixed point display dimensions
-    let width = be32(&p[size_off..]) >> 16;
-    let height = be32(&p[size_off + 4..]) >> 16;
-    Some((track_id, width, height, rotation))
-}
-
-/// `stts` ‚Üí (sample count, total delta in media timescale units).
-fn parse_stts(p: &[u8]) -> Option<(u32, u64)> {
-    if p.len() < 8 {
-        return None;
-    }
-    let entries = be32(&p[4..]) as usize;
-    let mut samples = 0u32;
-    let mut total = 0u64;
-    for i in 0..entries {
-        let off = 8 + i * 8;
-        if off + 8 > p.len() {
-            break;
-        }
-        let count = be32(&p[off..]);
-        let delta = be32(&p[off + 4..]);
-        samples = samples.saturating_add(count);
-        // Hostile input: count and delta are both u32, so their product can exceed u64.
-        // Saturate rather than overflowing (which would panic in a debug build).
-        total = total.saturating_add((count as u64).saturating_mul(delta as u64));
-    }
-    Some((samples, total))
-}
-
-/// First entry of `stsd`: (format fourcc, width, height, channels, sample rate).
-fn parse_stsd(p: &[u8], kind: &str) -> Option<(String, Option<u32>, Option<u32>, Option<u16>, Option<u32>)> {
-    if p.len() < 16 {
-        return None;
-    }
-    let format = fourcc(&p[12..16]);
-    let entry = &p[16..];
-    if kind == "vide" {
-        // sample entry: 6 reserved + 2 data_ref + 2+2+12 pre_defined + 2 width + 2 height
-        if entry.len() < 28 {
-            return Some((format, None, None, None, None));
-        }
-        let width = be16(&entry[24..]) as u32;
-        let height = be16(&entry[26..]) as u32;
-        Some((format, Some(width), Some(height), None, None))
-    } else if kind == "soun" {
-        if entry.len() < 20 {
-            return Some((format, None, None, None, None));
-        }
-        let channels = be16(&entry[16..]);
-        let sample_size = be16(&entry[18..]);
-        let rate = if entry.len() >= 28 { be32(&entry[24..]) >> 16 } else { 0 };
-        Some((format, None, None, Some(channels), Some(rate)))
-            .map(|t| (t.0, t.1, t.2, t.3, t.4))
-            .map(|t| {
-                let _ = sample_size;
-                t
-            })
-    } else {
-        Some((format, None, None, None, None))
-    }
-}
-
-fn track_kind(handler: &str) -> String {
-    match handler {
-        "vide" => "video".into(),
-        "soun" => "audio".into(),
-        "sbtl" | "subt" | "text" => "subtitle".into(),
-        "hint" => "hint".into(),
-        "meta" => "metadata".into(),
-        other => format!("handler:{}", other),
-    }
-}
-
-fn parse_trak(b: &Box_<'_>, warnings: &mut Vec<String>) -> Option<Track> {
-    let (moov, _) = children(b);
-    let mut track = Track::default();
-
-    if let Some(tkhd) = find(&moov, "tkhd") {
-        match parse_tkhd(tkhd.payload) {
-            Some((id, w, h, rot)) => {
-                track.id = id;
-                track.rotation = rot;
-                if w > 0 {
-                    track.width = Some(w);
-                }
-                if h > 0 {
-                    track.height = Some(h);
-                }
-            }
-            None => warnings.push("a track header (tkhd) was too short to read".into()),
-        }
-    } else {
-        warnings.push("a track has no tkhd header".into());
-    }
-
-    let Some(mdia) = find(&moov, "mdia") else {
-        warnings.push("a track has no mdia box".into());
-        return Some(track);
-    };
-    let (media, _) = children(mdia);
-    if let Some(mdhd) = find(&media, "mdhd") {
-        if let Some((timescale, duration, language)) = parse_mdhd(mdhd.payload) {
-            track.timescale = timescale;
-            track.language = language;
-            if timescale > 0 {
-                track.duration_ms = duration.saturating_mul(1000) / timescale as u64;
-            }
-        }
-    }
-    let handler = find(&media, "hdlr").and_then(|h| parse_hdlr(h.payload)).unwrap_or_default();
-    track.kind = track_kind(&handler);
-
-    if let Some(minf) = find(&media, "minf") {
-        if let Some(stbl) = find(&children(minf).0, "stbl") {
-            let (table, _) = children(stbl);
-            if let Some(stsd) = find(&table, "stsd") {
-                if let Some((codec, w, h, channels, rate)) = parse_stsd(stsd.payload, &handler) {
-                    track.codec = codec;
-                    if track.kind == "video" {
-                        if track.width.is_none() {
-                            track.width = w;
-                        }
-                        if track.height.is_none() {
-                            track.height = h;
-                        }
-                    } else if track.kind == "audio" {
-                        track.channels = channels;
-                        track.sample_rate = rate;
-                    }
-                }
-            } else {
-                warnings.push("a track has no sample description (stsd)".into());
-            }
-            if let Some(stts) = find(&table, "stts") {
-                if let Some((samples, total_delta)) = parse_stts(stts.payload) {
-                    track.sample_count = samples;
-                    // frame rate = samples / media duration in seconds
-                    if track.timescale > 0 && total_delta > 0 {
-                        let seconds = total_delta as f64 / track.timescale as f64;
-                        if seconds > 0.0 {
-                            track.fps = Some((samples as f64 / seconds * 100.0).round() / 100.0);
-                        }
-                    }
-                }
-            }
-            if track.kind == "video" && table.iter().any(|b| b.kind == "stss") {
-                // `stss` present means some frames are not sync frames: real B/P frames
-                track.sample_format = Some(1);
-            }
-        }
-    }
-    Some(track)
-}
-
-/// Detect the container from magic bytes and structural evidence ‚Äî never from a file name.
-pub fn detect(data: &[u8]) -> &'static str {
-    if data.len() >= 4 && data[..4] == [0x1A, 0x45, 0xDF, 0xA3] {
-        return "matroska"; // also WebM
-    }
-    if data.len() >= 2 && data[0] == 0x47 && (data.len() < 189 || data.get(188) == Some(&0x47)) {
-        return "mpeg-ts";
-    }
-    if data.len() >= 8 {
-        let kind = fourcc(&data[4..8]);
-        if matches!(
-            kind.as_str(),
-            "ftyp" | "styp" | "moov" | "mdat" | "free" | "skip" | "wide" | "pnot"
-        ) {
-            return "mp4";
-        }
-    }
-    if data.len() >= 4 && &data[..4] == b"RIFF" && data.len() >= 12 && &data[8..12] == b"AVI " {
-        return "avi";
-    }
-    "unknown"
-}
-
-/// Read the container structure of a media file.
-pub fn inspect(data: &[u8]) -> MediaInfo {
-    let mut info = MediaInfo {
-        container: detect(data).to_string(),
-        ..Default::default()
-    };
-    if matches!(info.container.as_str(), "matroska" | "mpeg-ts" | "avi") {
-        info.warnings.push(format!(
-            "{} container: this build parses ISO base media (MP4/M4A/MOV) only; \
-             duration, streams and frame rate are unknown",
-            info.container
-        ));
-        return info;
-    }
-    if info.container != "mp4" {
-        info.warnings.push(
-            "not a recognised media container (no ftyp/moov box, no Matroska or MPEG-TS magic)".into(),
-        );
-        return info;
-    }
-
-    let (top, mut warnings) = split_boxes(data);
-
-    if let Some(ftyp) = find(&top, "ftyp") {
-        if ftyp.payload.len() >= 8 {
-            info.brands.push(fourcc(&ftyp.payload[0..4]));
-            let mut i = 8;
-            while i + 4 <= ftyp.payload.len() {
-                info.brands.push(fourcc(&ftyp.payload[i..i + 4]));
-                i += 4;
-            }
-            info.brands.retain(|b| !b.is_empty() && b != "....");
-            info.brands.dedup();
-        }
-    }
-
-    let Some(moov) = find(&top, "moov") else {
-        warnings.push("no moov box: the file is incomplete or was saved without its index".into());
-        info.warnings = warnings;
-        return info;
-    };
-    let (moov_boxes, more) = children(moov);
-    warnings.extend(more);
-
-    if find(&moov_boxes, "mvex").is_some() {
-        info.fragmented = true;
-        warnings.push(
-            "fragmented MP4 (moov/mvex): duration and frame rate may only be known after the fragments are read"
-                .into(),
-        );
-    }
-
-    match find(&moov_boxes, "mvhd").and_then(|b| parse_mvhd(b.payload)) {
-        Some((timescale, duration)) => {
-            info.timescale = timescale;
-            if timescale > 0 {
-                info.duration_ms = duration.saturating_mul(1000) / timescale as u64;
-            }
-            if duration == 0 && !info.fragmented {
-                warnings.push("movie header reports a duration of zero".into());
-            }
-        }
-        None => warnings.push("moov has no readable mvhd (movie header)".into()),
-    }
-
-    for trak in find_all(&moov_boxes, "trak").into_iter().take(MAX_TRACKS) {
-        if let Some(track) = parse_trak(trak, &mut warnings) {
-            info.tracks.push(track);
-        }
-    }
-    if info.tracks.is_empty() {
-        warnings.push("no tracks were found in the movie header".into());
-    }
-    for t in &info.tracks {
-        if t.kind == "video" && (t.width.unwrap_or(0) == 0 || t.height.unwrap_or(0) == 0) {
-            warnings.push(format!("video track {} declares no display size", t.id));
-        }
-    }
-    info.warnings = warnings;
-    let _ = is_container;
-    let _ = MAX_DEPTH;
-    info
-}
-
-impl MediaInfo {
-    pub fn to_json(&self) -> Value {
-        obj! {
-            "container" => self.container.as_str(),
-            "duration_ms" => self.duration_ms,
-            "timescale" => self.timescale as u64,
-            "fragmented" => self.fragmented,
-            "brands" => Value::Arr(self.brands.iter().map(|b| Value::from(b.as_str())).collect()),
-            "tracks" => Value::Arr(self.tracks.iter().map(|t| obj! {
-                "id" => t.id as u64,
-                "kind" => t.kind.as_str(),
-                "codec" => t.codec.as_str(),
-                "language" => t.language.as_str(),
-                "timescale" => t.timescale as u64,
-                "duration_ms" => t.duration_ms,
-                "sample_count" => t.sample_count as u64,
-                "fps" => match t.fps { Some(f) => Value::from(f), None => Value::Null },
-                "width" => t.width.map(|w| Value::from(w as u64)).unwrap_or(Value::Null),
-                "height" => t.height.map(|h| Value::from(h as u64)).unwrap_or(Value::Null),
-                "rotation" => t.rotation as i64,
-                "channels" => t.channels.map(|c| Value::from(c as u64)).unwrap_or(Value::Null),
-                "sample_rate" => t.sample_rate.map(|r| Value::from(r as u64)).unwrap_or(Value::Null),
-            }).collect()),
-            "warnings" => Value::Arr(self.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ---------------- box builders (this is how the fixtures are made)
-
-    fn boxed(kind: &str, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(8 + payload.len());
-        out.extend_from_slice(&((8 + payload.len()) as u32).to_be_bytes());
-        out.extend_from_slice(kind.as_bytes());
-        out.extend_from_slice(payload);
-        out
-    }
-
-    fn large_boxed(kind: &str, payload: &[u8]) -> Vec<u8> {
-        let mut out = Vec::new();
-        out.extend_from_slice(&1u32.to_be_bytes());
-        out.extend_from_slice(kind.as_bytes());
-        out.extend_from_slice(&(16u64 + payload.len() as u64).to_be_bytes());
-        out.extend_from_slice(payload);
-        out
-    }
-
-    fn full(version: u8, flags: u32, payload: &[u8]) -> Vec<u8> {
-        let mut out = vec![version];
-        out.extend_from_slice(&flags.to_be_bytes()[1..]);
-        out.extend_from_slice(payload);
-        out
-    }
-
-    fn mvhd(timescale: u32, duration: u32) -> Vec<u8> {
-        let mut p = Vec::new();
-        p.extend_from_slice(&0u32.to_be_bytes()); // creation
-        p.extend_from_slice(&0u32.to_be_bytes()); // modification
-        p.extend_from_slice(&timescale.to_be_bytes());
-        p.extend_from_slice(&duration.to_be_bytes());
-        p.extend_from_slice(&[0u8; 80]); // rate, volume, matrix, etc.
-        boxed("mvhd", &full(0, 0, &p))
-    }
-
-    fn matrix(rotation: i32) -> [u8; 36] {
-        let one = 0x0001_0000i32;
-        let (a, b, c, d) = match rotation {
-            90 => (0, one, -one, 0),
-            180 => (-one, 0, 0, -one),
-            270 => (0, -one, one, 0),
-            _ => (one, 0, 0, one),
-        };
-        let mut m = [0u8; 36];
-        for (i, v) in [a, b, 0, c, d, 0, 0, 0, 0x4000_0000].iter().enumerate() {
-            m[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
-        }
-        m
-    }
-
-    fn tkhd(id: u32, w: u32, h: u32, rotation: i32) -> Vec<u8> {
-        let mut p = Vec::new();
-        p.extend_from_slice(&0u32.to_be_bytes()); // creation
-        p.extend_from_slice(&0u32.to_be_bytes()); // modification
-        p.extend_from_slice(&id.to_be_bytes());
-        p.extend_from_slice(&0u32.to_be_bytes()); // reserved
-        p.extend_from_slice(&1000u32.to_be_bytes()); // duration
-        p.extend_from_slice(&[0u8; 8]); // reserved
-        p.extend_from_slice(&0u16.to_be_bytes()); // layer
-        p.extend_from_slice(&0u16.to_be_bytes()); // alternate group
-        p.extend_from_slice(&0u16.to_be_bytes()); // volume
-        p.extend_from_slice(&0u16.to_be_bytes()); // reserved
-        p.extend_from_slice(&matrix(rotation));
-        p.extend_from_slice(&((w << 16).to_be_bytes()));
-        p.extend_from_slice(&((h << 16).to_be_bytes()));
-        boxed("tkhd", &full(0, 3, &p))
-    }
-
-    fn mdhd(timescale: u32, duration: u32) -> Vec<u8> {
-        let mut p = Vec::new();
-        p.extend_from_slice(&0u32.to_be_bytes()); // creation
-        p.extend_from_slice(&0u32.to_be_bytes()); // modification
-        p.extend_from_slice(&timescale.to_be_bytes());
-        p.extend_from_slice(&duration.to_be_bytes());
-        // "eng" packed as 5-bit letters
-        let lang: u16 = (b'e' as u16 - 0x60) << 10 | (b'n' as u16 - 0x60) << 5 | (b'g' as u16 - 0x60);
-        p.extend_from_slice(&lang.to_be_bytes());
-        p.extend_from_slice(&0u16.to_be_bytes());
-        boxed("mdhd", &full(0, 0, &p))
-    }
-
-    fn hdlr(kind: &str) -> Vec<u8> {
-        let mut p = Vec::new();
-        p.extend_from_slice(&0u32.to_be_bytes()); // pre_defined
-        p.extend_from_slice(kind.as_bytes());
-        p.extend_from_slice(&[0u8; 12]);
-        p.push(0);
-        boxed("hdlr", &full(0, 0, &p))
-    }
-
-    fn video_stsd(codec: &str, w: u16, h: u16) -> Vec<u8> {
-        let mut entry = Vec::new();
-        entry.extend_from_slice(&[0u8; 6]); // reserved
-        entry.extend_from_slice(&1u16.to_be_bytes()); // data ref index
-        entry.extend_from_slice(&[0u8; 16]); // pre_defined + reserved
-        entry.extend_from_slice(&w.to_be_bytes());
-        entry.extend_from_slice(&h.to_be_bytes());
-        entry.extend_from_slice(&[0u8; 50]); // resolutions, compressor name, depth
-        let mut sample = Vec::new();
-        sample.extend_from_slice(&((8 + entry.len()) as u32).to_be_bytes());
-        sample.extend_from_slice(codec.as_bytes());
-        sample.extend_from_slice(&entry);
-        let mut p = Vec::new();
-        p.extend_from_slice(&1u32.to_be_bytes()); // entry count
-        p.extend_from_slice(&sample);
-        boxed("stsd", &full(0, 0, &p))
-    }
-
-    fn audio_stsd(codec: &str, channels: u16, rate: u32) -> Vec<u8> {
-        let mut entry = Vec::new();
-        entry.extend_from_slice(&[0u8; 6]);
-        entry.extend_from_slice(&1u16.to_be_bytes());
-        entry.extend_from_slice(&0u16.to_be_bytes()); // version
-        entry.extend_from_slice(&0u16.to_be_bytes()); // revision
-        entry.extend_from_slice(&0u32.to_be_bytes()); // vendor
-        entry.extend_from_slice(&channels.to_be_bytes());
-        entry.extend_from_slice(&16u16.to_be_bytes()); // sample size
-        entry.extend_from_slice(&0u16.to_be_bytes());
-        entry.extend_from_slice(&0u16.to_be_bytes());
-        entry.extend_from_slice(&((rate << 16).to_be_bytes()));
-        let mut sample = Vec::new();
-        sample.extend_from_slice(&((8 + entry.len()) as u32).to_be_bytes());
-        sample.extend_from_slice(codec.as_bytes());
-        sample.extend_from_slice(&entry);
-        let mut p = Vec::new();
-        p.extend_from_slice(&1u32.to_be_bytes());
-        p.extend_from_slice(&sample);
-        boxed("stsd", &full(0, 0, &p))
-    }
-
-    fn stts(entries: &[(u32, u32)]) -> Vec<u8> {
-        let mut p = Vec::new();
-        p.extend_from_slice(&(entries.len() as u32).to_be_bytes());
-        for (count, delta) in entries {
-            p.extend_from_slice(&count.to_be_bytes());
-            p.extend_from_slice(&delta.to_be_bytes());
-        }
-        boxed("stts", &full(0, 0, &p))
-    }
-
-    fn trak(
-        stsd: Vec<u8>,
-        handler: &str,
-        timescale: u32,
-        duration: u32,
-        fps: u32,
-        w: u32,
-        h: u32,
-        rot: i32,
-    ) -> Vec<u8> {
-        // one stts entry: `frames` samples of `timescale / fps` media units each
-        let delta = (timescale / fps).max(1);
-        let frames = duration / delta;
-        let stbl = boxed("stbl", &[stsd, stts(&[(frames, delta)])].concat());
-        let minf = boxed("minf", &stbl);
-        let mdia = boxed("mdia", &[mdhd(timescale, duration), hdlr(handler), minf].concat());
-        boxed("trak", &[tkhd(1, w, h, rot), mdia].concat())
-    }
-
-    fn sample_mp4(rotation: i32) -> Vec<u8> {
-        let ftyp = boxed("ftyp", b"isomisomiso2mp41");
-        // 6 s movie, video at 10 fps, stereo 48 kHz audio
-        let video = trak(video_stsd("avc1", 320, 240), "vide", 30_000, 180_000, 10, 320, 240, rotation);
-        let audio = trak(audio_stsd("mp4a", 2, 48_000), "soun", 48_000, 288_000, 48_000, 0, 0, 0);
-        let moov = boxed("moov", &[mvhd(1000, 6000), video, audio].concat());
-        let mdat = boxed("mdat", &[0u8; 16]);
-        [ftyp, moov, mdat].concat()
-    }
-
-    // ---------------- tests
-
-    #[test]
-    fn reads_duration_streams_size_and_frame_rate() {
-        let info = inspect(&sample_mp4(0));
-        assert_eq!(info.container, "mp4");
-        assert_eq!(info.duration_ms, 6000, "6 s movie from mvhd");
-        assert!(info.brands.iter().any(|b| b == "isom"));
-        assert_eq!(info.tracks.len(), 2);
-
-        let video = info.tracks.iter().find(|t| t.kind == "video").expect("video track");
-        assert_eq!(video.codec, "avc1");
-        assert_eq!(video.width, Some(320));
-        assert_eq!(video.height, Some(240));
-        assert_eq!(video.fps, Some(10.0), "180 samples over 6 s of media time");
-        assert_eq!(video.duration_ms, 6000);
-        assert_eq!(video.language, "eng");
-        assert_eq!(video.rotation, 0);
-        assert_eq!(video.sample_count, 60, "6 s at 10 fps is 60 samples");
-
-        let audio = info.tracks.iter().find(|t| t.kind == "audio").expect("audio track");
-        assert_eq!(audio.codec, "mp4a");
-        assert_eq!(audio.channels, Some(2));
-        assert_eq!(audio.sample_rate, Some(48_000));
-        assert!(info.warnings.is_empty(), "{:?}", info.warnings);
-    }
-
-    #[test]
-    fn reads_display_rotation_from_the_track_matrix() {
-        assert_eq!(inspect(&sample_mp4(90)).tracks[0].rotation, 90);
-        assert_eq!(inspect(&sample_mp4(180)).tracks[0].rotation, 180);
-        assert_eq!(inspect(&sample_mp4(270)).tracks[0].rotation, 270);
-    }
-
-    #[test]
-    fn json_reports_absent_values_as_null_not_zero() {
-        let info = inspect(&sample_mp4(0));
-        let v = info.to_json();
-        let tracks = v.get("tracks").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
-        let audio = tracks.iter().find(|t| t.str_of("kind") == Some("audio")).unwrap();
-        assert!(audio.get("width").map(|w| w.is_null()).unwrap_or(false), "audio has no width");
-        let video = tracks.iter().find(|t| t.str_of("kind") == Some("video")).unwrap();
-        assert!(video.get("channels").map(|c| c.is_null()).unwrap_or(false), "video has no channels");
-        assert_eq!(video.get("fps").and_then(|f| f.as_f64()), Some(10.0));
-    }
-
-    #[test]
-    fn truncated_file_is_reported_not_guessed() {
-        let full = sample_mp4(0);
-        let cut = &full[..full.len() - 40];
-        let info = inspect(cut);
-        assert!(
-            info.warnings.iter().any(|w| w.contains("truncated") || w.contains("no moov")),
-            "{:?}",
-            info.warnings
-        );
-    }
-
-    #[test]
-    fn missing_moov_is_a_warning_and_no_tracks() {
-        let only_ftyp = boxed("ftyp", b"isomisom");
-        let info = inspect(&only_ftyp);
-        assert_eq!(info.container, "mp4");
-        assert!(info.tracks.is_empty());
-        assert!(info.warnings.iter().any(|w| w.contains("no moov")), "{:?}", info.warnings);
-    }
-
-    #[test]
-    fn fragmented_mp4_is_flagged() {
-        let mut moov_payload = mvhd(1000, 0);
-        moov_payload.extend(boxed("mvex", &[]));
-        let file = [boxed("ftyp", b"isomiso5"), boxed("moov", &moov_payload)].concat();
-        let info = inspect(&file);
-        assert!(info.fragmented);
-        assert!(info.warnings.iter().any(|w| w.contains("fragmented")), "{:?}", info.warnings);
-    }
-
-    #[test]
-    fn other_containers_are_named_but_not_parsed() {
-        let matroska = [0x1Au8, 0x45, 0xDF, 0xA3, 0, 0, 0, 0];
-        let info = inspect(&matroska);
-        assert_eq!(info.container, "matroska");
-        assert!(info.tracks.is_empty(), "no invented tracks");
-        assert!(info.warnings[0].contains("ISO base media"), "{:?}", info.warnings);
-
-        assert_eq!(detect(b"not media at all"), "unknown");
-        let unknown = inspect(b"hello world, definitely not a video");
-        assert_eq!(unknown.container, "unknown");
-        assert!(!unknown.warnings.is_empty());
-    }
-
-    #[test]
-    fn absurd_sample_tables_saturate_instead_of_overflowing() {
-        // Two entries of (0xFFFFFFFF samples, 0xFFFFFFFF delta) cannot be represented in u64;
-        // in a debug build the multiply would panic. `parse_stts` must clamp and keep going.
-        let mut p = vec![0, 0, 0, 0, 0, 0, 0, 2];
-        for _ in 0..2 {
-            p.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
-        }
-        let (samples, total) = parse_stts(&p).expect("well-formed header");
-        assert_eq!(samples, u32::MAX, "sample count saturates at the u32 ceiling");
-        assert_eq!(total, u64::MAX, "total duration saturates instead of wrapping to a small number");
-        // A truncated entry list stops at the last complete entry rather than reading past
-        // the buffer; here the first entry straddles the cut, so nothing is counted.
-        assert_eq!(parse_stts(&p[..12]), Some((0, 0)));
-        // One full entry is readable even when the second is cut in half.
-        assert_eq!(
-            parse_stts(&p[..16]),
-            Some((u32::MAX, (u32::MAX as u64) * (u32::MAX as u64)))
-        );
-    }
-
-    #[test]
-    fn sixty_four_bit_box_sizes_are_understood() {
-        let payload = [mvhd(1000, 2500)].concat();
-        let file = [
-            boxed("ftyp", b"isomiso5"),
-            large_boxed("moov", &payload),
-        ]
-        .concat();
-        let info = inspect(&file);
-        assert_eq!(info.duration_ms, 2500, "{:?}", info.warnings);
-    }
-
-    #[test]
-    fn a_real_encoder_output_is_read_correctly() {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sample.mp4");
-        let Ok(bytes) = std::fs::read(&p) else {
-            eprintln!("sample.mp4 fixture absent; skipping the real-encoder check");
-            return;
-        };
-        let info = inspect(&bytes);
-        assert_eq!(info.container, "mp4");
-        let video = info.tracks.iter().find(|t| t.kind == "video").expect("video track");
-        // the fixture is generated by the command recorded in tests/fixtures/make_media.py
-        assert_eq!(video.codec, "avc1");
-        assert_eq!(video.width, Some(320));
-        assert_eq!(video.height, Some(240));
-        assert_eq!(video.fps, Some(10.0), "{:?}", video);
-        assert!((5_900..=6_200).contains(&info.duration_ms), "duration {}", info.duration_ms);
-    }
-}
-```
-
-## `tests/fixtures/make_media.py`
-
-```python
-#!/usr/bin/env python3
-"""Provenance for `tests/fixtures/sample.mp4`.
-
-This fixture is **our own synthetic clip**, not material from any product or platform.
-It exists so `media::inspect` and the frame-extraction research below are tested against
-real encoder output instead of a hand-built box tree (which is also tested, in
-`media.rs::tests::sample_mp4`).
-
-Generated with a static FFmpeg 7.0.2 build (installed from the `imageio-ffmpeg` wheel;
-`ffprobe` is not part of it). The exact command:
-
-    ffmpeg -y \
-      -f lavfi -i "color=c=red:s=320x240:r=10:d=2" \
-      -f lavfi -i "color=c=green:s=320x240:r=10:d=2" \
-      -f lavfi -i "color=c=blue:s=320x240:r=10:d=2" \
-      -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]" \
-      -map "[v]" -c:v libx264 -pix_fmt yuv420p -g 10 -t 6 -r 10 \
-      tests/fixtures/sample.mp4
-
-What that produces, measured by our own parser (`media::tests::a_real_encoder_output_is_read_correctly`)
-and by FFmpeg itself:
-
-    container mp4, brand isom
-    duration  6.0 s (mvhd timescale 10240)
-    video     avc1, 320x240, yuv420p, 10 fps, 60 frames
-
-Regenerating it is optional; the checked-in file is what the tests read. If you do not have
-FFmpeg, delete nothing ‚Äî the test skips itself only when the fixture is absent.
-
-Frame extraction used for research (see docs/reference/VIDEO_RESEARCH.md). FFmpeg 7.x needs
-`-fps_mode vfr` for scene dumps; `-vsync` is deprecated and fails:
-
-    # one contact sheet: 3 frames across, sampled at 0.5 fps
-    ffmpeg -i sample.mp4 -vf "fps=0.5,scale=160:-1,tile=3x1" -frames:v 1 /tmp/sheet.png
-
-    # scene changes, one PNG per detected shot
-    ffmpeg -i sample.mp4 -vf "select='gt(scene,0.3)'" -fps_mode vfr /tmp/scenes/s-%03d.png
-
-The clip has exactly two scene cuts (red‚Üígreen at 2 s, green‚Üíblue at 4 s), so the expected
-result is exactly two PNGs. That is the assertion the research log records.
-
-There is no FFmpeg dependency in the product: `crates/forge-core` parses the container by
-hand and never shells out to FFmpeg.
-"""
-import os
-import subprocess
-import sys
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "sample.mp4")
-
-
-def main() -> int:
-    ff = os.environ.get("FFMPEG", "ffmpeg")
-    if not os.path.exists(OUT):
-        print(f"fixture missing: {OUT}", file=sys.stderr)
-        return 1
-    try:
-        subprocess.run([ff, "-version"], check=True, capture_output=True)
-    except (OSError, subprocess.CalledProcessError):
-        print("ffmpeg not available; the checked-in fixture is already present, nothing to do")
-        return 0
-    print(f"{OUT}: {os.path.getsize(OUT)} bytes")
-    print("regenerate with the command in the module docstring")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
-
-## `tests/fixtures/sample.mp4`
-
-```
-    ftypisom   isomiso2avc1mp41   free  mdat  Æˇˇ™‹EÈΩÊŸH∑ñ,ÿ Ÿ#ÓÔx264 - core 164 r3191 4613ac3 - H.264/MPEG-4 AVC codec - Copyleft 2003-2024 - http://www.videolan.org/x264.html - options: cabac=1 ref=3 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=7 psy=1 psy_rd=1.00:0.00 mixed_ref=1 me_range=16 chroma_me=1 trellis=1 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=-2 threads=3 lookahead_threads=1 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=2 keyint=250 keyint_min=10 scenecut=40 intra_refresh=0 rc_lookahead=40 rc=crf mbtree=1 crf=23.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00 Ä   CeàÑ ˇ˛Á„¸
-k+ƒøMP(ÕÈµ‹®∫5·’∆!O ∫3◊‘ ºJ±}[}8<ó¯P 
-ÑÕl¶K7ã	'3Å   Aö$lA˛µ*Ä X   
-AûBxá  7·   
-ûatC  P@   
-ûcjC  PA   AöhI®AhôL#ˇ˛µ*Ä Y   AûÜE,;ˇ  7·   
-û•tC  PA   
-ûßjC  P@   Aö¨I®AlôL#ˇ˛µ*Ä X   Aû E,;ˇ  7·   
-ûÈtC  P@   
-ûÎjC  P@   AöI®AlôL#ˇ˛µ*Ä Y   AüE,;ˇ  7·   
-ü-tC  PA   
-ü/jC  P@   Aõ4I®AlôL#ˇ˛µ*Ä X   AüRE,;ˇ  7·   
-üqtC  P@   
-üsjC  P@   CAõxI®AlôL#ˇ†!⁄È∆–ú˙∆â∞*ÿ"6<L69ÈÙ´3\n,g	`„#Ó≠@p uë~Å#n¿nÄ È  ÏAüñE,;ˇ˛˚¸ˇÂíÆ	|Gª¡•IyIñ_X1∞”2ﬁ$,	}H%eÔÛ)∞Ñ6HBfŒ<RåÜ|¸
-Æ	ÄïÓÌëNÕ7"Ê>5XÇ—˝Ïtñ‚Òb«ÀçªTX±Ù±?°˘I˘˛ˆ†Cˇg Xâ©ö»f⁄@≥˚Ï9ád‰+}·êÁÉ“©÷ûß∏[	u°D˛íÄ ˝1ûHƒIY20æÓvc”∆:†´G©ÂälQ^O(`‚äz©™a!˙˙ã^NÍùº–’J˘∏z°¬ô√9#AW⁄ugªi…ës‘∆&`’-ˇe\ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™EÛØ$è]¯¯¸‘z…íôƒ8#è’{ÁkÈ¥¡™[˛ πàé£eRèRF¯Ô™ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™(˝C`(-›˝>`Îç1≠áÒ§y;‚T*-N·≥ã¶B_»ù§û‹c¡j∑†I≤+‰6©ï[Rto∆&`’-ˇe\ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™(Ì~ú"ví{påx_™ﬁÅ&»Øêx⁄¶UmI“„Hø#;GÃPòàV√¯“<öò?Ùd/ˇ˝BÌ™¢ƒ‰xç_i’ûÌßÛä%*{ 6ëOã0]¯Á◊ö*!|˛ïˆ£|¢∑1≠áÒ§y;‚T*-N·≥ã¶B_»ù§û‹c¡j∑†I≤+‰ “&PBﬂˆUÃDu*îzêä7«Ò≠¶Ñ(F∫ÄsVﬂ"≠ÊO60Û#˚ñ:°“è‘5„∂VãäÄ@#‚∫V”B	î#]@9´oëVÛ'õyë˝ÀPÈGÍAnÔËAÛˇÖZ≠Ëlä˘ Gç™eV‘ù.1¥ãÚ3¥|≈–iàÖl?ç#…ﬂ°Qjwú]7¯  „üµtC˛˚ˆóeì∞Lªèêû√›∂,c ¡"Yi≥Õë0:∑‰¥tt≥ƒW"·eˆØt
-€/Õî€äﬁ”˝<üí82LÏïe¢ft&"eòq…∑¸ù›»O»4äz+”¡wN.˚t†ã⁄êÊd◊ ?€x*jf%©(®e¡‘[¬Á!ºíQë
-…ûq4”Ï¨ÎOŸ√"ñp…(≠Î
-€”√ÄÑ’‰ÏyÆI=aólé’	ycÏŒ<ü•˝7/ìÙØü¶ÈÚ~ó3Ù›.O“˛~õµ…˙bœ”x9?LŸ˙qŒ™á[-#å√ìße§uòrvl¥è3NÕñëˆa…€≤“@Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§∂Ó√ó'ÈÀ?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§ÉòràºZø?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥L∏Óòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥ês8¸¬≈ÏÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9áD8ºxl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñä‰L≠Ï¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñãDÄÑ¯l¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñã¶Øö•Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9áA¬ úœ”}fù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-ÛÛ™Áü¶˙Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂Z3ËG«?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥ÆA   
-ü∑jC  PA   AõºI®AlôL#ˇ˛µ*Ä X   Aü⁄E,;ˇ  7·   
-ü˘tC  P@   
-ü˚jC  PA   Aõ‡I®AlôL#ˇ˛µ*Ä Y   AûE,;ˇ  7‡   
-û=tC  P@   
-û?jC  PA   Aö$I®AlôL!ˇ˛™U  ∞   AûBE,;ˇ  7·   
-ûatC  P@   
-ûcjC  PA   AöhI®AlôLwˇ˛©ñ  o¡   AûÜE,;ˇ  7·   
-û•tC  PA   
-ûßjC  P@   Aö©I®AlôLoˇ˛ßÑ  ﬁÄ   CeàÇ ?˛Ï⁄~7V˘ı”!Ω‡ ∑+©ß¶&v.o§§pgÆœX G¸˛z–$…ñ{P#‡ N	µñ)ØNg   Aö$lA˛µ*Ä X   
-AûBxá  7‡   
-ûatC  PA   
-ûcjC  PA   AöhI®AhôL#ˇ˛µ*Ä Y   AûÜE,;ˇ  7‡   
-û•tC  P@   
-ûßjC  PA   Aö¨I®AlôL!ˇ˛™U  ∞   Aû E,;ˇ  7‡   
-ûÈtC  PA   
-ûÎjC  P@   AöI®AlôLˇ˛©ñ  o¡   AüE,;ˇ  7·   
-ü-tC  P@   
-ü/jC  PA   Aõ3I®AlôLoˇ˛ßÑ  ﬁÄ   AüQE,7ˇ  PA   
-ürjC  PA  moov   lmvhd              Ë  8                                            @                                Atrak   \tkhd                    8                                              @   @        $edts   elst         8        πmdia    mdhd              (   ¯ Uƒ     -hdlr        vide            VideoHandler   dminf   vmhd              $dinf   dref          url      $stbl   ¿stsd          ∞avc1                       @  H   H       Lavc61.3.100 libx264            ˇˇ   6avcCd ˇ· gd ¨ŸAA˚     @ÒBô` hÎ„À"¿˝¯¯    pasp         btrt      #  #   stts          >      stss             +  ctts       <                                                                                                                                                                                                                                                                                                                                                                                         stsc             >     stsz           >  ˘                                                               G    Á                                                         G                                                            stco          0   audta   Ymeta       !hdlr        mdirappl            ,ilst   $©too   data       Lavf61.1.100
-```
-
 ## `.gitignore`
 
 ```
@@ -1586,6 +640,58 @@ function renderSources(pane) {
   }
 }
 
+// ---------------------------------------------------------------- chat streaming
+// The answer is computed by the server and delivered as NDJSON frames. We render each delta
+// as it lands, so the cited sentence appears before the rest of the answer. Aborting the
+// request is a real Stop: the server never sees the terminating chunk, so the turn is not
+// written to the conversation at all.
+async function streamAnswer(path, body, { onEvent, signal }) {
+  const res = await fetch("/api" + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    let data = null;
+    try { data = await res.json(); } catch { /* non-JSON error */ }
+    const err = new Error((data && data.error) || `HTTP ${res.status}`);
+    err.code = data && data.code;
+    err.status = res.status;
+    throw err;
+  }
+
+  const handleLine = (line) => {
+    const t = line.trim();
+    if (!t) return;
+    let ev;
+    try { ev = JSON.parse(t); } catch { return; }
+    onEvent(ev);
+  };
+
+  // Browsers (and Node) expose a byte stream; fall back to a single buffered read when the
+  // environment has no streaming support, so the UI still works ‚Äî just not incrementally.
+  if (!res.body || typeof res.body.getReader !== "function") {
+    const text = await res.text();
+    for (const line of text.split("\n")) handleLine(line);
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = typeof TextDecoder !== "undefined" ? new TextDecoder() : null;
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder ? decoder.decode(value, { stream: true }) : String.fromCharCode.apply(null, value);
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      handleLine(buf.slice(0, i));
+      buf = buf.slice(i + 1);
+    }
+  }
+  handleLine(buf);
+}
+
 // ---------------------------------------------------------------- chat
 function lengthHint(length) {
   if (length === "brief") return "cites 1 passage";
@@ -1621,32 +727,69 @@ function renderChat(pane, onlyComposer = false) {
     state.busy = true;
     ta.value = "";
     scroll.append(messageEl({ role: "user", text: q }));
-    const pending = h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), spinner("Searching sources"));
+
+    // one live bubble that grows as frames arrive
+    const bodyEl = h("div", { class: "body streaming", "aria-live": "polite", "aria-busy": "true" });
+    const status = h("span", { class: "hint" }, "Searching sources‚Ä¶");
+    const stopBtn = h("button", { class: "stop", type: "button" }, "Stop");
+    const pending = h("div", { class: "msg assistant" },
+      h("div", { class: "who" }, "Forge"), bodyEl, h("div", { class: "row", style: "gap:8px;align-items:center;margin-top:6px" }, status, stopBtn));
     scroll.append(pending);
     scroll.scrollTop = scroll.scrollHeight;
+
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    let text = "";
+    let doneMsg = null;
+    stopBtn.onclick = () => { if (controller) controller.abort(); };
+
     try {
-      const r = await api.post(`/notebooks/${nb.id}/chat`, {
+      await streamAnswer(`/notebooks/${nb.id}/chat/stream`, {
         question: q,
         conversation_id: state.conversationId,
         source_ids: [...state.selected],
         style: state.style,
         length: state.length,
+      }, {
+        signal: controller ? controller.signal : undefined,
+        onEvent: (ev) => {
+          if (ev.event === "start") {
+            status.textContent = `Streaming ¬∑ ${ev.settings.style}/${ev.settings.length}`;
+          } else if (ev.event === "delta") {
+            text += ev.text;
+            bodyEl.textContent = text;
+            scroll.scrollTop = scroll.scrollHeight;
+          } else if (ev.event === "done") {
+            doneMsg = {
+              role: "assistant", text: ev.answer, citations: ev.citations,
+              abstained: ev.abstained, coverage: ev.coverage, engine: ev.engine,
+              computed: ev.computed === true, problems: ev.citation_problems,
+              settings: ev.settings, streamed: true,
+            };
+          }
+        },
       });
-      state.conversationId = r.conversation_id;
-      const msg = {
-        role: "assistant", text: r.answer, citations: r.citations,
-        abstained: r.abstained, coverage: r.coverage, engine: r.engine,
-        computed: r.computed === true, problems: r.citation_problems,
-        settings: r.settings,
-      };
-      state.messages.push({ role: "user", text: q }, msg);
-      pending.replaceWith(messageEl(msg));
+      if (!doneMsg) throw new Error("the stream ended without a final frame");
+      state.conversationId = doneMsg.conversation_id || state.conversationId;
+      state.messages.push({ role: "user", text: q }, doneMsg);
+      pending.replaceWith(messageEl(doneMsg));
     } catch (e) {
-      pending.replaceWith(h("div", { class: "msg assistant" },
-        h("div", { class: "who" }, "Forge"),
-        h("div", { class: "body", style: "color:var(--err)" }, e.message)));
+      const aborted = e && (e.name === "AbortError" || controller?.signal.aborted);
+      if (aborted) {
+        // Stop is not a failure of the answer; it is a decision not to keep it.
+        pending.replaceWith(h("div", { class: "msg assistant stopped" },
+          h("div", { class: "who" }, "Forge"),
+          h("div", { class: "body" }, text
+            ? h("span", null, text)
+            : "Stopped before any evidence was returned."),
+          h("p", { class: "hint" }, "Stopped ‚Äî this turn was not saved to the conversation.")));
+      } else {
+        pending.replaceWith(h("div", { class: "msg assistant" },
+          h("div", { class: "who" }, "Forge"),
+          h("div", { class: "body", style: "color:var(--err)" }, e.message)));
+      }
     } finally {
       state.busy = false;
+      stopBtn.onclick = null;
       scroll.scrollTop = scroll.scrollHeight;
     }
   }
@@ -2486,6 +1629,9 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.primary:hover { filter: brightness(1.08); }
 button.ghost { background: transparent; }
 button.danger:hover { border-color: var(--err); color: var(--err); }
+/* Stop is only shown while a stream is live; it is a control, not decoration. */
+button.stop { padding: 3px 10px; font-size: 12px; border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+button.stop:hover { border-color: var(--err); color: var(--err); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 
 input[type="text"], input[type="search"], textarea, select {
@@ -2626,6 +1772,13 @@ main { overflow: auto; }
 .toast.err { border-color: var(--err); }
 .empty { color: var(--muted); font-size: 13.5px; padding: 14px 0; }
 .hint { color: var(--faint); font-size: 12px; }
+/* Text that arrived as a stream is indistinguishable from a complete answer in content, but
+   while it is still arriving the caret marks it as unfinished rather than final. */
+.body.streaming::after { content: "‚ñç"; margin-left: 2px; color: var(--accent); animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { visibility: hidden; } }
+/* A stopped turn is kept visible as a record of the action, visibly not an answer. */
+.msg.stopped { border-color: color-mix(in srgb, var(--err) 35%, var(--line)); }
+.msg.stopped .body { color: var(--faint); }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .stack { display: flex; flex-direction: column; gap: 9px; }
 .sr-only {
@@ -5283,14 +4436,14 @@ use crate::domain::*;
 use crate::fetch::{self, FetchedMeta};
 use crate::grounded;
 use crate::hashes;
-use crate::http::{percent_decode, Request, Response};
+use crate::http::{percent_decode, Reply, Request, Response, StreamReply};
 use crate::ingest;
 use crate::json::{self, Value};
 use crate::notebooklm;
 use crate::providers::{self, ProviderConfig};
 use crate::obj;
 use crate::security;
-use crate::store::Store;
+use crate::store::{Db, Store};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -5348,9 +4501,121 @@ fn created(v: Value) -> Response {
     Response::json(201, &v)
 }
 
+/// One computed chat turn: everything needed to render the answer and, separately, to store
+/// it. `Clone` so a streaming reply can carry it into the post-delivery callback.
+#[derive(Clone)]
+struct ChatTurn {
+    notebook_id: String,
+    question: String,
+    user_msg: Message,
+    assistant_msg: Message,
+    engine: String,
+    engine_note: String,
+    coverage: usize,
+    problems: Vec<String>,
+    settings: grounded::AnswerOptions,
+    instructions: String,
+    conv_id: Option<String>,
+    sources_considered: usize,
+    chunks_considered: usize,
+    tables_considered: usize,
+}
+
+/// Append a turn to its conversation, creating the conversation when required. Pure with
+/// respect to the store, so it serves both the buffered route and the stream's callback.
+fn persist_into(db: &mut Db, turn: &ChatTurn) -> String {
+    let nb = turn.notebook_id.clone();
+    let cid = match turn.conv_id.clone() {
+        Some(c) if db.conversations.iter().any(|x| x.id == c && x.notebook_id == nb) => c,
+        _ => {
+            let c = new_id("conv");
+            db.conversations.push(Conversation {
+                id: c.clone(),
+                notebook_id: nb,
+                title: turn.question.chars().take(60).collect(),
+                messages: vec![],
+                created_at: turn.assistant_msg.created_at.clone(),
+                updated_at: turn.assistant_msg.created_at.clone(),
+            });
+            c
+        }
+    };
+    if let Some(conv) = db.conversations.iter_mut().find(|c| c.id == cid) {
+        conv.messages.push(turn.user_msg.clone());
+        conv.messages.push(turn.assistant_msg.clone());
+        conv.updated_at = now_iso();
+    }
+    cid
+}
+
+/// The JSON body shared by `POST .../chat` and the final frame of `POST .../chat/stream`.
+fn chat_json(turn: &ChatTurn, conversation_id: &str, persisted: bool) -> Value {
+    obj! {
+        "conversation_id" => conversation_id,
+        "message_id" => turn.assistant_msg.id.clone(),
+        "answer" => turn.assistant_msg.text.clone(),
+        "citations" => Value::Arr(turn.assistant_msg.citations.iter().map(|c| c.to_json()).collect()),
+        "abstained" => turn.assistant_msg.abstained,
+        "grounded" => true,
+        "engine" => turn.engine.clone(),
+        "engine_note" => turn.engine_note.clone(),
+        "settings" => obj! {
+            "style" => turn.settings.style.as_str(),
+            "length" => turn.settings.length.as_str(),
+            "max_citations" => turn.settings.length.max_citations() as u64,
+        },
+        "coverage" => turn.coverage as u64,
+        "citation_problems" => Value::Arr(turn.problems.iter().map(|p| Value::from(p.as_str())).collect()),
+        "sources_considered" => turn.sources_considered as u64,
+        "chunks_considered" => turn.chunks_considered as u64,
+        "tables_considered" => turn.tables_considered as u64,
+        "computed" => turn.engine == "table",
+        "note" => turn.assistant_msg.note.clone(),
+        "notebook_instructions" => turn.instructions.clone(),
+        "persisted" => persisted,
+    }
+}
+
+/// Split an answer into delivery frames at line and sentence boundaries. Every piece is a
+/// substring of the real answer, in order; nothing is added, dropped or reworded.
+fn answer_pieces(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.split_inclusive('\n') {
+        let mut cur = String::new();
+        for ch in line.chars() {
+            cur.push(ch);
+            if matches!(ch, '.' | '?' | '!' | ':' | '\n') && cur.trim().len() > 24 {
+                out.push(std::mem::take(&mut cur));
+            }
+        }
+        if !cur.trim().is_empty() {
+            out.push(cur);
+        }
+    }
+    out.into_iter().filter(|p| !p.trim().is_empty()).collect()
+}
+
 impl Api {
     pub fn new(store: Store) -> Api {
         Api { store }
+    }
+
+    /// Entry point for the server. Buffered for every route except the chat stream, which
+    /// needs chunked delivery (`Reply::Stream`). `handle()` stays available for tests and
+    /// callers that want the buffered shape.
+    pub fn route(&self, req: &Request) -> Reply {
+        let path = req.path.trim_end_matches('/').to_string();
+        let segs: Vec<&str> = path
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        if req.method == "POST" {
+            if let ["api", "notebooks", id, "chat", "stream"] = segs.as_slice() {
+                return self.chat_stream(id, req);
+            }
+        }
+        Reply::Full(self.handle(req))
     }
 
     pub fn handle(&self, req: &Request) -> Response {
@@ -6230,7 +5495,10 @@ impl Api {
     }
 
     // -------------------------------------------------------------- chat
-    fn chat(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+    /// Everything a chat turn needs, computed but **not yet stored**. Splitting this out is
+    /// what makes streaming honest: the buffered route stores immediately, while the stream
+    /// stores only once the last frame reached the client (`http::StreamReply::on_finish`).
+    fn chat_turn(&self, nb: &str, req: &Request) -> Result<ChatTurn, Response> {
         let body = parse_body(req)?;
         let question = body.str_of("question").unwrap_or("").trim().to_string();
         if question.is_empty() {
@@ -6311,8 +5579,7 @@ impl Api {
         let key = configured
             .as_ref()
             .and_then(|c| providers::read_secret(&self.store.dir, &c.id));
-        let (engine, engine_note) =
-            providers::select(configured.as_ref(), key.as_deref());
+        let (engine, engine_note) = providers::select(configured.as_ref(), key.as_deref());
 
         // A structured question ("total revenue by region") is answered by computing over
         // real cells. This runs before text retrieval because the text path can only ever
@@ -6370,56 +5637,105 @@ impl Api {
             .str_of("conversation_id")
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty());
-        let mut out_conv = String::new();
-        self.store
-            .write(|db| {
-                let cid = match conv_id {
-                    Some(c) if db.conversations.iter().any(|x| x.id == c && x.notebook_id == nb) => c,
-                    _ => {
-                        let c = new_id("conv");
-                        db.conversations.push(Conversation {
-                            id: c.clone(),
-                            notebook_id: nb.to_string(),
-                            title: question.chars().take(60).collect(),
-                            messages: vec![],
-                            created_at: now.clone(),
-                            updated_at: now.clone(),
-                        });
-                        c
-                    }
-                };
-                if let Some(conv) = db.conversations.iter_mut().find(|c| c.id == cid) {
-                    conv.messages.push(user_msg);
-                    conv.messages.push(assistant_msg.clone());
-                    conv.updated_at = now.clone();
-                }
-                out_conv = cid;
-            })
-            .map_err(|e| err(500, "storage", &e.to_string()))?;
 
-        Ok(ok(obj! {
-            "conversation_id" => out_conv,
-            "message_id" => assistant_msg.id.clone(),
-            "answer" => assistant_msg.text.clone(),
-            "citations" => Value::Arr(assistant_msg.citations.iter().map(|c| c.to_json()).collect()),
-            "abstained" => assistant_msg.abstained,
-            "grounded" => true,
-            "engine" => answer.engine.clone(),
-            "engine_note" => engine_note.clone(),
+        Ok(ChatTurn {
+            notebook_id: nb.to_string(),
+            question,
+            user_msg,
+            assistant_msg,
+            engine: answer.engine.clone(),
+            engine_note,
+            coverage: answer.coverage,
+            problems,
+            settings: answer_opts,
+            instructions,
+            conv_id,
+            sources_considered: sources.len(),
+            chunks_considered: chunks.len(),
+            tables_considered: tables.len(),
+        })
+    }
+
+    /// Append the turn to a conversation (creating one when needed) and persist.
+    fn persist_turn(&self, turn: &ChatTurn) -> std::io::Result<String> {
+        self.store.write(|db| persist_into(db, turn))
+    }
+
+    fn chat(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+        let turn = self.chat_turn(nb, req)?;
+        let conv = self
+            .persist_turn(&turn)
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        Ok(ok(chat_json(&turn, &conv, true)))
+    }
+
+    /// `POST /api/notebooks/:id/chat/stream` ‚Äî the same answer, delivered as NDJSON frames.
+    ///
+    /// The answer is extractive and computed before the first frame is written, so this is
+    /// **delivery** streaming, not token-by-token generation: the frames carry real sentences
+    /// that exist independently of the transport. What it buys is genuine: the user sees the
+    /// first cited sentence immediately, and pressing Stop aborts the connection, which means
+    /// the terminating chunk never lands, `on_finish` sees an incomplete stream, and the turn
+    /// is **not** written to the conversation. Stop therefore has a real effect.
+    fn chat_stream(&self, nb: &str, req: &Request) -> Reply {
+        let turn = match self.chat_turn(nb, req) {
+            Ok(t) => t,
+            Err(r) => return Reply::Full(r),
+        };
+        let mut frames: Vec<Vec<u8>> = Vec::new();
+        let mut frame = |v: Value| {
+            let mut line = json::to_string(&v).into_bytes();
+            line.push(b'\n');
+            frames.push(line);
+        };
+        frame(obj! {
+            "event" => "start",
+            "question" => turn.question.as_str(),
+            "engine" => turn.engine.as_str(),
             "settings" => obj! {
-                "style" => answer_opts.style.as_str(),
-                "length" => answer_opts.length.as_str(),
-                "max_citations" => answer_opts.length.max_citations() as u64,
+                "style" => turn.settings.style.as_str(),
+                "length" => turn.settings.length.as_str(),
+                "max_citations" => turn.settings.length.max_citations() as u64,
             },
-            "coverage" => answer.coverage as u64,
-            "citation_problems" => Value::Arr(problems.iter().map(|p| Value::from(p.as_str())).collect()),
-            "sources_considered" => sources.len() as u64,
-            "chunks_considered" => chunks.len() as u64,
-            "tables_considered" => tables.len() as u64,
-            "computed" => answer.engine == "table",
-            "note" => assistant_msg.note.clone(),
-            "notebook_instructions" => instructions,
-        }))
+            "delivery" => "extractive answer computed first, then delivered in frames",
+        });
+        for piece in answer_pieces(&turn.assistant_msg.text) {
+            frame(obj! { "event" => "delta", "text" => piece });
+        }
+        frame(obj! {
+            "event" => "citations",
+            "citations" => Value::Arr(turn.assistant_msg.citations.iter().map(|c| c.to_json()).collect()),
+        });
+        // The final frame repeats the buffered route's body and adds the delivery contract.
+        // `conversation_id` is deliberately empty here: it only exists once the store accepts
+        // the turn on a complete delivery, so announcing one now would be a guess.
+        let mut done = chat_json(&turn, "", false);
+        if let Value::Obj(map) = &mut done {
+            map.insert("event".into(), Value::from("done"));
+            map.insert("persisted_on_delivery".into(), Value::Bool(true));
+        }
+        frame(done);
+
+        let store = self.store.clone();
+        let turn_for_finish = turn.clone();
+        let pace = req
+            .query_get("pace_ms")
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|ms| *ms > 0 && *ms <= 1000)
+            .map(std::time::Duration::from_millis);
+        Reply::Stream(
+            StreamReply::new(200, "application/x-ndjson; charset=utf-8", frames)
+                .with_header("X-Forge-Stream", "chat/1")
+                .maybe_pace(pace)
+                .on_finish(move |complete| {
+                    if complete {
+                        // Delivery succeeded: only now does the turn become history.
+                        let _ = store.write(|db| {
+                            let _ = persist_into(db, &turn_for_finish);
+                        });
+                    }
+                }),
+        )
     }
 
     fn list_conversations(&self, nb: &str) -> Value {
@@ -9232,10 +8548,10 @@ fn answer_limited(
         }
         Style::Detailed => {
             text.push_str(&format!(
-                "{} passage{} bear on this question. Each is quoted below with its location; \
+                "{} passage{} on this question. Each is quoted below with its location; \
                  nothing is paraphrased.\n",
                 citations.len(),
-                if citations.len() == 1 { "" } else { "s" }
+                if citations.len() == 1 { " bears" } else { "s bear" }
             ));
             for (i, c) in citations.iter().enumerate() {
                 text.push_str(&format!(
@@ -10508,9 +9824,10 @@ mod tests {
 ```rust
 //! Small HTTP/1.1 server built on `std::net` (no hyper/axum: crates.io blocked).
 //!
-//! Scope is deliberate: one request per connection, `Connection: close`,
-//! hard limits on header size and body size, no chunked encoding. That is
-//! sufficient for a local single-user app and is fully covered by tests.
+//! Scope is deliberate: one request per connection, `Connection: close`, hard limits on
+//! header size and body size. Responses are either buffered (`Content-Length`) or streamed
+//! with **chunked transfer encoding** (`Reply::Stream`), which is what the chat stream uses.
+//! There is no request chunked decoding: request bodies must carry a `Content-Length`.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -10595,6 +9912,17 @@ impl Response {
         }
     }
 
+    fn common_headers() -> String {
+        let mut h = String::new();
+        h.push_str("X-Content-Type-Options: nosniff\r\n");
+        h.push_str("Cache-Control: no-store\r\n");
+        h.push_str("Referrer-Policy: no-referrer\r\n");
+        h.push_str(
+            "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'\r\n",
+        );
+        h
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut head = format!(
             "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
@@ -10603,14 +9931,7 @@ impl Response {
             self.content_type,
             self.body.len()
         );
-        head.push_str("X-Content-Type-Options: nosniff\r\n");
-        head.push_str("Cache-Control: no-store\r\n");
-        head.push_str("Referrer-Policy: no-referrer\r\n");
-        // No inline script is used by the app; inline *style attributes* are used
-        // by the renderer, hence style-src 'unsafe-inline'.
-        head.push_str(
-            "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'\r\n",
-        );
+        head.push_str(&Response::common_headers());
         for (k, v) in &self.headers {
             head.push_str(&format!("{}: {}\r\n", k, v));
         }
@@ -10619,6 +9940,133 @@ impl Response {
         out.extend_from_slice(&self.body);
         out
     }
+}
+
+
+/// What a handler returns. Most routes are `Full` (buffered, `Content-Length`); the chat
+/// stream is `Stream` (framed, `Transfer-Encoding: chunked`).
+pub enum Reply {
+    Full(Response),
+    Stream(StreamReply),
+}
+
+impl From<Response> for Reply {
+    fn from(r: Response) -> Reply {
+        Reply::Full(r)
+    }
+}
+
+/// A chunked response that is written frame by frame.
+///
+/// `on_finish` is called exactly once with `complete = true` only if the terminating
+/// zero-length chunk was accepted by the socket. That is what lets the API persist a chat
+/// turn **after** delivery: a stream the client aborted never becomes part of the
+/// conversation, so "Stop" has a real effect rather than a cosmetic one.
+pub struct StreamReply {
+    pub status: u16,
+    pub content_type: String,
+    pub headers: Vec<(String, String)>,
+    pub frames: Vec<Vec<u8>>,
+    /// Diagnostic pacing between frames (see `maybe_pace`). `None` means "as fast as the
+    /// socket accepts", which is what the UI uses.
+    pub pace: Option<Duration>,
+    pub on_finish: Option<Box<dyn FnOnce(bool) + Send + Sync>>,
+}
+
+impl StreamReply {
+    pub fn new(status: u16, content_type: &str, frames: Vec<Vec<u8>>) -> StreamReply {
+        StreamReply {
+            status,
+            content_type: content_type.to_string(),
+            headers: Vec::new(),
+            frames,
+            pace: None,
+            on_finish: None,
+        }
+    }
+
+    /// Diagnostic pacing between frames, in milliseconds. Off by default; it exists so a test
+    /// (or a person debugging the UI) can observe progressive delivery on a fast local answer.
+    /// It adds delay and nothing else ‚Äî no content depends on it.
+    pub fn maybe_pace(mut self, pace: Option<Duration>) -> StreamReply {
+        self.pace = pace;
+        self
+    }
+
+    pub fn with_header(mut self, k: &str, v: &str) -> StreamReply {
+        self.headers.push((k.to_string(), v.to_string()));
+        self
+    }
+
+    pub fn on_finish(mut self, f: impl FnOnce(bool) + Send + Sync + 'static) -> StreamReply {
+        self.on_finish = Some(Box::new(f));
+        self
+    }
+
+    fn head(&self) -> Vec<u8> {
+        let mut head = format!(
+            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",
+            self.status,
+            Response::reason(self.status),
+            self.content_type
+        );
+        head.push_str(&Response::common_headers());
+        // Proxies must not buffer a stream; nothing between us and the browser is allowed
+        // to sit on frames until the answer is finished.
+        head.push_str("X-Accel-Buffering: no\r\n");
+        for (k, v) in &self.headers {
+            head.push_str(&format!("{}: {}\r\n", k, v));
+        }
+        head.push_str("\r\n");
+        head.into_bytes()
+    }
+}
+
+/// True when the peer has closed its side of the connection.
+///
+/// `read` on a socket whose peer sent FIN returns `Ok(0)`; a timeout (the normal case, since
+/// the request body is already consumed) returns an error and means "still connected".
+fn peer_gone(stream: &TcpStream) -> bool {
+    let mut probe = match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let _ = probe.set_read_timeout(Some(Duration::from_millis(1)));
+    let mut byte = [0u8; 1];
+    matches!(probe.read(&mut byte), Ok(0))
+}
+
+/// Write a chunked response. Returns true only if every frame and the terminator were
+/// accepted. Aborts (peer gone, EPIPE, write timeout) stop the loop immediately.
+pub fn write_stream(stream: &mut TcpStream, mut sr: StreamReply) -> bool {
+    let mut complete = stream.write_all(&sr.head()).is_ok() && stream.flush().is_ok();
+    if complete {
+        for (idx, frame) in sr.frames.iter().enumerate() {
+            if idx > 0 {
+                if let Some(p) = sr.pace {
+                    std::thread::sleep(p);
+                }
+            }
+            if peer_gone(stream) {
+                complete = false;
+                break;
+            }
+            let mut buf = format!("{:X}\r\n", frame.len()).into_bytes();
+            buf.extend_from_slice(frame);
+            buf.extend_from_slice(b"\r\n");
+            if stream.write_all(&buf).is_err() || stream.flush().is_err() {
+                complete = false;
+                break;
+            }
+        }
+        if complete && (stream.write_all(b"0\r\n\r\n").is_err() || stream.flush().is_err()) {
+            complete = false;
+        }
+    }
+    if let Some(f) = sr.on_finish.take() {
+        f(complete);
+    }
+    complete
 }
 
 pub fn parse_request(raw: &[u8], peer: &str, max_body: usize) -> Result<Request, (u16, String)> {
@@ -10777,7 +10225,7 @@ pub fn read_request(stream: &mut TcpStream, peer: &str, max_body: usize) -> Resu
 /// Serve forever, one thread per connection.
 pub fn serve<F>(listener: TcpListener, handler: F, max_body: usize) -> std::io::Result<()>
 where
-    F: Fn(&Request) -> Response + Send + Sync + 'static,
+    F: Fn(&Request) -> Reply + Send + Sync + 'static,
 {
     let handler = Arc::new(handler);
     for incoming in listener.incoming() {
@@ -10795,20 +10243,30 @@ where
     Ok(())
 }
 
-fn handle_conn(mut stream: TcpStream, handler: &dyn Fn(&Request) -> Response, max_body: usize) {
+fn handle_conn(mut stream: TcpStream, handler: &dyn Fn(&Request) -> Reply, max_body: usize) {
     let peer = stream
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".into());
-    let response = match read_request(&mut stream, &peer, max_body) {
-        Ok(req) => handler(&req),
-        Err((code, msg)) => Response::json(
-            code,
-            &crate::obj! { "error" => msg.as_str(), "status" => code as u64 },
-        ),
-    };
-    let _ = stream.write_all(&response.encode());
-    let _ = stream.flush();
+    match read_request(&mut stream, &peer, max_body) {
+        Ok(req) => match handler(&req) {
+            Reply::Full(response) => {
+                let _ = stream.write_all(&response.encode());
+                let _ = stream.flush();
+            }
+            Reply::Stream(sr) => {
+                write_stream(&mut stream, sr);
+            }
+        },
+        Err((code, msg)) => {
+            let response = Response::json(
+                code,
+                &crate::obj! { "error" => msg.as_str(), "status" => code as u64 },
+            );
+            let _ = stream.write_all(&response.encode());
+            let _ = stream.flush();
+        }
+    }
 }
 
 pub fn mime_for(path: &str) -> &'static str {
@@ -10878,6 +10336,84 @@ mod tests {
     fn rejects_malformed() {
         assert!(parse_request(b"garbage", "p", 100).is_err());
         assert!(parse_request(b"GET / HTTP/1.1\r\nBadHeader\r\n\r\n", "p", 100).is_err());
+    }
+
+    #[test]
+    fn a_complete_stream_uses_chunked_framing_and_reports_delivery() {
+        use std::io::Read as _;
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel::<bool>();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            s.write_all(b"GET /api/notebooks/x/chat/stream HTTP/1.1\r\nHost: x\r\n\r\n")
+                .unwrap();
+            let mut raw = Vec::new();
+            s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let _ = s.read_to_end(&mut raw);
+            raw
+        });
+
+        let mut server = listener.accept().unwrap().0;
+        let _ = read_request(&mut server, "test", 1024);
+        let ok = write_stream(
+            &mut server,
+            StreamReply::new(
+                200,
+                "application/x-ndjson",
+                vec![b"{\"event\":\"start\"}\n".to_vec(), b"{\"event\":\"done\"}\n".to_vec()],
+            )
+            .on_finish(move |c| {
+                let _ = tx.send(c);
+            }),
+        );
+        assert!(ok, "an accepted stream must report completion");
+        assert!(rx.recv().unwrap(), "on_finish must see complete = true");
+        std::mem::drop(server); // close, so the client's read_to_end returns
+
+        let raw = client.join().unwrap();
+        let text = String::from_utf8_lossy(&raw).to_string();
+        assert!(text.contains("Transfer-Encoding: chunked"));
+        assert!(!text.contains("Content-Length"));
+        // Each frame is its own chunk: hex length, CRLF, payload, CRLF.
+        let start = format!("{:X}\r\n{{\"event\":\"start\"}}\n\r\n", "{\"event\":\"start\"}\n".len());
+        let done = format!("{:X}\r\n{{\"event\":\"done\"}}\n\r\n", "{\"event\":\"done\"}\n".len());
+        assert!(text.contains(&start), "raw: {}", text);
+        assert!(text.contains(&done), "raw: {}", text);
+        assert!(text.ends_with("0\r\n\r\n"));
+    }
+
+    #[test]
+    fn an_aborted_stream_is_not_reported_as_delivered() {
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let s = std::net::TcpStream::connect(addr).unwrap();
+            std::mem::drop(s); // hang up without reading a byte
+        });
+
+        let mut server = listener.accept().unwrap().0;
+        server.set_write_timeout(Some(Duration::from_millis(200))).unwrap();
+        client.join().unwrap();
+        // let the FIN land before the writer starts probing
+        std::thread::sleep(Duration::from_millis(50));
+
+        let (tx, rx) = mpsc::channel::<bool>();
+        let ok = write_stream(
+            &mut server,
+            StreamReply::new(200, "application/x-ndjson", vec![b"{\"event\":\"x\"}\n".to_vec()])
+                .on_finish(move |c| {
+                    let _ = tx.send(c);
+                }),
+        );
+        assert!(!ok, "a hung-up client must not count as delivery");
+        assert!(!rx.recv().unwrap(), "on_finish must see complete = false");
     }
 
     #[test]
@@ -13473,6 +13009,836 @@ pub mod web;
 pub use domain::*;
 ```
 
+## `crates/forge-core/src/media.rs`
+
+```rust
+//! Container-level media probing (ISO base media / MP4 family), written here because
+//! crates.io is unreachable (`docs/DECISIONS.md` D1) and the sandbox has no `ffprobe`.
+//!
+//! What this does **not** do: decode pixels, read captions, or transcribe audio. It reads
+//! the boxes an MP4/M4A/MOV file declares, which is enough to answer "how long is this,
+//! what streams does it have, at what size and frame rate, and is the file damaged?" ‚Äî
+//! the fields `MASTER_FORGE.md` ¬ß7.12 asks for before anyone watches a frame.
+//!
+//! Every value reported is read from the file. Where a value cannot be read the field is
+//! `None` and a warning explains why; nothing is inferred from the file extension.
+
+use crate::json::Value;
+use crate::obj;
+
+const MAX_TRACKS: usize = 64;
+const MAX_DEPTH: u32 = 8;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Track {
+    pub id: u32,
+    /// `video` | `audio` | `subtitle` | `hint` | `metadata` | the raw handler fourcc.
+    pub kind: String,
+    pub codec: String,
+    pub language: String,
+    pub timescale: u32,
+    pub duration_ms: u64,
+    pub sample_count: u32,
+    pub fps: Option<f64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// Display rotation in degrees (0/90/180/270), read from the track matrix.
+    pub rotation: i32,
+    pub channels: Option<u16>,
+    pub sample_rate: Option<u32>,
+    pub sample_format: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MediaInfo {
+    /// `mp4` | `matroska` | `mpeg-ts` | `unknown`
+    pub container: String,
+    pub brands: Vec<String>,
+    pub duration_ms: u64,
+    pub timescale: u32,
+    pub fragmented: bool,
+    pub tracks: Vec<Track>,
+    pub warnings: Vec<String>,
+}
+
+fn fourcc(b: &[u8]) -> String {
+    b.iter().map(|c| if c.is_ascii_graphic() { *c as char } else { '.' }).collect()
+}
+
+fn be32(b: &[u8]) -> u32 {
+    u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+}
+fn be16(b: &[u8]) -> u16 {
+    u16::from_be_bytes([b[0], b[1]])
+}
+fn be64(b: &[u8]) -> u64 {
+    u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+}
+
+/// One box: its fourcc and its payload (the bytes after the header).
+#[derive(Debug, Clone)]
+struct Box_<'a> {
+    kind: String,
+    payload: &'a [u8],
+    /// True when the declared size ran past the end of the buffer.
+    truncated: bool,
+}
+
+/// Split a buffer into boxes, tolerating (and reporting) truncation.
+fn split_boxes(buf: &[u8]) -> (Vec<Box_<'_>>, Vec<String>) {
+    let mut out = Vec::new();
+    let mut warnings = Vec::new();
+    let mut i = 0usize;
+    while i + 8 <= buf.len() {
+        let size32 = be32(&buf[i..]);
+        let kind = fourcc(&buf[i + 4..i + 8]);
+        let (header, mut size) = match size32 {
+            0 => (8usize, (buf.len() - i) as u64), // extends to end of file
+            1 => {
+                if i + 16 > buf.len() {
+                    warnings.push(format!("box {} is truncated before its 64-bit size", kind));
+                    break;
+                }
+                (16usize, be64(&buf[i + 8..]))
+            }
+            n => (8usize, n as u64),
+        };
+        if size < header as u64 {
+            warnings.push(format!("box {} declares an impossible size {}", kind, size));
+            break;
+        }
+        let body_start = i + header;
+        let body_end = i.saturating_add(size as usize);
+        let truncated = body_end > buf.len();
+        let payload = if body_start <= buf.len() {
+            &buf[body_start..body_end.min(buf.len())]
+        } else {
+            &buf[0..0]
+        };
+        if truncated {
+            warnings.push(format!(
+                "box {} is truncated: declares {} bytes, {} present",
+                kind,
+                size,
+                buf.len().saturating_sub(i)
+            ));
+        }
+        out.push(Box_ { kind, payload, truncated });
+        // A truncated last box ends parsing; anything after it cannot be trusted.
+        if truncated {
+            break;
+        }
+        i = body_end;
+        if out.len() > 10_000 {
+            warnings.push("too many boxes; stopped parsing".into());
+            break;
+        }
+        size = 0;
+        let _ = size;
+    }
+    (out, warnings)
+}
+
+fn find<'a>(boxes: &'a [Box_<'a>], kind: &str) -> Option<&'a Box_<'a>> {
+    boxes.iter().find(|b| b.kind == kind)
+}
+
+fn find_all<'a>(boxes: &'a [Box_<'a>], kind: &str) -> Vec<&'a Box_<'a>> {
+    boxes.iter().filter(|b| b.kind == kind).collect()
+}
+
+/// Parse `moov`/`trak`/`mdia`/`minf`/`stbl`/`udta` style containers one level down.
+fn children<'a>(b: &'a Box_<'a>) -> (Vec<Box_<'a>>, Vec<String>) {
+    split_boxes(b.payload)
+}
+
+fn is_container(kind: &str) -> bool {
+    matches!(
+        kind,
+        "moov" | "trak" | "mdia" | "minf" | "stbl" | "edts" | "udta" | "mvex" | "dinf" | "moof" | "traf"
+    )
+}
+
+// ---------------------------------------------------------------- header parsers
+
+fn parse_mvhd(p: &[u8]) -> Option<(u32, u64)> {
+    // version(1) flags(3) creation modification timescale duration
+    let version = *p.first()?;
+    if version == 1 {
+        if p.len() < 32 {
+            return None;
+        }
+        let timescale = be32(&p[20..]);
+        let duration = be64(&p[24..]);
+        Some((timescale, duration))
+    } else {
+        if p.len() < 20 {
+            return None;
+        }
+        let timescale = be32(&p[12..]);
+        let duration = be32(&p[16..]) as u64;
+        Some((timescale, duration))
+    }
+}
+
+fn parse_mdhd(p: &[u8]) -> Option<(u32, u64, String)> {
+    let version = *p.first()?;
+    let (ts_off, dur_off, dur_len) = if version == 1 { (20usize, 24usize, 8usize) } else { (12usize, 16usize, 4usize) };
+    if p.len() < dur_off + dur_len + 2 {
+        return None;
+    }
+    let timescale = be32(&p[ts_off..]);
+    let duration = if dur_len == 8 { be64(&p[dur_off..]) } else { be32(&p[dur_off..]) as u64 };
+    // packed ISO-639-2/T: three 5-bit letters, each offset by 0x60
+    let packed = be16(&p[dur_off + dur_len..]);
+    let lang: String = [(packed >> 10) & 0x1f, (packed >> 5) & 0x1f, packed & 0x1f]
+        .iter()
+        .map(|c| (0x60 + *c) as u8 as char)
+        .collect();
+    let language = if lang.chars().all(|c| c.is_ascii_lowercase()) { lang } else { "und".into() };
+    Some((timescale, duration, language))
+}
+
+fn parse_hdlr(p: &[u8]) -> Option<String> {
+    if p.len() < 12 {
+        return None;
+    }
+    Some(fourcc(&p[8..12]))
+}
+
+fn parse_tkhd(p: &[u8]) -> Option<(u32, u32, u32, i32)> {
+    // Layout (after the 4-byte version+flags):
+    //   v0: creation 4, modification 4, track_id 4, reserved 4, duration 4,
+    //       reserved 8, layer 2, alt_group 2, volume 2, reserved 2, matrix 36, width 4, height 4
+    //   v1: the two timestamps and the duration are 8 bytes wide (+12 bytes overall)
+    let version = *p.first()?;
+    let (id_off, matrix_off, size_off) = if version == 1 { (20usize, 52usize, 88usize) } else { (12usize, 40usize, 76usize) };
+    if p.len() < size_off + 8 {
+        return None;
+    }
+    let track_id = be32(&p[id_off..]);
+    let matrix = &p[matrix_off..matrix_off + 36];
+    let a = be32(&matrix[0..]) as i32;
+    let b = be32(&matrix[4..]) as i32;
+    let c = be32(&matrix[12..]) as i32;
+    let d = be32(&matrix[16..]) as i32;
+    let one = 0x0001_0000i32;
+    let rotation = if a == 0 && b == one && c == -one && d == 0 {
+        90
+    } else if a == -one && b == 0 && c == 0 && d == -one {
+        180
+    } else if a == 0 && b == -one && c == one && d == 0 {
+        270
+    } else {
+        0
+    };
+    // width/height are 16.16 fixed point display dimensions
+    let width = be32(&p[size_off..]) >> 16;
+    let height = be32(&p[size_off + 4..]) >> 16;
+    Some((track_id, width, height, rotation))
+}
+
+/// `stts` ‚Üí (sample count, total delta in media timescale units).
+fn parse_stts(p: &[u8]) -> Option<(u32, u64)> {
+    if p.len() < 8 {
+        return None;
+    }
+    let entries = be32(&p[4..]) as usize;
+    let mut samples = 0u32;
+    let mut total = 0u64;
+    for i in 0..entries {
+        let off = 8 + i * 8;
+        if off + 8 > p.len() {
+            break;
+        }
+        let count = be32(&p[off..]);
+        let delta = be32(&p[off + 4..]);
+        samples = samples.saturating_add(count);
+        // Hostile input: count and delta are both u32, so their product can exceed u64.
+        // Saturate rather than overflowing (which would panic in a debug build).
+        total = total.saturating_add((count as u64).saturating_mul(delta as u64));
+    }
+    Some((samples, total))
+}
+
+/// First entry of `stsd`: (format fourcc, width, height, channels, sample rate).
+fn parse_stsd(p: &[u8], kind: &str) -> Option<(String, Option<u32>, Option<u32>, Option<u16>, Option<u32>)> {
+    if p.len() < 16 {
+        return None;
+    }
+    let format = fourcc(&p[12..16]);
+    let entry = &p[16..];
+    if kind == "vide" {
+        // sample entry: 6 reserved + 2 data_ref + 2+2+12 pre_defined + 2 width + 2 height
+        if entry.len() < 28 {
+            return Some((format, None, None, None, None));
+        }
+        let width = be16(&entry[24..]) as u32;
+        let height = be16(&entry[26..]) as u32;
+        Some((format, Some(width), Some(height), None, None))
+    } else if kind == "soun" {
+        if entry.len() < 20 {
+            return Some((format, None, None, None, None));
+        }
+        let channels = be16(&entry[16..]);
+        let sample_size = be16(&entry[18..]);
+        let rate = if entry.len() >= 28 { be32(&entry[24..]) >> 16 } else { 0 };
+        Some((format, None, None, Some(channels), Some(rate)))
+            .map(|t| (t.0, t.1, t.2, t.3, t.4))
+            .map(|t| {
+                let _ = sample_size;
+                t
+            })
+    } else {
+        Some((format, None, None, None, None))
+    }
+}
+
+fn track_kind(handler: &str) -> String {
+    match handler {
+        "vide" => "video".into(),
+        "soun" => "audio".into(),
+        "sbtl" | "subt" | "text" => "subtitle".into(),
+        "hint" => "hint".into(),
+        "meta" => "metadata".into(),
+        other => format!("handler:{}", other),
+    }
+}
+
+fn parse_trak(b: &Box_<'_>, warnings: &mut Vec<String>) -> Option<Track> {
+    let (moov, _) = children(b);
+    let mut track = Track::default();
+
+    if let Some(tkhd) = find(&moov, "tkhd") {
+        match parse_tkhd(tkhd.payload) {
+            Some((id, w, h, rot)) => {
+                track.id = id;
+                track.rotation = rot;
+                if w > 0 {
+                    track.width = Some(w);
+                }
+                if h > 0 {
+                    track.height = Some(h);
+                }
+            }
+            None => warnings.push("a track header (tkhd) was too short to read".into()),
+        }
+    } else {
+        warnings.push("a track has no tkhd header".into());
+    }
+
+    let Some(mdia) = find(&moov, "mdia") else {
+        warnings.push("a track has no mdia box".into());
+        return Some(track);
+    };
+    let (media, _) = children(mdia);
+    if let Some(mdhd) = find(&media, "mdhd") {
+        if let Some((timescale, duration, language)) = parse_mdhd(mdhd.payload) {
+            track.timescale = timescale;
+            track.language = language;
+            if timescale > 0 {
+                track.duration_ms = duration.saturating_mul(1000) / timescale as u64;
+            }
+        }
+    }
+    let handler = find(&media, "hdlr").and_then(|h| parse_hdlr(h.payload)).unwrap_or_default();
+    track.kind = track_kind(&handler);
+
+    if let Some(minf) = find(&media, "minf") {
+        if let Some(stbl) = find(&children(minf).0, "stbl") {
+            let (table, _) = children(stbl);
+            if let Some(stsd) = find(&table, "stsd") {
+                if let Some((codec, w, h, channels, rate)) = parse_stsd(stsd.payload, &handler) {
+                    track.codec = codec;
+                    if track.kind == "video" {
+                        if track.width.is_none() {
+                            track.width = w;
+                        }
+                        if track.height.is_none() {
+                            track.height = h;
+                        }
+                    } else if track.kind == "audio" {
+                        track.channels = channels;
+                        track.sample_rate = rate;
+                    }
+                }
+            } else {
+                warnings.push("a track has no sample description (stsd)".into());
+            }
+            if let Some(stts) = find(&table, "stts") {
+                if let Some((samples, total_delta)) = parse_stts(stts.payload) {
+                    track.sample_count = samples;
+                    // frame rate = samples / media duration in seconds
+                    if track.timescale > 0 && total_delta > 0 {
+                        let seconds = total_delta as f64 / track.timescale as f64;
+                        if seconds > 0.0 {
+                            track.fps = Some((samples as f64 / seconds * 100.0).round() / 100.0);
+                        }
+                    }
+                }
+            }
+            if track.kind == "video" && table.iter().any(|b| b.kind == "stss") {
+                // `stss` present means some frames are not sync frames: real B/P frames
+                track.sample_format = Some(1);
+            }
+        }
+    }
+    Some(track)
+}
+
+/// Detect the container from magic bytes and structural evidence ‚Äî never from a file name.
+pub fn detect(data: &[u8]) -> &'static str {
+    if data.len() >= 4 && data[..4] == [0x1A, 0x45, 0xDF, 0xA3] {
+        return "matroska"; // also WebM
+    }
+    if data.len() >= 2 && data[0] == 0x47 && (data.len() < 189 || data.get(188) == Some(&0x47)) {
+        return "mpeg-ts";
+    }
+    if data.len() >= 8 {
+        let kind = fourcc(&data[4..8]);
+        if matches!(
+            kind.as_str(),
+            "ftyp" | "styp" | "moov" | "mdat" | "free" | "skip" | "wide" | "pnot"
+        ) {
+            return "mp4";
+        }
+    }
+    if data.len() >= 4 && &data[..4] == b"RIFF" && data.len() >= 12 && &data[8..12] == b"AVI " {
+        return "avi";
+    }
+    "unknown"
+}
+
+/// Read the container structure of a media file.
+pub fn inspect(data: &[u8]) -> MediaInfo {
+    let mut info = MediaInfo {
+        container: detect(data).to_string(),
+        ..Default::default()
+    };
+    if matches!(info.container.as_str(), "matroska" | "mpeg-ts" | "avi") {
+        info.warnings.push(format!(
+            "{} container: this build parses ISO base media (MP4/M4A/MOV) only; \
+             duration, streams and frame rate are unknown",
+            info.container
+        ));
+        return info;
+    }
+    if info.container != "mp4" {
+        info.warnings.push(
+            "not a recognised media container (no ftyp/moov box, no Matroska or MPEG-TS magic)".into(),
+        );
+        return info;
+    }
+
+    let (top, mut warnings) = split_boxes(data);
+
+    if let Some(ftyp) = find(&top, "ftyp") {
+        if ftyp.payload.len() >= 8 {
+            info.brands.push(fourcc(&ftyp.payload[0..4]));
+            let mut i = 8;
+            while i + 4 <= ftyp.payload.len() {
+                info.brands.push(fourcc(&ftyp.payload[i..i + 4]));
+                i += 4;
+            }
+            info.brands.retain(|b| !b.is_empty() && b != "....");
+            info.brands.dedup();
+        }
+    }
+
+    let Some(moov) = find(&top, "moov") else {
+        warnings.push("no moov box: the file is incomplete or was saved without its index".into());
+        info.warnings = warnings;
+        return info;
+    };
+    let (moov_boxes, more) = children(moov);
+    warnings.extend(more);
+
+    if find(&moov_boxes, "mvex").is_some() {
+        info.fragmented = true;
+        warnings.push(
+            "fragmented MP4 (moov/mvex): duration and frame rate may only be known after the fragments are read"
+                .into(),
+        );
+    }
+
+    match find(&moov_boxes, "mvhd").and_then(|b| parse_mvhd(b.payload)) {
+        Some((timescale, duration)) => {
+            info.timescale = timescale;
+            if timescale > 0 {
+                info.duration_ms = duration.saturating_mul(1000) / timescale as u64;
+            }
+            if duration == 0 && !info.fragmented {
+                warnings.push("movie header reports a duration of zero".into());
+            }
+        }
+        None => warnings.push("moov has no readable mvhd (movie header)".into()),
+    }
+
+    for trak in find_all(&moov_boxes, "trak").into_iter().take(MAX_TRACKS) {
+        if let Some(track) = parse_trak(trak, &mut warnings) {
+            info.tracks.push(track);
+        }
+    }
+    if info.tracks.is_empty() {
+        warnings.push("no tracks were found in the movie header".into());
+    }
+    for t in &info.tracks {
+        if t.kind == "video" && (t.width.unwrap_or(0) == 0 || t.height.unwrap_or(0) == 0) {
+            warnings.push(format!("video track {} declares no display size", t.id));
+        }
+    }
+    info.warnings = warnings;
+    let _ = is_container;
+    let _ = MAX_DEPTH;
+    info
+}
+
+impl MediaInfo {
+    pub fn to_json(&self) -> Value {
+        obj! {
+            "container" => self.container.as_str(),
+            "duration_ms" => self.duration_ms,
+            "timescale" => self.timescale as u64,
+            "fragmented" => self.fragmented,
+            "brands" => Value::Arr(self.brands.iter().map(|b| Value::from(b.as_str())).collect()),
+            "tracks" => Value::Arr(self.tracks.iter().map(|t| obj! {
+                "id" => t.id as u64,
+                "kind" => t.kind.as_str(),
+                "codec" => t.codec.as_str(),
+                "language" => t.language.as_str(),
+                "timescale" => t.timescale as u64,
+                "duration_ms" => t.duration_ms,
+                "sample_count" => t.sample_count as u64,
+                "fps" => match t.fps { Some(f) => Value::from(f), None => Value::Null },
+                "width" => t.width.map(|w| Value::from(w as u64)).unwrap_or(Value::Null),
+                "height" => t.height.map(|h| Value::from(h as u64)).unwrap_or(Value::Null),
+                "rotation" => t.rotation as i64,
+                "channels" => t.channels.map(|c| Value::from(c as u64)).unwrap_or(Value::Null),
+                "sample_rate" => t.sample_rate.map(|r| Value::from(r as u64)).unwrap_or(Value::Null),
+            }).collect()),
+            "warnings" => Value::Arr(self.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---------------- box builders (this is how the fixtures are made)
+
+    fn boxed(kind: &str, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + payload.len());
+        out.extend_from_slice(&((8 + payload.len()) as u32).to_be_bytes());
+        out.extend_from_slice(kind.as_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn large_boxed(kind: &str, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&1u32.to_be_bytes());
+        out.extend_from_slice(kind.as_bytes());
+        out.extend_from_slice(&(16u64 + payload.len() as u64).to_be_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn full(version: u8, flags: u32, payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![version];
+        out.extend_from_slice(&flags.to_be_bytes()[1..]);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn mvhd(timescale: u32, duration: u32) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&0u32.to_be_bytes()); // creation
+        p.extend_from_slice(&0u32.to_be_bytes()); // modification
+        p.extend_from_slice(&timescale.to_be_bytes());
+        p.extend_from_slice(&duration.to_be_bytes());
+        p.extend_from_slice(&[0u8; 80]); // rate, volume, matrix, etc.
+        boxed("mvhd", &full(0, 0, &p))
+    }
+
+    fn matrix(rotation: i32) -> [u8; 36] {
+        let one = 0x0001_0000i32;
+        let (a, b, c, d) = match rotation {
+            90 => (0, one, -one, 0),
+            180 => (-one, 0, 0, -one),
+            270 => (0, -one, one, 0),
+            _ => (one, 0, 0, one),
+        };
+        let mut m = [0u8; 36];
+        for (i, v) in [a, b, 0, c, d, 0, 0, 0, 0x4000_0000].iter().enumerate() {
+            m[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
+        }
+        m
+    }
+
+    fn tkhd(id: u32, w: u32, h: u32, rotation: i32) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&0u32.to_be_bytes()); // creation
+        p.extend_from_slice(&0u32.to_be_bytes()); // modification
+        p.extend_from_slice(&id.to_be_bytes());
+        p.extend_from_slice(&0u32.to_be_bytes()); // reserved
+        p.extend_from_slice(&1000u32.to_be_bytes()); // duration
+        p.extend_from_slice(&[0u8; 8]); // reserved
+        p.extend_from_slice(&0u16.to_be_bytes()); // layer
+        p.extend_from_slice(&0u16.to_be_bytes()); // alternate group
+        p.extend_from_slice(&0u16.to_be_bytes()); // volume
+        p.extend_from_slice(&0u16.to_be_bytes()); // reserved
+        p.extend_from_slice(&matrix(rotation));
+        p.extend_from_slice(&((w << 16).to_be_bytes()));
+        p.extend_from_slice(&((h << 16).to_be_bytes()));
+        boxed("tkhd", &full(0, 3, &p))
+    }
+
+    fn mdhd(timescale: u32, duration: u32) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&0u32.to_be_bytes()); // creation
+        p.extend_from_slice(&0u32.to_be_bytes()); // modification
+        p.extend_from_slice(&timescale.to_be_bytes());
+        p.extend_from_slice(&duration.to_be_bytes());
+        // "eng" packed as 5-bit letters
+        let lang: u16 = (b'e' as u16 - 0x60) << 10 | (b'n' as u16 - 0x60) << 5 | (b'g' as u16 - 0x60);
+        p.extend_from_slice(&lang.to_be_bytes());
+        p.extend_from_slice(&0u16.to_be_bytes());
+        boxed("mdhd", &full(0, 0, &p))
+    }
+
+    fn hdlr(kind: &str) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&0u32.to_be_bytes()); // pre_defined
+        p.extend_from_slice(kind.as_bytes());
+        p.extend_from_slice(&[0u8; 12]);
+        p.push(0);
+        boxed("hdlr", &full(0, 0, &p))
+    }
+
+    fn video_stsd(codec: &str, w: u16, h: u16) -> Vec<u8> {
+        let mut entry = Vec::new();
+        entry.extend_from_slice(&[0u8; 6]); // reserved
+        entry.extend_from_slice(&1u16.to_be_bytes()); // data ref index
+        entry.extend_from_slice(&[0u8; 16]); // pre_defined + reserved
+        entry.extend_from_slice(&w.to_be_bytes());
+        entry.extend_from_slice(&h.to_be_bytes());
+        entry.extend_from_slice(&[0u8; 50]); // resolutions, compressor name, depth
+        let mut sample = Vec::new();
+        sample.extend_from_slice(&((8 + entry.len()) as u32).to_be_bytes());
+        sample.extend_from_slice(codec.as_bytes());
+        sample.extend_from_slice(&entry);
+        let mut p = Vec::new();
+        p.extend_from_slice(&1u32.to_be_bytes()); // entry count
+        p.extend_from_slice(&sample);
+        boxed("stsd", &full(0, 0, &p))
+    }
+
+    fn audio_stsd(codec: &str, channels: u16, rate: u32) -> Vec<u8> {
+        let mut entry = Vec::new();
+        entry.extend_from_slice(&[0u8; 6]);
+        entry.extend_from_slice(&1u16.to_be_bytes());
+        entry.extend_from_slice(&0u16.to_be_bytes()); // version
+        entry.extend_from_slice(&0u16.to_be_bytes()); // revision
+        entry.extend_from_slice(&0u32.to_be_bytes()); // vendor
+        entry.extend_from_slice(&channels.to_be_bytes());
+        entry.extend_from_slice(&16u16.to_be_bytes()); // sample size
+        entry.extend_from_slice(&0u16.to_be_bytes());
+        entry.extend_from_slice(&0u16.to_be_bytes());
+        entry.extend_from_slice(&((rate << 16).to_be_bytes()));
+        let mut sample = Vec::new();
+        sample.extend_from_slice(&((8 + entry.len()) as u32).to_be_bytes());
+        sample.extend_from_slice(codec.as_bytes());
+        sample.extend_from_slice(&entry);
+        let mut p = Vec::new();
+        p.extend_from_slice(&1u32.to_be_bytes());
+        p.extend_from_slice(&sample);
+        boxed("stsd", &full(0, 0, &p))
+    }
+
+    fn stts(entries: &[(u32, u32)]) -> Vec<u8> {
+        let mut p = Vec::new();
+        p.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+        for (count, delta) in entries {
+            p.extend_from_slice(&count.to_be_bytes());
+            p.extend_from_slice(&delta.to_be_bytes());
+        }
+        boxed("stts", &full(0, 0, &p))
+    }
+
+    fn trak(
+        stsd: Vec<u8>,
+        handler: &str,
+        timescale: u32,
+        duration: u32,
+        fps: u32,
+        w: u32,
+        h: u32,
+        rot: i32,
+    ) -> Vec<u8> {
+        // one stts entry: `frames` samples of `timescale / fps` media units each
+        let delta = (timescale / fps).max(1);
+        let frames = duration / delta;
+        let stbl = boxed("stbl", &[stsd, stts(&[(frames, delta)])].concat());
+        let minf = boxed("minf", &stbl);
+        let mdia = boxed("mdia", &[mdhd(timescale, duration), hdlr(handler), minf].concat());
+        boxed("trak", &[tkhd(1, w, h, rot), mdia].concat())
+    }
+
+    fn sample_mp4(rotation: i32) -> Vec<u8> {
+        let ftyp = boxed("ftyp", b"isomisomiso2mp41");
+        // 6 s movie, video at 10 fps, stereo 48 kHz audio
+        let video = trak(video_stsd("avc1", 320, 240), "vide", 30_000, 180_000, 10, 320, 240, rotation);
+        let audio = trak(audio_stsd("mp4a", 2, 48_000), "soun", 48_000, 288_000, 48_000, 0, 0, 0);
+        let moov = boxed("moov", &[mvhd(1000, 6000), video, audio].concat());
+        let mdat = boxed("mdat", &[0u8; 16]);
+        [ftyp, moov, mdat].concat()
+    }
+
+    // ---------------- tests
+
+    #[test]
+    fn reads_duration_streams_size_and_frame_rate() {
+        let info = inspect(&sample_mp4(0));
+        assert_eq!(info.container, "mp4");
+        assert_eq!(info.duration_ms, 6000, "6 s movie from mvhd");
+        assert!(info.brands.iter().any(|b| b == "isom"));
+        assert_eq!(info.tracks.len(), 2);
+
+        let video = info.tracks.iter().find(|t| t.kind == "video").expect("video track");
+        assert_eq!(video.codec, "avc1");
+        assert_eq!(video.width, Some(320));
+        assert_eq!(video.height, Some(240));
+        assert_eq!(video.fps, Some(10.0), "180 samples over 6 s of media time");
+        assert_eq!(video.duration_ms, 6000);
+        assert_eq!(video.language, "eng");
+        assert_eq!(video.rotation, 0);
+        assert_eq!(video.sample_count, 60, "6 s at 10 fps is 60 samples");
+
+        let audio = info.tracks.iter().find(|t| t.kind == "audio").expect("audio track");
+        assert_eq!(audio.codec, "mp4a");
+        assert_eq!(audio.channels, Some(2));
+        assert_eq!(audio.sample_rate, Some(48_000));
+        assert!(info.warnings.is_empty(), "{:?}", info.warnings);
+    }
+
+    #[test]
+    fn reads_display_rotation_from_the_track_matrix() {
+        assert_eq!(inspect(&sample_mp4(90)).tracks[0].rotation, 90);
+        assert_eq!(inspect(&sample_mp4(180)).tracks[0].rotation, 180);
+        assert_eq!(inspect(&sample_mp4(270)).tracks[0].rotation, 270);
+    }
+
+    #[test]
+    fn json_reports_absent_values_as_null_not_zero() {
+        let info = inspect(&sample_mp4(0));
+        let v = info.to_json();
+        let tracks = v.get("tracks").and_then(|t| t.as_arr()).cloned().unwrap_or_default();
+        let audio = tracks.iter().find(|t| t.str_of("kind") == Some("audio")).unwrap();
+        assert!(audio.get("width").map(|w| w.is_null()).unwrap_or(false), "audio has no width");
+        let video = tracks.iter().find(|t| t.str_of("kind") == Some("video")).unwrap();
+        assert!(video.get("channels").map(|c| c.is_null()).unwrap_or(false), "video has no channels");
+        assert_eq!(video.get("fps").and_then(|f| f.as_f64()), Some(10.0));
+    }
+
+    #[test]
+    fn truncated_file_is_reported_not_guessed() {
+        let full = sample_mp4(0);
+        let cut = &full[..full.len() - 40];
+        let info = inspect(cut);
+        assert!(
+            info.warnings.iter().any(|w| w.contains("truncated") || w.contains("no moov")),
+            "{:?}",
+            info.warnings
+        );
+    }
+
+    #[test]
+    fn missing_moov_is_a_warning_and_no_tracks() {
+        let only_ftyp = boxed("ftyp", b"isomisom");
+        let info = inspect(&only_ftyp);
+        assert_eq!(info.container, "mp4");
+        assert!(info.tracks.is_empty());
+        assert!(info.warnings.iter().any(|w| w.contains("no moov")), "{:?}", info.warnings);
+    }
+
+    #[test]
+    fn fragmented_mp4_is_flagged() {
+        let mut moov_payload = mvhd(1000, 0);
+        moov_payload.extend(boxed("mvex", &[]));
+        let file = [boxed("ftyp", b"isomiso5"), boxed("moov", &moov_payload)].concat();
+        let info = inspect(&file);
+        assert!(info.fragmented);
+        assert!(info.warnings.iter().any(|w| w.contains("fragmented")), "{:?}", info.warnings);
+    }
+
+    #[test]
+    fn other_containers_are_named_but_not_parsed() {
+        let matroska = [0x1Au8, 0x45, 0xDF, 0xA3, 0, 0, 0, 0];
+        let info = inspect(&matroska);
+        assert_eq!(info.container, "matroska");
+        assert!(info.tracks.is_empty(), "no invented tracks");
+        assert!(info.warnings[0].contains("ISO base media"), "{:?}", info.warnings);
+
+        assert_eq!(detect(b"not media at all"), "unknown");
+        let unknown = inspect(b"hello world, definitely not a video");
+        assert_eq!(unknown.container, "unknown");
+        assert!(!unknown.warnings.is_empty());
+    }
+
+    #[test]
+    fn absurd_sample_tables_saturate_instead_of_overflowing() {
+        // Two entries of (0xFFFFFFFF samples, 0xFFFFFFFF delta) cannot be represented in u64;
+        // in a debug build the multiply would panic. `parse_stts` must clamp and keep going.
+        let mut p = vec![0, 0, 0, 0, 0, 0, 0, 2];
+        for _ in 0..2 {
+            p.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        }
+        let (samples, total) = parse_stts(&p).expect("well-formed header");
+        assert_eq!(samples, u32::MAX, "sample count saturates at the u32 ceiling");
+        assert_eq!(total, u64::MAX, "total duration saturates instead of wrapping to a small number");
+        // A truncated entry list stops at the last complete entry rather than reading past
+        // the buffer; here the first entry straddles the cut, so nothing is counted.
+        assert_eq!(parse_stts(&p[..12]), Some((0, 0)));
+        // One full entry is readable even when the second is cut in half.
+        assert_eq!(
+            parse_stts(&p[..16]),
+            Some((u32::MAX, (u32::MAX as u64) * (u32::MAX as u64)))
+        );
+    }
+
+    #[test]
+    fn sixty_four_bit_box_sizes_are_understood() {
+        let payload = [mvhd(1000, 2500)].concat();
+        let file = [
+            boxed("ftyp", b"isomiso5"),
+            large_boxed("moov", &payload),
+        ]
+        .concat();
+        let info = inspect(&file);
+        assert_eq!(info.duration_ms, 2500, "{:?}", info.warnings);
+    }
+
+    #[test]
+    fn a_real_encoder_output_is_read_correctly() {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sample.mp4");
+        let Ok(bytes) = std::fs::read(&p) else {
+            eprintln!("sample.mp4 fixture absent; skipping the real-encoder check");
+            return;
+        };
+        let info = inspect(&bytes);
+        assert_eq!(info.container, "mp4");
+        let video = info.tracks.iter().find(|t| t.kind == "video").expect("video track");
+        // the fixture is generated by the command recorded in tests/fixtures/make_media.py
+        assert_eq!(video.codec, "avc1");
+        assert_eq!(video.width, Some(320));
+        assert_eq!(video.height, Some(240));
+        assert_eq!(video.fps, Some(10.0), "{:?}", video);
+        assert!((5_900..=6_200).contains(&info.duration_ms), "duration {}", info.duration_ms);
+    }
+}
+```
+
 ## `crates/forge-core/src/notebooklm.rs`
 
 ```rust
@@ -15415,7 +15781,7 @@ use crate::obj;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Default, Clone)]
 pub struct Db {
@@ -15430,9 +15796,13 @@ pub struct Db {
     pub tables: Vec<crate::tables::Table>,
 }
 
+/// `Clone` is cheap and shares the same in-memory database (`Arc<Mutex<Db>>`). It exists so a
+/// streaming response can take a handle it will use *after* the request handler returns, when
+/// the answer has actually reached the client (see `http::StreamReply::on_finish`).
+#[derive(Clone)]
 pub struct Store {
     pub dir: PathBuf,
-    inner: Mutex<Db>,
+    inner: Arc<Mutex<Db>>,
 }
 
 impl Store {
@@ -15444,7 +15814,7 @@ impl Store {
             Ok(text) => decode_db(&text).unwrap_or_default(),
             Err(_) => Db::default(),
         };
-        let s = Store { dir, inner: Mutex::new(db) };
+        let s = Store { dir, inner: Arc::new(Mutex::new(db)) };
         if !s.path().exists() {
             s.save()?;
         }
@@ -17689,6 +18059,7 @@ mod tests {
 use forge_core::api::Api;
 use forge_core::http::{serve, Request};
 use forge_core::json::{self, Value};
+use forge_core::obj;
 use forge_core::store::Store;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -17709,9 +18080,9 @@ impl Server {
         std::thread::spawn(move || {
             let handler = move |req: &Request| {
                 if req.path.starts_with("/api") {
-                    api.handle(req)
+                    api.route(req)
                 } else {
-                    forge_core::web::serve_static(&web, &req.path)
+                    forge_core::http::Reply::Full(forge_core::web::serve_static(&web, &req.path))
                 }
             };
             let _ = serve(listener, handler, forge_core::http::DEFAULT_MAX_BODY);
@@ -18847,6 +19218,83 @@ fn chat_style_and_length_are_effective_and_validated() {
     assert_eq!(messages, 10, "five accepted asks (2 messages each), rejections store nothing");
 }
 
+
+impl Server {
+    /// Open a chat stream and read it like a browser does: headers first, then chunked frames.
+    /// `stop_after` limits how many chunks are read before the socket is dropped, which is
+    /// exactly what the Stop button does.
+    fn stream_chat(
+        &self,
+        nb: &str,
+        body: &Value,
+        stop_after: Option<usize>,
+    ) -> (Vec<String>, String, bool) {
+        let mut s = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let payload = json::to_string(body).into_bytes();
+        let head = format!(
+            "POST /api/notebooks/{}/chat/stream HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            nb,
+            payload.len()
+        );
+        s.write_all(head.as_bytes()).unwrap();
+        s.write_all(&payload).unwrap();
+
+        let mut raw = Vec::new(); // response bytes not yet consumed
+        let mut body = Vec::new(); // chunked body bytes not yet decoded
+        let mut buf = [0u8; 4096];
+        let mut frames: Vec<String> = Vec::new();
+        let mut finished = false;
+        let mut head_done = false;
+        loop {
+            if let Some(limit) = stop_after {
+                if frames.len() >= limit {
+                    break; // hang up mid-stream: the cancellation path
+                }
+            }
+            match s.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    raw.extend_from_slice(&buf[..n]);
+                    if !head_done {
+                        if let Some(h) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                            body.extend_from_slice(&raw[h + 4..]);
+                            raw.clear();
+                            head_done = true;
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        body.append(&mut raw);
+                    }
+                    while let Some((frame, consumed)) = take_chunk(&body) {
+                        body.drain(..consumed);
+                        if frame.is_empty() {
+                            finished = true;
+                        } else {
+                            frames.push(frame);
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        (frames, String::from_utf8_lossy(&raw).to_string(), finished)
+    }
+}
+
+/// Pull one chunk out of a chunked-encoding buffer: `hex\r\npayload\r\n`.
+fn take_chunk(buf: &[u8]) -> Option<(String, usize)> {
+    let crlf = buf.windows(2).position(|w| w == b"\r\n")?;
+    let size = usize::from_str_radix(std::str::from_utf8(&buf[..crlf]).ok()?.trim(), 16).ok()?;
+    let start = crlf + 2;
+    if buf.len() < start + size + 2 {
+        return None;
+    }
+    let body = String::from_utf8_lossy(&buf[start..start + size]).to_string();
+    Some((body, start + size + 2))
+}
+
 /// Media metadata is read from the container, and the response says what was *not* done.
 #[test]
 fn media_metadata_is_read_without_decoding_frames() {
@@ -18905,6 +19353,151 @@ fn media_metadata_is_read_without_decoding_frames() {
     assert_eq!(st, 400);
     let (st, _) = s.json("GET", "/api/media/inspect", None);
     assert_eq!(st, 404, "GET is not routed");
+}
+
+/// CHAT-06 / journey: the answer streams, and a stream the client abandons stores nothing.
+#[test]
+fn chat_streams_frames_and_only_persists_when_delivery_completes() {
+    let dir = tempdir("stream");
+    let s = Server::start(dir);
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj! { "title" => "stream" }));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj! {
+            "title" => "calvin",
+            "text" => "The Calvin cycle fixes carbon dioxide. RuBisCO catalyses carbon fixation. \
+                       Light reactions produce ATP and NADPH in the thylakoid membrane."
+        }),
+    );
+
+    // 1. a complete stream: frames arrive in order and the turn becomes history
+    let (frames, _, finished) = s.stream_chat(
+        &nb_id,
+        &obj! { "question" => "what does the calvin cycle fix", "style" => "detailed", "length" => "brief" },
+        None,
+    );
+    assert!(finished, "the terminating chunk must arrive");
+    let events: Vec<&str> = frames.iter().map(|f| f.as_str()).collect();
+    assert!(events[0].contains("\"event\":\"start\""), "first frame: {}", events[0]);
+    assert!(events.iter().any(|f| f.contains("\"event\":\"delta\"")));
+    assert_eq!(
+        events.iter().filter(|f| f.contains("\"event\":\"done\"")).count(),
+        1,
+        "exactly one done frame"
+    );
+    let done = json::parse(frames.last().unwrap()).unwrap();
+    assert_eq!(done.str_of("event"), Some("done"));
+    assert_eq!(done.str_of("engine"), Some("extractive"));
+    assert_eq!(done.get("settings").and_then(|s| s.str_of("length")), Some("brief"));
+    assert_eq!(
+        done.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()),
+        Some(1),
+        "brief = one citation, same budget as the buffered route"
+    );
+
+    // every delta is a real substring of the answer, in order ‚Äî no invented words
+    let answer = done.str_of("answer").unwrap();
+    let mut cursor = 0usize;
+    for f in &frames {
+        let v = json::parse(f).unwrap();
+        if v.str_of("event") == Some("delta") {
+            let piece = v.str_of("text").unwrap();
+            let at = answer[cursor..]
+                .find(piece)
+                .unwrap_or_else(|| panic!("delta {:?} is not in the answer", piece));
+            cursor += at + piece.len();
+        }
+    }
+
+    // the persisted turn matches what was delivered
+    let (_, convs) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    let list = convs.get("conversations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(list.len(), 1, "a delivered stream is stored");
+    assert_eq!(list[0].get("message_count").and_then(|m| m.as_f64()), Some(2.0));
+
+    // 2. a second complete stream appends to the *same* conversation when asked to
+    let conv_id = list[0].str_of("id").unwrap_or("").to_string();
+    let (frames2, _, finished2) = s.stream_chat(
+        &nb_id,
+        &obj! { "question" => "what produces ATP", "conversation_id" => conv_id.clone() },
+        None,
+    );
+    assert!(!frames2.is_empty() && finished2);
+    let (_, c2) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    let l2 = c2.get("conversations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(l2.len(), 1, "the stream honours conversation_id instead of starting a new one");
+    assert_eq!(l2[0].get("message_count").and_then(|m| m.as_f64()), Some(4.0));
+
+    // 3. an abandoned stream: pace the frames, read one, hang up
+
+    let (partial, _, finished3) = {
+        let mut socket = TcpStream::connect(("127.0.0.1", s.port)).unwrap();
+        socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let payload = json::to_string(&obj! {
+            "question" => "what catalyses carbon fixation",
+            "conversation_id" => conv_id.clone(),
+        })
+        .into_bytes();
+        let head = format!(
+            "POST /api/notebooks/{}/chat/stream?pace_ms=40 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            nb_id,
+            payload.len()
+        );
+        socket.write_all(head.as_bytes()).unwrap();
+        socket.write_all(&payload).unwrap();
+        let mut got = Vec::new();
+        let mut body = Vec::new();
+        let mut buf = [0u8; 512];
+        let mut frames: Vec<String> = Vec::new();
+        let mut head_done = false;
+        // read until the first whole frame arrives, then hang up: this is the Stop button
+        while frames.is_empty() {
+            let n = socket.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buf[..n]);
+            if !head_done {
+                if let Some(h) = got.windows(4).position(|w| w == b"\r\n\r\n") {
+                    body.extend_from_slice(&got[h + 4..]);
+                    head_done = true;
+                }
+                continue;
+            }
+            body.extend_from_slice(&buf[..n]);
+            while let Some((f, used)) = take_chunk(&body) {
+                body.drain(..used);
+                if !f.is_empty() {
+                    frames.push(f);
+                }
+            }
+        }
+        drop(socket); // Stop
+        (frames, String::new(), false)
+    };
+    assert!(!partial.is_empty(), "at least the start frame arrived before Stop");
+    assert!(!finished3, "the stream was cut short");
+    std::thread::sleep(Duration::from_millis(600)); // let the writer notice the FIN
+
+    let (_, convs2) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    let list2 = convs2.get("conversations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(list2.len(), 1, "Stop must not create a second conversation");
+    assert_eq!(
+        list2[0].get("message_count").and_then(|m| m.as_f64()),
+        Some(4.0),
+        "Stop must not append a message: the aborted turn is not history"
+    );
+
+    // 4. an invalid style never opens a stream at all
+    let (status, body) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat/stream", nb_id),
+        Some(obj! { "question" => "anything", "style" => "shouty" }),
+    );
+    assert_eq!(status, 422);
+    assert_eq!(body.str_of("code"), Some("bad_style"));
 }
 ```
 
@@ -19172,7 +19765,7 @@ mod tests {
 mod binary;
 
 use forge_core::api::Api;
-use forge_core::http::{serve, Response};
+use forge_core::http::{serve, Reply};
 use forge_core::web::serve_static;
 use forge_core::store::Store;
 use std::net::TcpListener;
@@ -19212,14 +19805,14 @@ fn main() {
     let web = web_dir.canonicalize().unwrap_or(web_dir.clone());
     let web_for_handler = web.clone();
 
-    let handler = move |req: &forge_core::http::Request| -> Response {
+    let handler = move |req: &forge_core::http::Request| -> Reply {
         if req.path == "/api/binary/inspect" {
-            return binary::handle(req);
+            return Reply::Full(binary::handle(req));
         }
         if req.path.starts_with("/api") {
-            return api.handle(req);
+            return api.route(req);
         }
-        serve_static(&web_for_handler, &req.path)
+        Reply::Full(serve_static(&web_for_handler, &req.path))
     };
 
     if let Err(e) = serve(listener, handler, forge_core::http::DEFAULT_MAX_BODY) {
@@ -19777,6 +20370,37 @@ WebM "a bit" ‚Äî half a container parser produces confident nonsense.
 `video: unsupported` with the reason. Frame-based research stays possible and reproducible via
 the committed commands, and its limits (no vision model, no authorized footage) are stated in
 `VIDEO_RESEARCH.md` rather than papered over.
+
+## D19 ‚Äî Streaming is delivery streaming; Stop cancels persistence, not computation
+
+**Date.** 2026-10-31. **Background.** ¬ß7.5 and CHAT-06 ask for streamed answers and a stop
+control. Forge's answer engine is extractive: the answer, its citations and its validation are
+all complete before anything is sent. A model provider is not reachable, so "token-by-token"
+would be a costume.
+
+**Chosen.** `POST /api/notebooks/:id/chat/stream` writes NDJSON frames over genuine chunked
+transfer encoding. The `start` frame states the delivery model in plain words
+(`"extractive answer computed first, then delivered in frames"`). The frames carry real
+substrings of the final answer, in order ‚Äî no filler, no sleeps in production, no invented
+"thinking" events. The UI renders each delta as it lands, which is why the first cited sentence
+appears before the answer ends.
+
+**Stop.** The server calls `on_finish(complete)` after writing the terminating chunk. The turn is
+written to the conversation **only** when `complete` is true. A client that aborts (the Stop
+button, a closed tab, a dropped connection) therefore leaves no half-answer in history: the
+conversation shows exactly what the user kept. Two tests assert this, one at the socket level
+(`http::tests::an_aborted_stream_is_not_reported_as_delivered`) and one end-to-end that hangs up
+mid-stream and checks the message count (`chat_streams_frames_and_only_persists_when_delivery_completes`).
+
+**Rejected.** (a) Persisting first and deleting on abort ‚Äî a crash between the two leaves a
+ghost answer the user explicitly stopped. (b) Fake pacing in production so the stream "feels"
+like a model. A diagnostic `?pace_ms=` exists for tests and debugging; it is documented, capped
+at 1 s, and never used by the client. (c) Server-sent events ‚Äî no reason to add a second framing
+format when NDJSON over chunked encoding is simpler and scriptable with `curl -N`.
+
+**Consequences.** A network drop after the answer is fully written but before the client reads
+the last chunk loses that turn. That is the same trade-off the reference product's stop button
+makes, and it is stated in `UNKNOWN_AND_LIMITATIONS.md` rather than hidden.
 ```
 
 ## `docs/FEATURE_PARITY.md`
@@ -22862,7 +23486,7 @@ curl is out of scope for this layer.
 ```markdown
 # Status ‚Äî Forge (NLLM2)
 
-Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length, media metadata).
+Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length, media metadata, chat streaming + Stop).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -22881,13 +23505,14 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **197 passing, 0 failing** (26 `bininspect` + 152 lib + 14 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **72 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **200 passing, 0 failing** (26 `bininspect` + 154 lib + 15 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **79 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
 | Chat style / length | `style` (evidence ¬∑ concise ¬∑ detailed) and `length` (brief ¬∑ standard ¬∑ thorough = 1/2/4 citations) are validated, echoed back, and change the rendered answer without ever changing which passages are cited | `grounded::AnswerOptions` + e2e `chat_style_and_length_are_effective_and_validated` |
 | Source Guide | per-source orientation: verbatim quoted headline + summary with locators, recurring terms (incl. two-word phrases), real outline (sections/sheets), suggested questions | `guide` (8 tests) + e2e `source_guide_quotes_the_source_and_refuses_when_empty` + UI smoke (9 assertions) |
+| Streaming answers + Stop | `POST /api/notebooks/:id/chat/stream` delivers the answer as NDJSON frames over real chunked transfer encoding; the UI renders each frame as it lands and shows a Stop control. Stop aborts the connection, the terminating chunk never arrives, and the server does **not** write the turn to the conversation | `http::StreamReply` (2 unit tests), e2e `chat_streams_frames_and_only_persists_when_delivery_completes` (aborts a live stream, asserts message count unchanged), 7 UI assertions |
 | Media metadata | MP4/M4A/MOV box tree parsed by hand: duration, per-track kind/codec/language/timescale/duration/sample count/fps/display size/rotation/channels/sample rate; truncation, missing `moov` and fragmented files produce warnings; unknown values are `null`, never `0` | `media` (10 tests) + e2e `media_metadata_is_read_without_decoding_frames`; cross-checked against `ffmpeg -i` on a fixture we encoded |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` ‚Üí 200 |
 | PDF | 2-page fixtures (stored + Flate) ‚Üí page locators | `ingest::pdf` tests |
@@ -22953,15 +23578,15 @@ total          186
 | `.xls` (BIFF), ODS, Google Sheets | no parser written; binary formats out of scope for now | upload is rejected by kind detection with a clear error, never half-indexed |
 | Data Tables artifact (schema-inferred extraction, charts) | not implemented | reported as `planned`; existing spreadsheets are queried directly instead |
 | Model-written source summaries | no reachable LLM (no TLS client, no key) | the Source Guide is **extractive**: every line is a quotation with its locator, and the payload says `generated_by: extractive`, `model: null` |
-| Streaming / stop | the HTTP layer is a hand-written buffered responder, so answers return whole | not claimed anywhere; `settings` states what was applied, and the answer is instant because it is extractive |
+| Token-by-token generation | there is no model to generate tokens; the extractive answer exists in full before the first frame | the stream is honest about it: the `start` frame says `delivery: "extractive answer computed first, then delivered in frames"`, and the transport is genuinely chunked. Frames carry real sentences, never placeholders |
 | Style / length for a remote provider | no provider is reachable | the citation budget is passed to a provider when one is used; the style vocabulary is documented as extractive-engine only |
 | Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps
 
-1. Streaming answers + stop (CHAT-06) ‚Äî the responder is buffered today.
-2. EPUB ingestion ‚Äî the ZIP reader already exists; needs XHTML container mapping.
-3. Conversation export as Markdown; artifact re-generation on source change.
+1. EPUB ingestion ‚Äî the ZIP reader already exists; needs XHTML container mapping.
+2. Conversation export as Markdown; artifact re-generation on source change.
+3. Verify the ¬ß14 acceptance journeys A‚ÄìK one by one and close the gaps (in progress).
 4. Wire an HTTPS client (requires a TLS-capable toolchain/route) to switch URL
    ingestion and remote providers from "configured but unavailable" to working.
 5. Optional: local embedding index once a model can be shipped offline.
@@ -22977,7 +23602,7 @@ total          186
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 197 tests: 152 lib + 14 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 200 tests: 154 lib + 15 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -22985,10 +23610,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 72 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 79 assertions
 ```
 
-## Unit tests (152) ‚Äî exact names from `cargo test --lib -- --list`
+## Unit tests (154) ‚Äî exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -23006,10 +23631,15 @@ column 3, survives JSON, and a timestamp locator renders `01:15`).
 `corrupt_db_does_not_panic`, `tables_survive_a_restart_with_cells_intact` (grids, precision,
 formula text and the computed total are identical after a reopen).
 
-### `http` (6)
+### `http` (8)
 `parses_query_and_percent_encoding`, `encodes_response_with_content_length`,
 `rejects_malformed`, `rejects_oversized_body`, `mime_types`,
-`responses_carry_security_headers`.
+`responses_carry_security_headers`,
+`a_complete_stream_uses_chunked_framing_and_reports_delivery`,
+`an_aborted_stream_is_not_reported_as_delivered` ‚Äî a real socket pair: chunk sizes, `\r\n`
+framing, the `0\r\n\r\n` terminator, and the delivery callback that decides whether a chat
+turn is stored. The abort case hangs up mid-stream and asserts the callback sees
+`complete = false`.
 
 ### `inflate` (2)
 `stored_block`, `rejects_garbage`. Fixed/dynamic Huffman are exercised indirectly by
@@ -23084,7 +23714,7 @@ them, because it is unreachable.
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
 
-## End-to-end HTTP tests (14, real sockets)
+## End-to-end HTTP tests (15, real sockets)
 
 | Test | Proves |
 |---|---|
@@ -23094,6 +23724,7 @@ them, because it is unreachable.
 | `imports_office_formats_over_http` | DOCX/PPTX/XLSX upload ‚Üí correct `kind` and locator kind; a DOCX answer carries a `paragraph` citation |
 | `source_guide_quotes_the_source_and_refuses_when_empty` | guide is extractive (`model: null`); headline is a substring of a stored chunk; every summary line resolves to a real chunk + locator; unknown source 404; unextractable source 409 |
 | `chat_style_and_length_are_effective_and_validated` | `settings` echoed; brief ‚Üí 1 citation; detailed shows per-quote source + locator; concise and detailed cite the same passages; unknown style/length ‚Üí 422 and nothing stored |
+| `chat_streams_frames_and_only_persists_when_delivery_completes` | NDJSON frames in order (`start` ‚Üí `delta`* ‚Üí `citations` ‚Üí `done`); every delta is a substring of the final answer, in order; `conversation_id` on a second stream appends instead of starting a new conversation; **a stream the client hangs up on is not stored** (message count unchanged after the abort); an invalid style returns `422` without opening a stream |
 | `media_metadata_is_read_without_decoding_frames` | `sample.mp4` ‚Üí mp4, ~6200 ms, avc1 320√ó240 @ 10 fps, `decoded_frames: 0`, `transcript: "not produced"`; Matroska bytes ‚Üí `matroska` with **no** invented tracks; empty body 400; GET 404 |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
@@ -23277,6 +23908,23 @@ compiled manifest, DEX inventory + finding categories, PE sections/imports/entro
 ELF identification, APK report assembly, format detection, base64 round-trip, and the HTTP
 endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
 
+## Chat streaming and Stop (2 unit tests + 1 e2e + 7 UI assertions)
+
+Transport: `http::StreamReply` + `write_stream`. The response is `Transfer-Encoding: chunked`
+with a `<hex>\r\n‚Ä¶\r\n` frame per event, `X-Accel-Buffering: no`, and a `0\r\n\r\n`
+terminator. `on_finish(complete)` fires exactly once; the API stores the turn **only** when
+`complete` is true, which is what makes Stop more than a UI gesture.
+
+Frames: `start` (question, engine, settings, and the sentence that says the answer is computed
+first), `delta` (substrings of the real answer, in order), `citations`, `done` (the same body the
+buffered route returns, plus `persisted_on_delivery: true`). `?pace_ms=` (‚â§1000) is a diagnostic
+that sleeps between frames; it adds delay only and no content depends on it.
+
+UI: `a Stop control appears while the answer streams`, `partial text is rendered before the
+answer finishes`, `stopping says the turn was not saved`, `stopped turn is marked, not presented
+as an answer`, `a stopped turn is not written to the conversation`, `a completed stream renders
+its citations`, `a completed stream is saved once`.
+
 ## Media metadata (10 unit tests + 1 e2e + 2 UI assertions)
 
 `media` module ‚Äî a hand-written ISO base media (MP4/M4A/MOV) parser. No FFmpeg, no
@@ -23327,7 +23975,8 @@ unsupported with a reason`.
   LibreOffice was tested (no authorized sample), so merged cells, date serials, sheet-scoped
   named ranges and shared-formula groups remain unverified.
 * No `.xls`/ODS fixtures at all ‚Äî those formats have no parser here.
-* No streaming test: there is no streaming implementation to test.
+* Streaming is *delivery* streaming, not generation: the extractive answer is complete before the first frame. There is no test ‚Äî and cannot be one here ‚Äî for token-by-token output, because there is no model.
+* The `?pace_ms=` diagnostic is exercised by tests; nothing asserts browser rendering smoothness under a slow network.
 * No decoded pixel, caption or transcript is produced by the product. Frame decoding was used
   **only** as research tooling on a fixture we encoded ourselves (`docs/reference/VIDEO_RESEARCH.md`);
   no vision model, no ASR, no authorized third-party footage.
@@ -23536,6 +24185,25 @@ Limits that are real, not hypothetical:
 * **Scene detection is luma-based and was observed to miss a cut.** On our clip the red‚Üígreen
   transition scores 0.0 while green‚Üíblue scores 0.4 (`VIDEO_RESEARCH.md`). Any future
   frame-sampling pipeline must not trust `select='gt(scene,‚Ä¶)'` alone.
+
+## Chat streaming and Stop (2026-10-31)
+
+What was measured: `POST /api/notebooks/:id/chat/stream` returns `Transfer-Encoding: chunked`
+NDJSON frames, and the UI renders them as they arrive (jsdom drive-through with the transport
+slowed by `?pace_ms=`, then a real abort).
+
+Honest limits:
+
+* **This is delivery streaming, not generation.** The extractive answer is complete before the
+  first frame. If a model is ever wired in, this protocol can carry tokens, but today it cannot
+  and the `start` frame says so.
+* **A network drop after the last frame is written but before the client reads it loses the
+  turn.** The server commits to history only on a complete delivery (D19). A retry re-asks.
+* **No backpressure beyond the socket.** Frames are written as fast as the kernel accepts them;
+  a slow client is handled by TCP flow control and the 30 s write timeout, not by a queue.
+* **`?pace_ms=` exists for tests and debugging.** It sleeps between frames and changes nothing
+  else. It is capped at 1 s and rejected above that.
+* **No resume/replay.** An interrupted stream cannot be continued; the user asks again.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -27782,7 +28450,7 @@ Statuses: `done` (works + tested) ¬∑ `partial` ¬∑ `planned` ¬∑ `blocked` (enviro
 | CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |
 | CHAT-04 | source selection scopes chat | documented | done | `app.js` + api | UI |
 | CHAT-05 | conversation persistence / history | documented | done | `store.rs` | e2e |
-| CHAT-06 | streaming + stop | documented | planned ‚Äî the HTTP responder is buffered; answers return whole (and are instant because they are extractive) | ‚Äî | ‚Äî |
+| CHAT-06 | streaming + stop | documented | **done** ‚Äî real chunked delivery (`Transfer-Encoding: chunked`) of NDJSON frames, rendered progressively; Stop aborts and the turn is **not** persisted. Not token-by-token: the extractive answer is computed before the first frame and the protocol says so | `http::StreamReply`, `api::chat_stream`, `app.js` | 2 unit + 1 e2e + 7 UI |
 | CHAT-07 | style / length / custom instructions | documented | **partial** ‚Äî style (evidence/concise/detailed) and length (brief/standard/thorough) are real and validated over the extractive engine; custom instructions are stored and echoed but cannot steer a model that is not reachable | `grounded.rs`, `api::chat`, UI selects | 4 unit + e2e + 8 UI |
 | CHAT-08 | **table answers** (aggregation over source cells) | documented ("table answers" in the answer modes; Data Tables journey I) | **partial** ‚Äî sum/average/min/max/count over an existing grid, optional group-by; no schema inference, no charts | `tables::try_answer`, `api::chat` | 22 unit + e2e + UI |
 | NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
@@ -29962,6 +30630,80 @@ if __name__ == "__main__":
     main()
 ```
 
+## `tests/fixtures/make_media.py`
+
+```python
+#!/usr/bin/env python3
+"""Provenance for `tests/fixtures/sample.mp4`.
+
+This fixture is **our own synthetic clip**, not material from any product or platform.
+It exists so `media::inspect` and the frame-extraction research below are tested against
+real encoder output instead of a hand-built box tree (which is also tested, in
+`media.rs::tests::sample_mp4`).
+
+Generated with a static FFmpeg 7.0.2 build (installed from the `imageio-ffmpeg` wheel;
+`ffprobe` is not part of it). The exact command:
+
+    ffmpeg -y \
+      -f lavfi -i "color=c=red:s=320x240:r=10:d=2" \
+      -f lavfi -i "color=c=green:s=320x240:r=10:d=2" \
+      -f lavfi -i "color=c=blue:s=320x240:r=10:d=2" \
+      -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]" \
+      -map "[v]" -c:v libx264 -pix_fmt yuv420p -g 10 -t 6 -r 10 \
+      tests/fixtures/sample.mp4
+
+What that produces, measured by our own parser (`media::tests::a_real_encoder_output_is_read_correctly`)
+and by FFmpeg itself:
+
+    container mp4, brand isom
+    duration  6.0 s (mvhd timescale 10240)
+    video     avc1, 320x240, yuv420p, 10 fps, 60 frames
+
+Regenerating it is optional; the checked-in file is what the tests read. If you do not have
+FFmpeg, delete nothing ‚Äî the test skips itself only when the fixture is absent.
+
+Frame extraction used for research (see docs/reference/VIDEO_RESEARCH.md). FFmpeg 7.x needs
+`-fps_mode vfr` for scene dumps; `-vsync` is deprecated and fails:
+
+    # one contact sheet: 3 frames across, sampled at 0.5 fps
+    ffmpeg -i sample.mp4 -vf "fps=0.5,scale=160:-1,tile=3x1" -frames:v 1 /tmp/sheet.png
+
+    # scene changes, one PNG per detected shot
+    ffmpeg -i sample.mp4 -vf "select='gt(scene,0.3)'" -fps_mode vfr /tmp/scenes/s-%03d.png
+
+The clip has exactly two scene cuts (red‚Üígreen at 2 s, green‚Üíblue at 4 s), so the expected
+result is exactly two PNGs. That is the assertion the research log records.
+
+There is no FFmpeg dependency in the product: `crates/forge-core` parses the container by
+hand and never shells out to FFmpeg.
+"""
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "sample.mp4")
+
+
+def main() -> int:
+    ff = os.environ.get("FFMPEG", "ffmpeg")
+    if not os.path.exists(OUT):
+        print(f"fixture missing: {OUT}", file=sys.stderr)
+        return 1
+    try:
+        subprocess.run([ff, "-version"], check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError):
+        print("ffmpeg not available; the checked-in fixture is already present, nothing to do")
+        return 0
+    print(f"{OUT}: {os.path.getsize(OUT)} bytes")
+    print("regenerate with the command in the module docstring")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
 ## `tests/fixtures/make_ooxml.py`
 
 ```python
@@ -30290,6 +31032,48 @@ North;Web;1200,50;10
 East;Web;;4
 ```
 
+## `tests/fixtures/sample.mp4`
+
+```
+    ftypisom   isomiso2avc1mp41   free  mdat  Æˇˇ™‹EÈΩÊŸH∑ñ,ÿ Ÿ#ÓÔx264 - core 164 r3191 4613ac3 - H.264/MPEG-4 AVC codec - Copyleft 2003-2024 - http://www.videolan.org/x264.html - options: cabac=1 ref=3 deblock=1:0:0 analyse=0x3:0x113 me=hex subme=7 psy=1 psy_rd=1.00:0.00 mixed_ref=1 me_range=16 chroma_me=1 trellis=1 8x8dct=1 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=-2 threads=3 lookahead_threads=1 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=3 b_pyramid=2 b_adapt=1 b_bias=0 direct=1 weightb=1 open_gop=0 weightp=2 keyint=250 keyint_min=10 scenecut=40 intra_refresh=0 rc_lookahead=40 rc=crf mbtree=1 crf=23.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00 Ä   CeàÑ ˇ˛Á„¸
+k+ƒøMP(ÕÈµ‹®∫5·’∆!O ∫3◊‘ ºJ±}[}8<ó¯P 
+ÑÕl¶K7ã	'3Å   Aö$lA˛µ*Ä X   
+AûBxá  7·   
+ûatC  P@   
+ûcjC  PA   AöhI®AhôL#ˇ˛µ*Ä Y   AûÜE,;ˇ  7·   
+û•tC  PA   
+ûßjC  P@   Aö¨I®AlôL#ˇ˛µ*Ä X   Aû E,;ˇ  7·   
+ûÈtC  P@   
+ûÎjC  P@   AöI®AlôL#ˇ˛µ*Ä Y   AüE,;ˇ  7·   
+ü-tC  PA   
+ü/jC  P@   Aõ4I®AlôL#ˇ˛µ*Ä X   AüRE,;ˇ  7·   
+üqtC  P@   
+üsjC  P@   CAõxI®AlôL#ˇ†!⁄È∆–ú˙∆â∞*ÿ"6<L69ÈÙ´3\n,g	`„#Ó≠@p uë~Å#n¿nÄ È  ÏAüñE,;ˇ˛˚¸ˇÂíÆ	|Gª¡•IyIñ_X1∞”2ﬁ$,	}H%eÔÛ)∞Ñ6HBfŒ<RåÜ|¸
+Æ	ÄïÓÌëNÕ7"Ê>5XÇ—˝Ïtñ‚Òb«ÀçªTX±Ù±?°˘I˘˛ˆ†Cˇg Xâ©ö»f⁄@≥˚Ï9ád‰+}·êÁÉ“©÷ûß∏[	u°D˛íÄ ˝1ûHƒIY20æÓvc”∆:†´G©ÂälQ^O(`‚äz©™a!˙˙ã^NÍùº–’J˘∏z°¬ô√9#AW⁄ugªi…ës‘∆&`’-ˇe\ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™EÛØ$è]¯¯¸‘z…íôƒ8#è’{ÁkÈ¥¡™[˛ πàé£eRèRF¯Ô™ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™(˝C`(-›˝>`Îç1≠áÒ§y;‚T*-N·≥ã¶B_»ù§û‹c¡j∑†I≤+‰6©ï[Rto∆&`’-ˇe\ƒGQ≤©G©£|⁄hA2Ñk®5mÚ*ﬁdÛc2?πc™(Ì~ú"ví{påx_™ﬁÅ&»Øêx⁄¶UmI“„Hø#;GÃPòàV√¯“<öò?Ùd/ˇ˝BÌ™¢ƒ‰xç_i’ûÌßÛä%*{ 6ëOã0]¯Á◊ö*!|˛ïˆ£|¢∑1≠áÒ§y;‚T*-N·≥ã¶B_»ù§û‹c¡j∑†I≤+‰ “&PBﬂˆUÃDu*îzêä7«Ò≠¶Ñ(F∫ÄsVﬂ"≠ÊO60Û#˚ñ:°“è‘5„∂VãäÄ@#‚∫V”B	î#]@9´oëVÛ'õyë˝ÀPÈGÍAnÔËAÛˇÖZ≠Ëlä˘ Gç™eV‘ù.1¥ãÚ3¥|≈–iàÖl?ç#…ﬂ°Qjwú]7¯  „üµtC˛˚ˆóeì∞Lªèêû√›∂,c ¡"Yi≥Õë0:∑‰¥tt≥ƒW"·eˆØt
+€/Õî€äﬁ”˝<üí82LÏïe¢ft&"eòq…∑¸ù›»O»4äz+”¡wN.˚t†ã⁄êÊd◊ ?€x*jf%©(®e¡‘[¬Á!ºíQë
+…ûq4”Ï¨ÎOŸ√"ñp…(≠Î
+€”√ÄÑ’‰ÏyÆI=aólé’	ycÏŒ<ü•˝7/ìÙØü¶ÈÚ~ó3Ù›.O“˛~õµ…˙bœ”x9?LŸ˙qŒ™á[-#å√ìße§uòrvl¥è3NÕñëˆa…€≤“@Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§∂Ó√ó'ÈÀ?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§ÉòràºZø?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥L∏Óòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥ês8¸¬≈ÏÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9áD8ºxl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñä‰L≠Ï¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñãDÄÑ¯l¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñã¶Øö•Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9áA¬ úœ”}fù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-ÛÛ™Áü¶˙Ã9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥êsNÌñía…›≤“AÃ9;∂Z3ËG«?Mıòrwl¥êsNÌñía…›≤“AÃ9;∂ZH9á'vÀI0‰ÓŸi Êù€-$√ìªe§Éòrwl¥ÆA   
+ü∑jC  PA   AõºI®AlôL#ˇ˛µ*Ä X   Aü⁄E,;ˇ  7·   
+ü˘tC  P@   
+ü˚jC  PA   Aõ‡I®AlôL#ˇ˛µ*Ä Y   AûE,;ˇ  7‡   
+û=tC  P@   
+û?jC  PA   Aö$I®AlôL!ˇ˛™U  ∞   AûBE,;ˇ  7·   
+ûatC  P@   
+ûcjC  PA   AöhI®AlôLwˇ˛©ñ  o¡   AûÜE,;ˇ  7·   
+û•tC  PA   
+ûßjC  P@   Aö©I®AlôLoˇ˛ßÑ  ﬁÄ   CeàÇ ?˛Ï⁄~7V˘ı”!Ω‡ ∑+©ß¶&v.o§§pgÆœX G¸˛z–$…ñ{P#‡ N	µñ)ØNg   Aö$lA˛µ*Ä X   
+AûBxá  7‡   
+ûatC  PA   
+ûcjC  PA   AöhI®AhôL#ˇ˛µ*Ä Y   AûÜE,;ˇ  7‡   
+û•tC  P@   
+ûßjC  PA   Aö¨I®AlôL!ˇ˛™U  ∞   Aû E,;ˇ  7‡   
+ûÈtC  PA   
+ûÎjC  P@   AöI®AlôLˇ˛©ñ  o¡   AüE,;ˇ  7·   
+ü-tC  P@   
+ü/jC  PA   Aõ3I®AlôLoˇ˛ßÑ  ﬁÄ   AüQE,7ˇ  PA   
+ürjC  PA  moov   lmvhd              Ë  8                                            @                                Atrak   \tkhd                    8                                              @   @        $edts   elst         8        πmdia    mdhd              (   ¯ Uƒ     -hdlr        vide            VideoHandler   dminf   vmhd              $dinf   dref          url      $stbl   ¿stsd          ∞avc1                       @  H   H       Lavc61.3.100 libx264            ˇˇ   6avcCd ˇ· gd ¨ŸAA˚     @ÒBô` hÎ„À"¿˝¯¯    pasp         btrt      #  #   stts          >      stss             +  ctts       <                                                                                                                                                                                                                                                                                                                                                                                         stsc             >     stsz           >  ˘                                                               G    Á                                                         G                                                            stco          0   audta   Ymeta       !hdlr        mdirappl            ,ilst   $©too   data       Lavf61.1.100
+```
+
 ## `tests/ui-smoke.js`
 
 ```javascript
@@ -30324,7 +31108,19 @@ async function main() {
   const { window } = dom;
 
   // jsdom has no fetch; forward to the live server.
-  window.fetch = (url, init) => fetch(BASE + url, init);
+  // `__pace` is a test-side transport slowdown for the chat stream (the server accepts
+  // `?pace_ms=` as a diagnostic). The app itself never sets it.
+  window.__pace = null;
+  window.fetch = (url, init) => {
+    let u = String(url);
+    if (window.__pace && u.includes("/chat/stream")) {
+      u += (u.includes("?") ? "&" : "?") + "pace_ms=" + window.__pace;
+    }
+    return fetch(BASE + u, init);
+  };
+  // jsdom lacks a couple of web-platform globals the streaming path uses
+  if (!window.TextDecoder) window.TextDecoder = TextDecoder;
+  if (!window.AbortController) window.AbortController = AbortController;
   window.confirm = () => true;
   window.prompt = () => null;
   window.scrollTo = () => {};
@@ -30452,6 +31248,46 @@ async function main() {
   setStyle("evidence");
   setLen("standard");
   await wait(50);
+
+  // --- streaming: frames render progressively and Stop is real (not decorative)
+  const convsBefore = await (await fetch(`${BASE}/api/notebooks/${nbId}/conversations`)).json();
+  const countBefore = (convsBefore.conversations || []).reduce((n, c) => n + c.message_count, 0);
+
+  window.__pace = 60; // test-side transport slowdown only
+  const askStream = $(".composer textarea");
+  askStream.value = "What does the Calvin cycle fix?";
+  byText(".composer button", "Ask").click();
+  await wait(250);
+  const live = $$(".msg.assistant").pop();
+  check("a Stop control appears while the answer streams", !!live?.querySelector("button.stop"),
+    live?.textContent?.slice(0, 120));
+  check("partial text is rendered before the answer finishes",
+    /Calvin|passage|Sources/i.test(live?.querySelector(".body")?.textContent || ""),
+    live?.querySelector(".body")?.textContent);
+  live?.querySelector("button.stop")?.click();
+  await wait(500);
+  const stopped = $$(".msg.assistant").pop();
+  check("stopping says the turn was not saved", /not saved to the conversation/.test(stopped?.textContent || ""),
+    stopped?.textContent?.slice(-160));
+  check("stopped turn is marked, not presented as an answer", !!stopped?.classList.contains("stopped"));
+
+  await wait(600); // let the server notice the hang-up
+  const convsAfter = await (await fetch(`${BASE}/api/notebooks/${nbId}/conversations`)).json();
+  const countAfter = (convsAfter.conversations || []).reduce((n, c) => n + c.message_count, 0);
+  check("a stopped turn is not written to the conversation", countAfter === countBefore,
+    `messages before=${countBefore} after=${countAfter}`);
+
+  window.__pace = null;
+  const askFinal = $(".composer textarea");
+  askFinal.value = "What does the Calvin cycle fix?";
+  byText(".composer button", "Ask").click();
+  await wait(900);
+  const streamedMsg = $$(".msg.assistant").pop();
+  check("a completed stream renders its citations", streamedMsg.querySelectorAll(".cite").length >= 1);
+  const convsFinal = await (await fetch(`${BASE}/api/notebooks/${nbId}/conversations`)).json();
+  const countFinal = (convsFinal.conversations || []).reduce((n, c) => n + c.message_count, 0);
+  check("a completed stream is saved once", countFinal === countBefore + 2,
+    `messages before=${countBefore} after=${countFinal}`);
 
   // --- study tools
   byText(".tabs button", "Study").click();

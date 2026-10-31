@@ -29,7 +29,19 @@ async function main() {
   const { window } = dom;
 
   // jsdom has no fetch; forward to the live server.
-  window.fetch = (url, init) => fetch(BASE + url, init);
+  // `__pace` is a test-side transport slowdown for the chat stream (the server accepts
+  // `?pace_ms=` as a diagnostic). The app itself never sets it.
+  window.__pace = null;
+  window.fetch = (url, init) => {
+    let u = String(url);
+    if (window.__pace && u.includes("/chat/stream")) {
+      u += (u.includes("?") ? "&" : "?") + "pace_ms=" + window.__pace;
+    }
+    return fetch(BASE + u, init);
+  };
+  // jsdom lacks a couple of web-platform globals the streaming path uses
+  if (!window.TextDecoder) window.TextDecoder = TextDecoder;
+  if (!window.AbortController) window.AbortController = AbortController;
   window.confirm = () => true;
   window.prompt = () => null;
   window.scrollTo = () => {};
@@ -157,6 +169,46 @@ async function main() {
   setStyle("evidence");
   setLen("standard");
   await wait(50);
+
+  // --- streaming: frames render progressively and Stop is real (not decorative)
+  const convsBefore = await (await fetch(`${BASE}/api/notebooks/${nbId}/conversations`)).json();
+  const countBefore = (convsBefore.conversations || []).reduce((n, c) => n + c.message_count, 0);
+
+  window.__pace = 60; // test-side transport slowdown only
+  const askStream = $(".composer textarea");
+  askStream.value = "What does the Calvin cycle fix?";
+  byText(".composer button", "Ask").click();
+  await wait(250);
+  const live = $$(".msg.assistant").pop();
+  check("a Stop control appears while the answer streams", !!live?.querySelector("button.stop"),
+    live?.textContent?.slice(0, 120));
+  check("partial text is rendered before the answer finishes",
+    /Calvin|passage|Sources/i.test(live?.querySelector(".body")?.textContent || ""),
+    live?.querySelector(".body")?.textContent);
+  live?.querySelector("button.stop")?.click();
+  await wait(500);
+  const stopped = $$(".msg.assistant").pop();
+  check("stopping says the turn was not saved", /not saved to the conversation/.test(stopped?.textContent || ""),
+    stopped?.textContent?.slice(-160));
+  check("stopped turn is marked, not presented as an answer", !!stopped?.classList.contains("stopped"));
+
+  await wait(600); // let the server notice the hang-up
+  const convsAfter = await (await fetch(`${BASE}/api/notebooks/${nbId}/conversations`)).json();
+  const countAfter = (convsAfter.conversations || []).reduce((n, c) => n + c.message_count, 0);
+  check("a stopped turn is not written to the conversation", countAfter === countBefore,
+    `messages before=${countBefore} after=${countAfter}`);
+
+  window.__pace = null;
+  const askFinal = $(".composer textarea");
+  askFinal.value = "What does the Calvin cycle fix?";
+  byText(".composer button", "Ask").click();
+  await wait(900);
+  const streamedMsg = $$(".msg.assistant").pop();
+  check("a completed stream renders its citations", streamedMsg.querySelectorAll(".cite").length >= 1);
+  const convsFinal = await (await fetch(`${BASE}/api/notebooks/${nbId}/conversations`)).json();
+  const countFinal = (convsFinal.conversations || []).reduce((n, c) => n + c.message_count, 0);
+  check("a completed stream is saved once", countFinal === countBefore + 2,
+    `messages before=${countBefore} after=${countFinal}`);
 
   // --- study tools
   byText(".tabs button", "Study").click();

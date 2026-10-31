@@ -53,6 +53,9 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.primary:hover { filter: brightness(1.08); }
 button.ghost { background: transparent; }
 button.danger:hover { border-color: var(--err); color: var(--err); }
+/* Stop is only shown while a stream is live; it is a control, not decoration. */
+button.stop { padding: 3px 10px; font-size: 12px; border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+button.stop:hover { border-color: var(--err); color: var(--err); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 
 input[type="text"], input[type="search"], textarea, select {
@@ -193,6 +196,13 @@ main { overflow: auto; }
 .toast.err { border-color: var(--err); }
 .empty { color: var(--muted); font-size: 13.5px; padding: 14px 0; }
 .hint { color: var(--faint); font-size: 12px; }
+/* Text that arrived as a stream is indistinguishable from a complete answer in content, but
+   while it is still arriving the caret marks it as unfinished rather than final. */
+.body.streaming::after { content: "▍"; margin-left: 2px; color: var(--accent); animation: blink 1s steps(2, start) infinite; }
+@keyframes blink { to { visibility: hidden; } }
+/* A stopped turn is kept visible as a record of the action, visibly not an answer. */
+.msg.stopped { border-color: color-mix(in srgb, var(--err) 35%, var(--line)); }
+.msg.stopped .body { color: var(--faint); }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .stack { display: flex; flex-direction: column; gap: 9px; }
 .sr-only {

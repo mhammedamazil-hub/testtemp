@@ -3,6 +3,7 @@
 use forge_core::api::Api;
 use forge_core::http::{serve, Request};
 use forge_core::json::{self, Value};
+use forge_core::obj;
 use forge_core::store::Store;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -23,9 +24,9 @@ impl Server {
         std::thread::spawn(move || {
             let handler = move |req: &Request| {
                 if req.path.starts_with("/api") {
-                    api.handle(req)
+                    api.route(req)
                 } else {
-                    forge_core::web::serve_static(&web, &req.path)
+                    forge_core::http::Reply::Full(forge_core::web::serve_static(&web, &req.path))
                 }
             };
             let _ = serve(listener, handler, forge_core::http::DEFAULT_MAX_BODY);
@@ -1161,6 +1162,83 @@ fn chat_style_and_length_are_effective_and_validated() {
     assert_eq!(messages, 10, "five accepted asks (2 messages each), rejections store nothing");
 }
 
+
+impl Server {
+    /// Open a chat stream and read it like a browser does: headers first, then chunked frames.
+    /// `stop_after` limits how many chunks are read before the socket is dropped, which is
+    /// exactly what the Stop button does.
+    fn stream_chat(
+        &self,
+        nb: &str,
+        body: &Value,
+        stop_after: Option<usize>,
+    ) -> (Vec<String>, String, bool) {
+        let mut s = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let payload = json::to_string(body).into_bytes();
+        let head = format!(
+            "POST /api/notebooks/{}/chat/stream HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            nb,
+            payload.len()
+        );
+        s.write_all(head.as_bytes()).unwrap();
+        s.write_all(&payload).unwrap();
+
+        let mut raw = Vec::new(); // response bytes not yet consumed
+        let mut body = Vec::new(); // chunked body bytes not yet decoded
+        let mut buf = [0u8; 4096];
+        let mut frames: Vec<String> = Vec::new();
+        let mut finished = false;
+        let mut head_done = false;
+        loop {
+            if let Some(limit) = stop_after {
+                if frames.len() >= limit {
+                    break; // hang up mid-stream: the cancellation path
+                }
+            }
+            match s.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    raw.extend_from_slice(&buf[..n]);
+                    if !head_done {
+                        if let Some(h) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                            body.extend_from_slice(&raw[h + 4..]);
+                            raw.clear();
+                            head_done = true;
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        body.append(&mut raw);
+                    }
+                    while let Some((frame, consumed)) = take_chunk(&body) {
+                        body.drain(..consumed);
+                        if frame.is_empty() {
+                            finished = true;
+                        } else {
+                            frames.push(frame);
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        (frames, String::from_utf8_lossy(&raw).to_string(), finished)
+    }
+}
+
+/// Pull one chunk out of a chunked-encoding buffer: `hex\r\npayload\r\n`.
+fn take_chunk(buf: &[u8]) -> Option<(String, usize)> {
+    let crlf = buf.windows(2).position(|w| w == b"\r\n")?;
+    let size = usize::from_str_radix(std::str::from_utf8(&buf[..crlf]).ok()?.trim(), 16).ok()?;
+    let start = crlf + 2;
+    if buf.len() < start + size + 2 {
+        return None;
+    }
+    let body = String::from_utf8_lossy(&buf[start..start + size]).to_string();
+    Some((body, start + size + 2))
+}
+
 /// Media metadata is read from the container, and the response says what was *not* done.
 #[test]
 fn media_metadata_is_read_without_decoding_frames() {
@@ -1219,4 +1297,149 @@ fn media_metadata_is_read_without_decoding_frames() {
     assert_eq!(st, 400);
     let (st, _) = s.json("GET", "/api/media/inspect", None);
     assert_eq!(st, 404, "GET is not routed");
+}
+
+/// CHAT-06 / journey: the answer streams, and a stream the client abandons stores nothing.
+#[test]
+fn chat_streams_frames_and_only_persists_when_delivery_completes() {
+    let dir = tempdir("stream");
+    let s = Server::start(dir);
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj! { "title" => "stream" }));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj! {
+            "title" => "calvin",
+            "text" => "The Calvin cycle fixes carbon dioxide. RuBisCO catalyses carbon fixation. \
+                       Light reactions produce ATP and NADPH in the thylakoid membrane."
+        }),
+    );
+
+    // 1. a complete stream: frames arrive in order and the turn becomes history
+    let (frames, _, finished) = s.stream_chat(
+        &nb_id,
+        &obj! { "question" => "what does the calvin cycle fix", "style" => "detailed", "length" => "brief" },
+        None,
+    );
+    assert!(finished, "the terminating chunk must arrive");
+    let events: Vec<&str> = frames.iter().map(|f| f.as_str()).collect();
+    assert!(events[0].contains("\"event\":\"start\""), "first frame: {}", events[0]);
+    assert!(events.iter().any(|f| f.contains("\"event\":\"delta\"")));
+    assert_eq!(
+        events.iter().filter(|f| f.contains("\"event\":\"done\"")).count(),
+        1,
+        "exactly one done frame"
+    );
+    let done = json::parse(frames.last().unwrap()).unwrap();
+    assert_eq!(done.str_of("event"), Some("done"));
+    assert_eq!(done.str_of("engine"), Some("extractive"));
+    assert_eq!(done.get("settings").and_then(|s| s.str_of("length")), Some("brief"));
+    assert_eq!(
+        done.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()),
+        Some(1),
+        "brief = one citation, same budget as the buffered route"
+    );
+
+    // every delta is a real substring of the answer, in order — no invented words
+    let answer = done.str_of("answer").unwrap();
+    let mut cursor = 0usize;
+    for f in &frames {
+        let v = json::parse(f).unwrap();
+        if v.str_of("event") == Some("delta") {
+            let piece = v.str_of("text").unwrap();
+            let at = answer[cursor..]
+                .find(piece)
+                .unwrap_or_else(|| panic!("delta {:?} is not in the answer", piece));
+            cursor += at + piece.len();
+        }
+    }
+
+    // the persisted turn matches what was delivered
+    let (_, convs) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    let list = convs.get("conversations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(list.len(), 1, "a delivered stream is stored");
+    assert_eq!(list[0].get("message_count").and_then(|m| m.as_f64()), Some(2.0));
+
+    // 2. a second complete stream appends to the *same* conversation when asked to
+    let conv_id = list[0].str_of("id").unwrap_or("").to_string();
+    let (frames2, _, finished2) = s.stream_chat(
+        &nb_id,
+        &obj! { "question" => "what produces ATP", "conversation_id" => conv_id.clone() },
+        None,
+    );
+    assert!(!frames2.is_empty() && finished2);
+    let (_, c2) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    let l2 = c2.get("conversations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(l2.len(), 1, "the stream honours conversation_id instead of starting a new one");
+    assert_eq!(l2[0].get("message_count").and_then(|m| m.as_f64()), Some(4.0));
+
+    // 3. an abandoned stream: pace the frames, read one, hang up
+
+    let (partial, _, finished3) = {
+        let mut socket = TcpStream::connect(("127.0.0.1", s.port)).unwrap();
+        socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let payload = json::to_string(&obj! {
+            "question" => "what catalyses carbon fixation",
+            "conversation_id" => conv_id.clone(),
+        })
+        .into_bytes();
+        let head = format!(
+            "POST /api/notebooks/{}/chat/stream?pace_ms=40 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            nb_id,
+            payload.len()
+        );
+        socket.write_all(head.as_bytes()).unwrap();
+        socket.write_all(&payload).unwrap();
+        let mut got = Vec::new();
+        let mut body = Vec::new();
+        let mut buf = [0u8; 512];
+        let mut frames: Vec<String> = Vec::new();
+        let mut head_done = false;
+        // read until the first whole frame arrives, then hang up: this is the Stop button
+        while frames.is_empty() {
+            let n = socket.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buf[..n]);
+            if !head_done {
+                if let Some(h) = got.windows(4).position(|w| w == b"\r\n\r\n") {
+                    body.extend_from_slice(&got[h + 4..]);
+                    head_done = true;
+                }
+                continue;
+            }
+            body.extend_from_slice(&buf[..n]);
+            while let Some((f, used)) = take_chunk(&body) {
+                body.drain(..used);
+                if !f.is_empty() {
+                    frames.push(f);
+                }
+            }
+        }
+        drop(socket); // Stop
+        (frames, String::new(), false)
+    };
+    assert!(!partial.is_empty(), "at least the start frame arrived before Stop");
+    assert!(!finished3, "the stream was cut short");
+    std::thread::sleep(Duration::from_millis(600)); // let the writer notice the FIN
+
+    let (_, convs2) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    let list2 = convs2.get("conversations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(list2.len(), 1, "Stop must not create a second conversation");
+    assert_eq!(
+        list2[0].get("message_count").and_then(|m| m.as_f64()),
+        Some(4.0),
+        "Stop must not append a message: the aborted turn is not history"
+    );
+
+    // 4. an invalid style never opens a stream at all
+    let (status, body) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat/stream", nb_id),
+        Some(obj! { "question" => "anything", "style" => "shouty" }),
+    );
+    assert_eq!(status, 422);
+    assert_eq!(body.str_of("code"), Some("bad_style"));
 }
