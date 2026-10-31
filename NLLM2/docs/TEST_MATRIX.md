@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 181 tests: 138 lib + 12 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 186 tests: 142 lib + 13 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -16,7 +16,7 @@ FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
 FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 53 assertions
 ```
 
-## Unit tests (138) — exact names from `cargo test --lib -- --list`
+## Unit tests (142) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -227,6 +227,33 @@ citation`, `viewer renders the real grid`, `grid keeps original row numbers`, `g
 cached formula value`, `grid cells expose their A1 reference`, `hidden sheets are labelled
 when shown`.
 
+## Chat presentation controls (4 unit tests + 1 e2e + 8 UI assertions)
+
+`grounded::AnswerOptions` — `style` (evidence · concise · detailed) and `length`
+(brief = 1 citation, standard = 2, thorough = 4).
+
+* `length_changes_how_many_passages_are_cited` — brief gives exactly one citation; standard
+  and thorough never give fewer; the budget is a real citation count.
+* `style_changes_presentation_and_never_the_evidence` — the same request in all three styles
+  returns **identical citations, quotes and order**, while the rendering differs (bullet list
+  vs paragraph vs per-quote source + locator); each quote is still a substring of its chunk and
+  the citation validator reports nothing.
+* `unknown_style_and_length_values_are_rejected` — `bullets` and `long` are `None` (the API
+  turns that into `422`), aliases (`shorter`, `thorough`) resolve.
+* `a_styled_answer_still_abstains_without_evidence` — a styled question with no evidence
+  produces no answer skeleton.
+
+Over HTTP: `chat_style_and_length_are_effective_and_validated` — `settings` echoed with the
+defaults; `length: brief` → exactly one citation and `max_citations: 1`; `style: detailed`
+contains "Sources consulted:" and the locator; `style: concise` has no bullet list and the
+**same** citation count as `detailed`; `style: bullets` → `422 bad_style`, `length: long` →
+`422 bad_length`; rejected requests write nothing to the conversation.
+
+UI: `composer exposes a style control`, `composer exposes a length control`, `length control
+explains its effect`, `brief answer cites exactly one passage`, `brief answer reports its
+settings`, `detailed style shows where each quote came from`, `detailed answer still cites real
+passages`, `detailed answer reports its settings`.
+
 ## Source Guide (8 unit tests + 1 e2e + 9 UI assertions)
 
 `guide` module. Every line of the guide is a **quotation** from an indexed passage with that
@@ -276,3 +303,4 @@ endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
   LibreOffice was tested (no authorized sample), so merged cells, date serials, sheet-scoped
   named ranges and shared-formula groups remain unverified.
 * No `.xls`/ODS fixtures at all — those formats have no parser here.
+* No streaming test: there is no streaming implementation to test.

@@ -115,6 +115,49 @@ async function main() {
   byText(".viewer header button", "✕").click();
   await wait(200);
 
+  // --- chat presentation controls are real (they change the answer)
+  check("composer exposes a style control", !!$("#chatStyle") && !!$("#chatStyle").getAttribute("aria-label"));
+  check("composer exposes a length control", !!$("#chatLength"));
+  const setLen = (v) => {
+    const sel = $("#chatLength");
+    sel.value = v;
+    sel.dispatchEvent(new window.Event("change", { bubbles: true }));
+  };
+  const setStyle = (v) => {
+    const sel = $("#chatStyle");
+    sel.value = v;
+    sel.dispatchEvent(new window.Event("change", { bubbles: true }));
+  };
+  setLen("brief");
+  await wait(50);
+  check("length control explains its effect", /cites 1 passage/.test($("#styleHint")?.textContent || ""), $("#styleHint")?.textContent);
+  const askAgain = $(".composer textarea");
+  askAgain.value = "What does the Calvin cycle fix?";
+  byText(".composer button", "Ask").click();
+  await wait(900);
+  const briefAnswers = $$(".msg.assistant");
+  const briefMsg = briefAnswers[briefAnswers.length - 1];
+  check("brief answer cites exactly one passage", briefMsg.querySelectorAll(".cite").length === 1,
+    `cites=${briefMsg.querySelectorAll(".cite").length}`);
+  check("brief answer reports its settings", /evidence\/brief/.test(briefMsg.textContent), briefMsg.textContent.slice(-120));
+
+  setStyle("detailed");
+  setLen("thorough");
+  await wait(50);
+  const askThird = $(".composer textarea");
+  askThird.value = "What does the Calvin cycle fix?";
+  byText(".composer button", "Ask").click();
+  await wait(900);
+  const detailedAnswers = $$(".msg.assistant");
+  const detailedMsg = detailedAnswers[detailedAnswers.length - 1];
+  check("detailed style shows where each quote came from", /Sources consulted:/.test(detailedMsg.textContent),
+    detailedMsg.textContent.slice(0, 200));
+  check("detailed answer still cites real passages", detailedMsg.querySelectorAll(".cite").length >= 1);
+  check("detailed answer reports its settings", /detailed\/thorough/.test(detailedMsg.textContent));
+  setStyle("evidence");
+  setLen("standard");
+  await wait(50);
+
   // --- study tools
   byText(".tabs button", "Study").click();
   await wait(100);

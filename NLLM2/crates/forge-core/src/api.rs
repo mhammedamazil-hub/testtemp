@@ -937,6 +937,26 @@ impl Api {
             return Err(err(404, "not_found", "notebook not found"));
         }
 
+        // Presentation controls. Both are validated: an unknown value is rejected rather
+        // than silently replaced by the default, so the UI can never claim a style it got.
+        let style_raw = body.str_of("style").unwrap_or("").to_string();
+        let length_raw = body.str_of("length").unwrap_or("").to_string();
+        let Some(style) = grounded::Style::parse(&style_raw) else {
+            return Err(err(
+                422,
+                "bad_style",
+                &format!("unknown style \"{}\" (use evidence, concise or detailed)", style_raw),
+            ));
+        };
+        let Some(length) = grounded::Length::parse(&length_raw) else {
+            return Err(err(
+                422,
+                "bad_length",
+                &format!("unknown length \"{}\" (use brief, standard or thorough)", length_raw),
+            ));
+        };
+        let answer_opts = grounded::AnswerOptions { style, length };
+
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
         let instructions = self.store.read(|db| {
             db.notebooks
@@ -996,9 +1016,17 @@ impl Api {
                 (a, problems)
             }
             None => {
-                let a = engine
-                    .answer(&question, &chunks, &sources, 4)
-                    .unwrap_or_else(|_| grounded::answer(&question, &chunks, &sources, 4));
+                // Our own engine is called directly so style/length are honoured; a
+                // provider (when one is reachable) only receives the citation budget.
+                let a = if engine.name() == "extractive" {
+                    grounded::answer_with(&question, &chunks, &sources, answer_opts)
+                } else {
+                    engine
+                        .answer(&question, &chunks, &sources, answer_opts.length.max_citations())
+                        .unwrap_or_else(|_| {
+                            grounded::answer_with(&question, &chunks, &sources, answer_opts)
+                        })
+                };
                 let problems = grounded::validate_citations(&a.citations, &chunks);
                 (a, problems)
             }
@@ -1070,6 +1098,11 @@ impl Api {
             "grounded" => true,
             "engine" => answer.engine.clone(),
             "engine_note" => engine_note.clone(),
+            "settings" => obj! {
+                "style" => answer_opts.style.as_str(),
+                "length" => answer_opts.length.as_str(),
+                "max_citations" => answer_opts.length.max_citations() as u64,
+            },
             "coverage" => answer.coverage as u64,
             "citation_problems" => Value::Arr(problems.iter().map(|p| Value::from(p.as_str())).collect()),
             "sources_considered" => sources.len() as u64,
@@ -1242,6 +1275,26 @@ impl Api {
         let body = parse_body(req)?;
         let kind = body.str_of("kind").unwrap_or("").to_string();
         let topic = body.str_of("topic").unwrap_or("").to_string();
+        // Presentation controls. Both are validated: an unknown value is rejected rather
+        // than silently replaced by the default, so the UI can never claim a style it got.
+        let style_raw = body.str_of("style").unwrap_or("").to_string();
+        let length_raw = body.str_of("length").unwrap_or("").to_string();
+        let Some(style) = grounded::Style::parse(&style_raw) else {
+            return Err(err(
+                422,
+                "bad_style",
+                &format!("unknown style \"{}\" (use evidence, concise or detailed)", style_raw),
+            ));
+        };
+        let Some(length) = grounded::Length::parse(&length_raw) else {
+            return Err(err(
+                422,
+                "bad_length",
+                &format!("unknown length \"{}\" (use brief, standard or thorough)", length_raw),
+            ));
+        };
+        let answer_opts = grounded::AnswerOptions { style, length };
+
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
 
         let (chunks, sources) = self.store.read(|db| {

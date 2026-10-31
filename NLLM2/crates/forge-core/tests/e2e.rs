@@ -1061,3 +1061,102 @@ Gas exchange measurements record carbon dioxide uptake per leaf area, so a droug
     assert_eq!(st, 409, "{:?}", body);
     assert_eq!(body.str_of("code"), Some("guide_unavailable"));
 }
+
+/// Chat presentation controls are real: they change the answer and are validated.
+#[test]
+fn chat_style_and_length_are_effective_and_validated() {
+    let dir = tempdir("style");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[("title", Value::from("Style"))])),
+    );
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Retrieval notes")),
+            (
+                "text",
+                Value::from(
+                    "The retrieval pipeline ranks candidate spans with BM25 and then builds bounded model context.\n\n\
+                     Candidate spans are ranked by BM25 so that the model only sees context that matched the question.\n\n\
+                     A bounded context window keeps retrieval ranking honest: spans compete for a fixed budget.",
+                ),
+            ),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let question = "how are candidate spans ranked by BM25";
+
+    let ask = |extra: Vec<(&str, Value)>| {
+        let mut fields = vec![("question", Value::from(question))];
+        fields.extend(extra);
+        s.json("POST", &format!("/api/notebooks/{}/chat", nb_id), Some(obj(&fields)))
+    };
+
+    // default settings are echoed back
+    let (st, base) = ask(vec![]);
+    assert_eq!(st, 200, "{:?}", base);
+    let settings = base.get("settings").expect("settings echoed");
+    assert_eq!(settings.str_of("style"), Some("evidence"));
+    assert_eq!(settings.str_of("length"), Some("standard"));
+
+    // brief = one citation, thorough = more
+    let (st, brief) = ask(vec![("length", Value::from("brief"))]);
+    assert_eq!(st, 200);
+    let brief_cites = brief.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()).unwrap_or(0);
+    assert_eq!(brief_cites, 1, "{:?}", brief);
+    assert_eq!(
+        brief.get("settings").and_then(|s| s.get("max_citations")).and_then(|x| x.as_f64()),
+        Some(1.0)
+    );
+    let (st, thorough) = ask(vec![("length", Value::from("thorough"))]);
+    assert_eq!(st, 200);
+    let thorough_cites = thorough.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()).unwrap_or(0);
+    assert!(thorough_cites >= brief_cites, "{} vs {}", thorough_cites, brief_cites);
+
+    // styles change the rendering while citing the same passages
+    let (st, detailed) = ask(vec![("style", Value::from("detailed"))]);
+    assert_eq!(st, 200);
+    let detailed_text = detailed.str_of("answer").unwrap().to_string();
+    assert!(detailed_text.contains("Sources consulted:"), "{}", detailed_text);
+    assert!(
+        detailed_text.contains("—"),
+        "detailed answers name the source and location: {}",
+        detailed_text
+    );
+    let (st, concise) = ask(vec![("style", Value::from("concise"))]);
+    assert_eq!(st, 200);
+    let concise_text = concise.str_of("answer").unwrap().to_string();
+    assert!(!concise_text.contains("\n- "), "concise has no bullet list: {}", concise_text);
+    assert_eq!(
+        detailed.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()),
+        concise.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()),
+        "style must not change the evidence"
+    );
+
+    // unknown values are refused, not silently defaulted
+    let (st, bad_style) = ask(vec![("style", Value::from("bullets"))]);
+    assert_eq!(st, 422, "{:?}", bad_style);
+    assert_eq!(bad_style.str_of("code"), Some("bad_style"));
+    let (st, bad_length) = ask(vec![("length", Value::from("long"))]);
+    assert_eq!(st, 422, "{:?}", bad_length);
+    assert_eq!(bad_length.str_of("code"), Some("bad_length"));
+
+    // an invalid setting must not leave a half-written conversation behind
+    let (_, convs) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    let messages: usize = convs
+        .get("conversations")
+        .and_then(|c| c.as_arr())
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| c.get("message_count").and_then(|m| m.as_f64()))
+                .map(|n| n as usize)
+                .sum()
+        })
+        .unwrap_or(0);
+    assert_eq!(messages, 10, "five accepted asks (2 messages each), rejections store nothing");
+}

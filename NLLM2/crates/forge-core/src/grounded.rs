@@ -22,6 +22,83 @@ pub struct Answer {
     pub coverage: usize,
 }
 
+/// How the verified evidence is presented. Style never changes *which* evidence is used —
+/// only how it is laid out — so every style is checkable against the same citations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    /// Quoted lines with numbered markers and a closing provenance note (the default).
+    Evidence,
+    /// One short paragraph of quotations, for skimming.
+    Concise,
+    /// Each quotation followed by its source title and locator, plus a sources-consulted line.
+    Detailed,
+}
+
+/// How much verified evidence to include. The number is a real citation count, not a
+/// prose hint: a shorter answer cites fewer passages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Length {
+    Brief,
+    Standard,
+    Thorough,
+}
+
+impl Style {
+    pub fn parse(raw: &str) -> Option<Style> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "evidence" => Some(Style::Evidence),
+            "concise" | "short" => Some(Style::Concise),
+            "detailed" | "explained" => Some(Style::Detailed),
+            _ => None,
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Style::Evidence => "evidence",
+            Style::Concise => "concise",
+            Style::Detailed => "detailed",
+        }
+    }
+}
+
+impl Length {
+    pub fn parse(raw: &str) -> Option<Length> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "standard" => Some(Length::Standard),
+            "brief" | "shorter" => Some(Length::Brief),
+            "thorough" | "longer" => Some(Length::Thorough),
+            _ => None,
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Length::Brief => "brief",
+            Length::Standard => "standard",
+            Length::Thorough => "thorough",
+        }
+    }
+    /// Maximum citations this length may use.
+    pub fn max_citations(&self) -> usize {
+        match self {
+            Length::Brief => 1,
+            Length::Standard => 2,
+            Length::Thorough => 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnswerOptions {
+    pub style: Style,
+    pub length: Length,
+}
+
+impl Default for AnswerOptions {
+    fn default() -> Self {
+        AnswerOptions { style: Style::Evidence, length: Length::Standard }
+    }
+}
+
 /// Minimum BM25 score for a passage to count as evidence at all.
 pub const EVIDENCE_FLOOR: f64 = 0.35;
 
@@ -30,6 +107,26 @@ pub const EVIDENCE_FLOOR: f64 = 0.35;
 pub const SENTENCE_OVERLAP_FLOOR: f64 = 0.30;
 
 pub fn answer(question: &str, chunks: &[Chunk], sources: &[Source], max_citations: usize) -> Answer {
+    answer_limited(question, chunks, sources, max_citations, Style::Evidence)
+}
+
+/// Answer with an explicit presentation style and citation budget.
+pub fn answer_with(
+    question: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    opts: AnswerOptions,
+) -> Answer {
+    answer_limited(question, chunks, sources, opts.length.max_citations(), opts.style)
+}
+
+fn answer_limited(
+    question: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    max_citations: usize,
+    style: Style,
+) -> Answer {
     let hits = retrieve::search(chunks, question, 12);
     let strong: Vec<_> = hits.into_iter().filter(|h| h.score >= EVIDENCE_FLOOR).collect();
 
@@ -119,25 +216,62 @@ pub fn answer(question: &str, chunks: &[Chunk], sources: &[Source], max_citation
     };
 
     let mut text = String::new();
-    if distinct_sources > 1 {
-        text.push_str(&format!(
-            "From {} sources, the passages that bear on this question are:\n\n",
-            distinct_sources
-        ));
-    } else {
-        text.push_str("Based on the selected sources:\n\n");
+    match style {
+        Style::Evidence => {
+            if distinct_sources > 1 {
+                text.push_str(&format!(
+                    "From {} sources, the passages that bear on this question are:\n\n",
+                    distinct_sources
+                ));
+            } else {
+                text.push_str("Based on the selected sources:\n\n");
+            }
+            for s in &sentences {
+                text.push_str("- ");
+                text.push_str(s);
+                text.push('\n');
+            }
+            text.push_str(&format!(
+                "\nEvery statement above is quoted from the notebook's evidence ({} citation{}). \
+                 Forge does not add outside knowledge in grounded mode.",
+                citations.len(),
+                if citations.len() == 1 { "" } else { "s" }
+            ));
+        }
+        Style::Concise => {
+            // same quotations, laid out as one paragraph; no framing claim is added
+            text.push_str(&sentences.join(" "));
+            text.push_str(&format!(
+                "\n\n— quoted from {} passage{} of the notebook's evidence.",
+                citations.len(),
+                if citations.len() == 1 { "" } else { "s" }
+            ));
+        }
+        Style::Detailed => {
+            text.push_str(&format!(
+                "{} passage{} bear on this question. Each is quoted below with its location; \
+                 nothing is paraphrased.\n",
+                citations.len(),
+                if citations.len() == 1 { "" } else { "s" }
+            ));
+            for (i, c) in citations.iter().enumerate() {
+                text.push_str(&format!(
+                    "\n{}. “{}”\n   — {} · {}\n",
+                    i + 1,
+                    c.quote,
+                    c.source_title,
+                    c.locator.human()
+                ));
+            }
+            let mut used: Vec<&str> = citations.iter().map(|c| c.source_title.as_str()).collect();
+            used.dedup();
+            text.push_str(&format!(
+                "\nSources consulted: {}. Quotation only — Forge adds no outside knowledge while \
+                 grounded mode is on.",
+                used.join("; ")
+            ));
+        }
     }
-    for s in &sentences {
-        text.push_str("- ");
-        text.push_str(s);
-        text.push('\n');
-    }
-    text.push_str(&format!(
-        "\nEvery statement above is quoted from the notebook's evidence ({} citation{}). \
-         Forge does not add outside knowledge in grounded mode.",
-        citations.len(),
-        if citations.len() == 1 { "" } else { "s" }
-    ));
 
     Answer {
         text,
@@ -246,6 +380,108 @@ mod tests {
             text: text.into(),
             locator: Locator::page(page, 0, text.len() as u32),
         }
+    }
+
+    fn three_passage_corpus() -> (Vec<Chunk>, Vec<Source>) {
+        let chunks = vec![
+            chunk(
+                "k1",
+                "s1",
+                "The retrieval pipeline ranks candidate spans with BM25 and then builds bounded model context. Ranking happens before any generation step.",
+                1,
+            ),
+            chunk(
+                "k2",
+                "s2",
+                "Candidate spans are ranked by BM25 so that the model only sees context that matched the question. Ranking is deterministic and testable.",
+                2,
+            ),
+            chunk(
+                "k3",
+                "s1",
+                "A bounded context window keeps retrieval ranking honest: spans compete for a fixed budget. Retrieval evidence is quoted verbatim.",
+                3,
+            ),
+        ];
+        (chunks, vec![src("s1", "Retrieval notes"), src("s2", "Pipeline paper")])
+    }
+
+    #[test]
+    fn length_changes_how_many_passages_are_cited() {
+        let (chunks, sources) = three_passage_corpus();
+        let mut counts = Vec::new();
+        for length in [Length::Brief, Length::Standard, Length::Thorough] {
+            let a = answer_with(
+                "how are candidate spans ranked by BM25 for retrieval",
+                &chunks,
+                &sources,
+                AnswerOptions { style: Style::Evidence, length },
+            );
+            assert!(!a.abstained, "{:?}: {}", length, a.text);
+            counts.push(a.citations.len());
+        }
+        assert_eq!(counts[0], 1, "brief means one citation");
+        assert!(counts[1] <= 2 && counts[1] >= counts[0], "standard: {:?}", counts);
+        assert!(counts[2] >= counts[1], "thorough cites at least as much: {:?}", counts);
+        assert_eq!(Length::Brief.max_citations(), 1);
+        assert_eq!(Length::Thorough.max_citations(), 4);
+    }
+
+    #[test]
+    fn style_changes_presentation_and_never_the_evidence() {
+        let (chunks, sources) = three_passage_corpus();
+        let q = "how are candidate spans ranked by BM25 for retrieval";
+        let opts = |style| AnswerOptions { style, length: Length::Standard };
+        let evidence = answer_with(q, &chunks, &sources, opts(Style::Evidence));
+        let concise = answer_with(q, &chunks, &sources, opts(Style::Concise));
+        let detailed = answer_with(q, &chunks, &sources, opts(Style::Detailed));
+
+        // identical evidence: same citations, same order, same quotes
+        let quotes = |a: &Answer| a.citations.iter().map(|c| (c.chunk_id.clone(), c.quote.clone())).collect::<Vec<_>>();
+        assert_eq!(quotes(&evidence), quotes(&concise), "style must not change the evidence");
+        assert_eq!(quotes(&evidence), quotes(&detailed), "style must not change the evidence");
+
+        // but the rendering is visibly different
+        assert!(evidence.text.contains("\n- "), "evidence style lists quotes");
+        assert!(!concise.text.contains("\n- "), "concise has no bullet list");
+        assert!(concise.text.len() < evidence.text.len(), "concise must be shorter");
+        assert!(detailed.text.contains("Sources consulted:"), "{}", detailed.text);
+        assert!(detailed.text.contains(&detailed.citations[0].locator.human()), "detailed shows locations");
+        assert!(detailed.text.contains(&detailed.citations[0].source_title), "detailed names the source");
+
+        // every style stays verifiable: quotes are in their chunks, citations resolve
+        for a in [&evidence, &concise, &detailed] {
+            assert!(validate_citations(&a.citations, &chunks).is_empty());
+            for c in &a.citations {
+                let chunk = chunks.iter().find(|k| k.id == c.chunk_id).unwrap();
+                assert!(chunk.text.contains(&c.quote));
+                assert!(a.text.contains(&c.quote), "each quote appears in the rendered text");
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_style_and_length_values_are_rejected() {
+        assert_eq!(Style::parse("bullets"), None);
+        assert_eq!(Style::parse("Evidence"), Some(Style::Evidence));
+        assert_eq!(Style::parse(""), Some(Style::Evidence));
+        assert_eq!(Length::parse("long"), None);
+        assert_eq!(Length::parse("thorough"), Some(Length::Thorough));
+        assert_eq!(Length::parse("shorter"), Some(Length::Brief));
+    }
+
+    #[test]
+    fn a_styled_answer_still_abstains_without_evidence() {
+        let (chunks, sources) = three_passage_corpus();
+        let a = answer_with(
+            "what is the capital of France",
+            &chunks,
+            &sources,
+            AnswerOptions { style: Style::Concise, length: Length::Thorough },
+        );
+        assert!(a.abstained);
+        assert!(a.citations.is_empty());
+        assert!(!a.text.contains("Sources consulted"), "no skeleton answer when abstaining");
     }
 
     #[test]

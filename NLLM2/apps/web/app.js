@@ -42,6 +42,10 @@ const state = {
   conversationId: null,
   artifact: null,
   busy: false,
+  // Presentation controls, persisted for the session. They change how the verified
+  // evidence is laid out and how many passages are cited — never what is cited.
+  style: localStorage.getItem("forge.style") || "evidence",
+  length: localStorage.getItem("forge.length") || "standard",
 };
 
 // ---------------------------------------------------------------- dom helpers
@@ -497,6 +501,12 @@ function renderSources(pane) {
 }
 
 // ---------------------------------------------------------------- chat
+function lengthHint(length) {
+  if (length === "brief") return "cites 1 passage";
+  if (length === "thorough") return "cites up to 4 passages";
+  return "cites up to 2 passages";
+}
+
 function renderChat(pane, onlyComposer = false) {
   const nb = state.nb;
   if (!pane) return;
@@ -533,12 +543,15 @@ function renderChat(pane, onlyComposer = false) {
         question: q,
         conversation_id: state.conversationId,
         source_ids: [...state.selected],
+        style: state.style,
+        length: state.length,
       });
       state.conversationId = r.conversation_id;
       const msg = {
         role: "assistant", text: r.answer, citations: r.citations,
         abstained: r.abstained, coverage: r.coverage, engine: r.engine,
         computed: r.computed === true, problems: r.citation_problems,
+        settings: r.settings,
       };
       state.messages.push({ role: "user", text: q }, msg);
       pending.replaceWith(messageEl(msg));
@@ -552,10 +565,38 @@ function renderChat(pane, onlyComposer = false) {
     }
   }
 
+  const styleSel = h("select", {
+    id: "chatStyle", "aria-label": "Answer style", title: "How the quoted evidence is laid out",
+    onchange: (e) => { state.style = e.target.value; localStorage.setItem("forge.style", state.style); },
+  }, ...[["evidence", "Evidence list"], ["concise", "Concise"], ["detailed", "Detailed"]].map(([v, label]) => {
+    const opt = h("option", { value: v }, label);
+    if (v === state.style) opt.selected = true;
+    return opt;
+  }));
+  const lengthSel = h("select", {
+    id: "chatLength", "aria-label": "Answer length", title: "How many passages are cited",
+    onchange: (e) => {
+      state.length = e.target.value;
+      localStorage.setItem("forge.length", state.length);
+      const hint = document.getElementById("styleHint");
+      if (hint) hint.textContent = lengthHint(state.length);
+    },
+  }, ...[["brief", "Brief"], ["standard", "Standard"], ["thorough", "Thorough"]].map(([v, label]) => {
+    const opt = h("option", { value: v }, label);
+    if (v === state.length) opt.selected = true;
+    return opt;
+  }));
+
   const composer = h("div", { class: "composer" },
     h("div", { class: "row" },
       ta,
       h("button", { class: "primary", onclick: send }, "Ask")),
+    h("div", { class: "row", style: "margin-top:7px;gap:8px;align-items:center" },
+      h("span", { class: "hint" }, "Style"),
+      styleSel,
+      h("span", { class: "hint" }, "Length"),
+      lengthSel,
+      h("span", { class: "hint", id: "styleHint" }, lengthHint(state.length))),
     h("div", { class: "row-between", style: "margin-top:7px" },
       h("span", { class: "hint" }, "Answers are extractive: sentences from your sources, never invented."),
       h("span", { class: "hint" }, `${state.selected.size} source(s) selected`)));
@@ -592,7 +633,8 @@ function messageEl(m) {
   const meta = h("div", { class: "row-between", style: "margin-top:8px" },
     h("span", { class: "hint" },
       m.computed ? "computed from table cells · " : "",
-      m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : ""),
+      m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : "",
+      m.settings ? ` · ${m.settings.style}/${m.settings.length}` : ""),
     (m.problems || []).length ? h("span", { class: "badge warn" }, "citation check: " + m.problems.join("; ")) : null);
   return h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), body, cites, meta);
 }

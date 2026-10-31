@@ -1,6 +1,6 @@
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-31 (spreadsheet tables + Source Guide).
+Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -19,11 +19,12 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **181 passing, 0 failing** (26 `bininspect` + 138 lib + 12 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **62 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **186 passing, 0 failing** (26 `bininspect` + 142 lib + 13 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **70 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
+| Chat style / length | `style` (evidence · concise · detailed) and `length` (brief · standard · thorough = 1/2/4 citations) are validated, echoed back, and change the rendered answer without ever changing which passages are cited | `grounded::AnswerOptions` + e2e `chat_style_and_length_are_effective_and_validated` |
 | Source Guide | per-source orientation: verbatim quoted headline + summary with locators, recurring terms (incl. two-word phrases), real outline (sections/sheets), suggested questions | `guide` (8 tests) + e2e `source_guide_quotes_the_source_and_refuses_when_empty` + UI smoke (9 assertions) |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
@@ -50,7 +51,7 @@ notebooklm      15
 fetch           11
 retrieve         9
 guide            8
-grounded         8
+grounded        12
 artifacts        7
 security         6
 json             6
@@ -66,12 +67,12 @@ ingest           3   (PDF + dispatch)
 ingest::zip      2
 inflate          2
 --------------------
-lib total      138
+lib total      142
 bininspect      26   (separate crate)
-e2e (HTTP)      12
+e2e (HTTP)      13
 server           5
 ====================
-total          181
+total          186
 ```
 
 ## Not available, with reasons
@@ -89,6 +90,8 @@ total          181
 | `.xls` (BIFF), ODS, Google Sheets | no parser written; binary formats out of scope for now | upload is rejected by kind detection with a clear error, never half-indexed |
 | Data Tables artifact (schema-inferred extraction, charts) | not implemented | reported as `planned`; existing spreadsheets are queried directly instead |
 | Model-written source summaries | no reachable LLM (no TLS client, no key) | the Source Guide is **extractive**: every line is a quotation with its locator, and the payload says `generated_by: extractive`, `model: null` |
+| Streaming / stop | the HTTP layer is a hand-written buffered responder, so answers return whole | not claimed anywhere; `settings` states what was applied, and the answer is instant because it is extractive |
+| Style / length for a remote provider | no provider is reachable | the citation budget is passed to a provider when one is used; the style vocabulary is documented as extractive-engine only |
 | Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps

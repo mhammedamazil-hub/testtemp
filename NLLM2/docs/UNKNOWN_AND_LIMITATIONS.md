@@ -149,3 +149,17 @@ producers emit is unverified.
 * No caching: a guide is recomputed per request. It is deterministic, so two requests return
   identical content (covered by a test), but a very large source costs a full re-tokenisation
   each time.
+
+## Chat style and length (2026-10-31)
+
+* `style` changes **layout only**: evidence list, one paragraph, or per-quote source + locator.
+  It cannot make an answer warmer, more formal, or simpler — an extractive engine quotes, it
+  does not compose. A test asserts the citation set is identical across styles.
+* `length` sets a citation **count** (1 / 2 / 4). It is not a word count; a two-sentence
+  passage and a forty-word passage count the same.
+* With a configured-but-unreachable provider, only the citation budget is forwarded; the style
+  vocabulary does not reach the provider (`partial`, see the feature matrix).
+* Notebook instructions are stored and echoed in the chat response, but they cannot steer the
+  extractive engine; no test claims they do.
+* No streaming: the answer is computed, verified, then returned in one response. There is no
+  "stop" button, and none is shown.

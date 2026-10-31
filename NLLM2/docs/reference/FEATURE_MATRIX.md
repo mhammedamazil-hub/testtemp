@@ -38,8 +38,8 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |
 | CHAT-04 | source selection scopes chat | documented | done | `app.js` + api | UI |
 | CHAT-05 | conversation persistence / history | documented | done | `store.rs` | e2e |
-| CHAT-06 | streaming + stop | documented | planned | — | — |
-| CHAT-07 | style / length / custom instructions | documented | partial (notebook instructions only) | `api.rs` | — |
+| CHAT-06 | streaming + stop | documented | planned — the HTTP responder is buffered; answers return whole (and are instant because they are extractive) | — | — |
+| CHAT-07 | style / length / custom instructions | documented | **partial** — style (evidence/concise/detailed) and length (brief/standard/thorough) are real and validated over the extractive engine; custom instructions are stored and echoed but cannot steer a model that is not reachable | `grounded.rs`, `api::chat`, UI selects | 4 unit + e2e + 8 UI |
 | CHAT-08 | **table answers** (aggregation over source cells) | documented ("table answers" in the answer modes; Data Tables journey I) | **partial** — sum/average/min/max/count over an existing grid, optional group-by; no schema inference, no charts | `tables::try_answer`, `api::chat` | 22 unit + e2e + UI |
 | NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
 | NOTE-02 | save answer as note | documented | done | UI | UI smoke |

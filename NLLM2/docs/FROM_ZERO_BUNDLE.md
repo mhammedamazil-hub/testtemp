@@ -10,663 +10,6 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
-## `crates/forge-core/src/guide.rs`
-
-```rust
-//! Source Guide: a per-source orientation built **only** from the source itself.
-//!
-//! The reference product shows a guide/summary when a source is opened. Forge cannot
-//! reach a model provider (no TLS client, no key), so pretending to summarise with an
-//! LLM would be a lie. What this module produces instead is a deterministic,
-//! extractive guide:
-//!
-//! * every sentence in the summary is **quoted verbatim** from one chunk and carries
-//!   that chunk's id and human locator, so the user can jump to it and check;
-//! * topics are term frequencies with the chunk where each first appears;
-//! * the outline comes from real structure the parser recorded (sections, sheets,
-//!   pages), never from guesswork;
-//! * suggested questions are templates over observed topics, labelled as suggestions.
-//!
-//! The output always says `generated_by: "extractive"` and `model: null`. Nothing here
-//! paraphrases, and nothing is inferred about the source's meaning.
-
-use crate::domain::{Chunk, Source};
-use crate::json::Value;
-use crate::obj;
-use crate::retrieve;
-use crate::tables::Table;
-use std::collections::BTreeMap;
-
-/// Default shape of a guide. Small on purpose: a guide that restates the whole source is
-/// just the source again.
-pub const MAX_SUMMARY_SENTENCES: usize = 5;
-pub const MAX_TOPICS: usize = 8;
-pub const MAX_QUESTIONS: usize = 5;
-
-#[derive(Debug, Clone)]
-pub struct GuideSentence {
-    pub text: String,
-    pub chunk_id: String,
-    pub locator: String,
-    pub ordinal: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct GuideTopic {
-    /// Surface form shown to the user (most frequent original casing). For a phrase this
-    /// is the words joined, e.g. "Calvin cycle".
-    pub term: String,
-    /// Stemmed words the term is made of (one for a single word, two for a phrase).
-    pub stems: Vec<String>,
-    pub count: usize,
-    /// Chunks containing the term.
-    pub chunks: usize,
-    pub first_chunk_id: String,
-    pub first_locator: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct Guide {
-    pub source_id: String,
-    pub title: String,
-    pub kind: String,
-    pub headline: Option<GuideSentence>,
-    pub summary: Vec<GuideSentence>,
-    pub topics: Vec<GuideTopic>,
-    pub outline: Vec<String>,
-    pub questions: Vec<String>,
-    pub word_count: usize,
-    pub chunk_count: usize,
-    pub table_count: usize,
-    pub table_row_count: usize,
-    pub warnings: Vec<String>,
-}
-
-impl Guide {
-    pub fn to_json(&self) -> Value {
-        let sentence_json = |s: &GuideSentence| {
-            obj! {
-                "text" => s.text.as_str(),
-                "chunk_id" => s.chunk_id.as_str(),
-                "locator" => s.locator.as_str(),
-                "ordinal" => s.ordinal as u64,
-            }
-        };
-        obj! {
-            "source_id" => self.source_id.as_str(),
-            "title" => self.title.as_str(),
-            "kind" => self.kind.as_str(),
-            // Honesty fields, read by the UI: this text is quoted, not generated.
-            "generated_by" => "extractive",
-            "model" => Value::Null,
-            "deterministic" => true,
-            "headline" => match &self.headline { Some(s) => sentence_json(s), None => Value::Null },
-            "summary" => Value::Arr(self.summary.iter().map(sentence_json).collect()),
-            "topics" => Value::Arr(self.topics.iter().map(|t| obj! {
-                "term" => t.term.as_str(),
-                "count" => t.count as u64,
-                "chunks" => t.chunks as u64,
-                "chunk_id" => t.first_chunk_id.as_str(),
-                "locator" => t.first_locator.as_str(),
-            }).collect()),
-            "outline" => Value::Arr(self.outline.iter().map(|o| Value::from(o.as_str())).collect()),
-            "questions" => Value::Arr(self.questions.iter().map(|q| Value::from(q.as_str())).collect()),
-            "stats" => obj! {
-                "words" => self.word_count as u64,
-                "chunks" => self.chunk_count as u64,
-                "tables" => self.table_count as u64,
-                "table_rows" => self.table_row_count as u64,
-            },
-            "warnings" => Value::Arr(self.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
-        }
-    }
-}
-
-/// A sentence candidate: score, chunk index, position inside the chunk, text.
-struct Candidate {
-    score: f64,
-    chunk_idx: usize,
-    text: String,
-}
-
-fn jaccard(a: &[String], b: &[String]) -> f64 {
-    if a.is_empty() || b.is_empty() {
-        return 0.0;
-    }
-    let mut inter = 0usize;
-    for x in a {
-        if b.contains(x) {
-            inter += 1;
-        }
-    }
-    let union = a.len() + b.len() - inter;
-    if union == 0 {
-        0.0
-    } else {
-        inter as f64 / union as f64
-    }
-}
-
-/// Choose the surface form to display for a stemmed term: most frequent original casing,
-/// preferring a capitalised form when counts tie (so "BM25" beats "bm25").
-fn surface_forms(chunks: &[Chunk]) -> BTreeMap<String, BTreeMap<String, usize>> {
-    let mut forms: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
-    for c in chunks {
-        for raw in retrieve::tokenize(&c.text) {
-            if raw.len() < 3 {
-                continue;
-            }
-            let stem = retrieve::stem(&raw);
-            *forms.entry(stem).or_default().entry(raw.clone()).or_insert(0) += 1;
-        }
-    }
-    forms
-}
-
-/// Count content words (stemmed) and adjacent two-word phrases, with chunk coverage.
-fn ngram_counts(chunks: &[Chunk], n: usize) -> BTreeMap<String, (usize, usize)> {
-    // stem-key -> (total occurrences, chunks containing it)
-    let mut totals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
-    for c in chunks {
-        let stems: Vec<String> = retrieve::terms(&c.text).into_iter().map(|t| retrieve::stem(&t)).collect();
-        let mut seen: Vec<String> = Vec::new();
-        for i in 0..stems.len() {
-            if i + n > stems.len() {
-                break;
-            }
-            let key = stems[i..i + n].join(" ");
-            let e = totals.entry(key.clone()).or_insert((0, 0));
-            e.0 += 1;
-            if !seen.contains(&key) {
-                seen.push(key);
-                e.1 += 1;
-            }
-        }
-    }
-    totals
-}
-
-fn surface_of(stem: &str, forms: &BTreeMap<String, BTreeMap<String, usize>>) -> String {
-    forms
-        .get(stem)
-        .and_then(|m| m.iter().max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0))).map(|(k, _)| k.clone()))
-        .unwrap_or_else(|| stem.to_string())
-}
-
-/// Topics for display, and the unigram weights used to score sentences.
-///
-/// A phrase ("calvin cycle") is preferred over its parts when it recurs: a guide that
-/// lists "calvin" and "cycle" separately is less useful than one that lists the phrase.
-fn topic_terms(chunks: &[Chunk]) -> (Vec<GuideTopic>, Vec<(String, f64)>) {
-    let forms = surface_forms(chunks);
-    let min_chunks = if chunks.len() > 1 { 2 } else { 1 };
-    let unigrams = ngram_counts(chunks, 1);
-    let bigrams = ngram_counts(chunks, 2);
-
-    let mut topics: Vec<GuideTopic> = Vec::new();
-    let mut absorbed: Vec<String> = Vec::new();
-    let mut phrases: Vec<(String, usize, usize, Vec<String>)> = Vec::new();
-    for (key, (count, chunk_count)) in &bigrams {
-        if *chunk_count < min_chunks || *count < 2 {
-            continue;
-        }
-        let parts: Vec<String> = key.split(' ').map(|x| x.to_string()).collect();
-        // a phrase made of one-word parts that never occur alone would be noise
-        if parts.iter().any(|p| p.len() < 3) {
-            continue;
-        }
-        phrases.push((key.clone(), *count, *chunk_count, parts));
-    }
-    phrases.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    phrases.truncate(4);
-
-    for (key, count, chunk_count, parts) in &phrases {
-        let surface: Vec<String> = parts.iter().map(|p| surface_of(p, &forms)).collect();
-        for p in parts {
-            // the phrase usually accounts for this word; listing both would be repetition
-            if let Some((uni_count, _)) = unigrams.get(p) {
-                if count * 2 >= *uni_count {
-                    absorbed.push(p.clone());
-                }
-            }
-        }
-        topics.push(GuideTopic {
-            term: surface.join(" "),
-            stems: parts.clone(),
-            count: *count,
-            chunks: *chunk_count,
-            first_chunk_id: String::new(),
-            first_locator: String::new(),
-        });
-        let _ = key;
-    }
-
-    for (stem, (count, chunk_count)) in &unigrams {
-        if *chunk_count < min_chunks || stem.len() < 3 || absorbed.contains(stem) {
-            continue;
-        }
-        topics.push(GuideTopic {
-            term: surface_of(stem, &forms),
-            stems: vec![stem.clone()],
-            count: *count,
-            chunks: *chunk_count,
-            first_chunk_id: String::new(),
-            first_locator: String::new(),
-        });
-    }
-
-    topics.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.term.cmp(&b.term)));
-    topics.truncate(MAX_TOPICS);
-
-    // sentence scoring keeps every unigram, including ones absorbed into a phrase
-    let mut weights: Vec<(String, f64)> = unigrams
-        .iter()
-        .filter(|(stem, (count, chunk_count))| *chunk_count >= min_chunks && stem.len() >= 3 && *count > 0)
-        .map(|(stem, (count, _))| (stem.clone(), (*count as f64).sqrt()))
-        .collect();
-    weights.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
-    (topics, weights)
-}
-
-/// Does this chunk mention the topic (all words of a phrase, in any order)?
-fn mentions(chunk: &Chunk, topic: &GuideTopic) -> bool {
-    let stems: Vec<String> = retrieve::terms(&chunk.text).into_iter().map(|t| retrieve::stem(&t)).collect();
-    topic.stems.iter().all(|want| stems.contains(want))
-}
-
-fn sentences_in(chunk: &Chunk) -> Vec<String> {
-    retrieve::split_sentences(&chunk.text)
-        .into_iter()
-        .filter(|s| {
-            let words = s.split_whitespace().count();
-            (4..=60).contains(&words)
-        })
-        .collect()
-}
-
-/// Rank sentences by how much of the source's core vocabulary they carry, but keep them
-/// in document order in the output so the guide reads like the source, not like a ranking.
-fn ranked_sentences(chunks: &[Chunk], weights: &[(String, f64)]) -> Vec<Candidate> {
-    let weight: BTreeMap<String, f64> = weights.iter().cloned().collect();
-
-    let mut out: Vec<Candidate> = Vec::new();
-    for (idx, c) in chunks.iter().enumerate() {
-        for s in sentences_in(c) {
-            let toks: Vec<String> = retrieve::terms(&s).into_iter().map(|t| retrieve::stem(&t)).collect();
-            if toks.is_empty() {
-                continue;
-            }
-            let mut score = 0.0f64;
-            let mut covered = 0usize;
-            for t in &toks {
-                if let Some(w) = weight.get(t) {
-                    score += w;
-                    covered += 1;
-                }
-            }
-            if covered == 0 {
-                continue; // a sentence sharing nothing with the source's vocabulary is noise
-            }
-            let distinct: Vec<String> = {
-                let mut d = toks.clone();
-                d.sort();
-                d.dedup();
-                d
-            };
-            // length normalisation + a bonus for covering many distinct core terms
-            score *= 1.0 + (distinct.len() as f64).sqrt() / 4.0;
-            score /= (toks.len() as f64).sqrt();
-            out.push(Candidate { score, chunk_idx: idx, text: s });
-        }
-    }
-    out.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.chunk_idx.cmp(&b.chunk_idx))
-            .then(a.text.cmp(&b.text))
-    });
-    out
-}
-
-fn pick_summary(chunks: &[Chunk], candidates: Vec<Candidate>, limit: usize) -> Vec<GuideSentence> {
-    let mut chosen: Vec<(u32, usize, GuideSentence)> = Vec::new();
-    let mut seen: Vec<Vec<String>> = Vec::new();
-    for cand in candidates {
-        if chosen.len() >= limit {
-            break;
-        }
-        let toks: Vec<String> = retrieve::terms(&cand.text).into_iter().map(|t| retrieve::stem(&t)).collect();
-        // near-duplicates make a summary look padded; one paraphrase per idea is enough
-        if seen.iter().any(|s| jaccard(s, &toks) > 0.55) {
-            continue;
-        }
-        seen.push(toks);
-        let c = &chunks[cand.chunk_idx];
-        let at = c.text.find(&cand.text).unwrap_or(usize::MAX);
-        chosen.push((
-            c.ordinal,
-            at,
-            GuideSentence {
-                text: cand.text,
-                chunk_id: c.id.clone(),
-                locator: c.locator.human(),
-                ordinal: c.ordinal,
-            },
-        ));
-    }
-    // read in document order: a score ranking jumps around and reads like a list of
-    // unrelated lines; the source's own order keeps the meaning intact
-    chosen.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    chosen.into_iter().map(|(_, _, s)| s).collect()
-}
-
-/// Real structure the parser recorded: sections/slides, then sheets, then pages.
-fn outline_of(source: &Source, chunks: &[Chunk], tables: &[Table]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for c in chunks {
-        if let Some(section) = &c.locator.section {
-            if !section.trim().is_empty() && !out.iter().any(|x| x.eq_ignore_ascii_case(section)) {
-                out.push(section.clone());
-            }
-        }
-    }
-    for t in tables {
-        out.push(format!(
-            "sheet {} ({} row{}{})",
-            t.sheet,
-            t.rows.len(),
-            if t.rows.len() == 1 { "" } else { "s" },
-            if t.hidden { ", hidden" } else { "" }
-        ));
-    }
-    if out.is_empty() && source.page_count > 1 {
-        out.push(format!("{} pages", source.page_count));
-    }
-    out.truncate(40);
-    out
-}
-
-fn questions_for(topics: &[GuideTopic], tables: &[Table]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for t in tables.iter().filter(|t| !t.hidden) {
-        // suggest a computation only when a numeric column actually exists
-        for (i, header) in t.headers.iter().enumerate() {
-            let numeric = t
-                .rows
-                .iter()
-                .filter(|r| t.cell(r, i).map(|c| c.is_number()).unwrap_or(false))
-                .count();
-            if numeric >= 2 && out.len() < MAX_QUESTIONS {
-                out.push(format!("What is the total {} in {}?", header, t.sheet));
-                break;
-            }
-        }
-    }
-    for topic in topics {
-        if out.len() >= MAX_QUESTIONS {
-            break;
-        }
-        out.push(format!("What does {} say about {}?", "this source", topic.term));
-    }
-    out.truncate(MAX_QUESTIONS);
-    out
-}
-
-/// Build the guide for one source.
-///
-/// Returns an error when there is nothing to orient the user in — an empty guide would be
-/// worse than no guide.
-pub fn build(source: &Source, chunks: &[Chunk], tables: &[Table]) -> Result<Guide, String> {
-    let mut own: Vec<Chunk> = chunks.iter().filter(|c| c.source_id == source.id).cloned().collect();
-    own.sort_by_key(|c| c.ordinal);
-    if own.is_empty() {
-        return Err("this source has no indexed passages yet".into());
-    }
-    let mine: Vec<Table> = tables.iter().filter(|t| t.source_id == source.id).cloned().collect();
-
-    let word_count = own.iter().map(|c| retrieve::tokenize(&c.text).len()).sum();
-    let (mut topics, weights) = topic_terms(&own);
-    for t in topics.iter_mut() {
-        if let Some(c) = own.iter().find(|c| mentions(c, t)) {
-            t.first_chunk_id = c.id.clone();
-            t.first_locator = c.locator.human();
-        }
-    }
-
-    let candidates = ranked_sentences(&own, &weights);
-    let mut summary = pick_summary(&own, candidates, MAX_SUMMARY_SENTENCES);
-    // The highest-ranked line is the headline; the rest are the summary.
-    let headline = if summary.is_empty() { None } else { Some(summary.remove(0)) };
-
-    let mut warnings: Vec<String> = Vec::new();
-    if own.len() == 1 {
-        warnings.push("single passage: topics cannot be cross-checked across the source".into());
-    }
-    if word_count < 40 {
-        warnings.push("very short source: the guide is close to quoting it in full".into());
-    }
-    let mut guide = Guide {
-        source_id: source.id.clone(),
-        title: source.title.clone(),
-        kind: source.kind.clone(),
-        headline,
-        summary,
-        topics,
-        outline: outline_of(source, &own, &mine),
-        questions: Vec::new(),
-        word_count,
-        chunk_count: own.len(),
-        table_count: mine.len(),
-        table_row_count: mine.iter().map(|t| t.rows.len()).sum(),
-        warnings: Vec::new(),
-    };
-    guide.questions = questions_for(&guide.topics, &mine);
-    for w in source.warnings.iter().chain(warnings.iter()) {
-        if !guide.warnings.contains(w) {
-            guide.warnings.push(w.clone());
-        }
-    }
-    Ok(guide)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::Locator;
-
-    fn src(id: &str, kind: &str) -> Source {
-        Source { id: id.into(), kind: kind.into(), title: "Doc".into(), status: "ready".into(), ..Default::default() }
-    }
-
-    fn chunk(id: &str, sid: &str, ordinal: u32, text: &str) -> Chunk {
-        Chunk {
-            id: id.into(),
-            source_id: sid.into(),
-            notebook_id: "nb".into(),
-            ordinal,
-            text: text.into(),
-            locator: Locator::paragraph(ordinal, 0, 0),
-        }
-    }
-
-    fn corpus() -> Vec<Chunk> {
-        vec![
-            chunk(
-                "c1",
-                "s1",
-                0,
-                "Photosynthesis converts light energy into chemical energy inside chloroplasts. \
-                 Chlorophyll absorbs light most strongly in the blue and red bands. \
-                 The Calvin cycle fixes carbon dioxide into glucose using ATP and NADPH.",
-            ),
-            chunk(
-                "c2",
-                "s1",
-                1,
-                "Chlorophyll reflects green light, which is why leaves look green. \
-                 The Calvin cycle runs in the stroma and does not require light directly. \
-                 Carbon dioxide enters through stomata.",
-            ),
-            chunk(
-                "c3",
-                "s1",
-                2,
-                "Light reactions produce ATP and NADPH for the Calvin cycle. \
-                 Stomata close under drought stress, limiting carbon dioxide uptake.",
-            ),
-        ]
-    }
-
-    #[test]
-    fn every_summary_sentence_is_a_verbatim_quote_with_a_real_locator() {
-        let chunks = corpus();
-        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
-        let all: Vec<&GuideSentence> = g.headline.iter().chain(g.summary.iter()).collect();
-        assert!(!all.is_empty());
-        for s in all {
-            let c = chunks.iter().find(|c| c.id == s.chunk_id).expect("chunk exists");
-            assert!(c.text.contains(&s.text), "quote must appear verbatim in its chunk: {}", s.text);
-            assert_eq!(s.locator, c.locator.human());
-        }
-        let json = g.to_json();
-        assert_eq!(json.str_of("generated_by"), Some("extractive"), "never claims to be a model summary");
-        assert!(json.get("model").map(|m| m.is_null()).unwrap_or(false));
-    }
-
-    #[test]
-    fn summary_prefers_distinct_ideas_over_repeats() {
-        let chunks = corpus();
-        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
-        let texts: Vec<String> = g.summary.iter().map(|s| s.text.clone()).collect();
-        assert!(texts.len() >= 2, "summary too short: {:?}", texts);
-        for i in 0..texts.len() {
-            for j in (i + 1)..texts.len() {
-                let a: Vec<String> = retrieve::terms(&texts[i]).into_iter().map(|t| retrieve::stem(&t)).collect();
-                let b: Vec<String> = retrieve::terms(&texts[j]).into_iter().map(|t| retrieve::stem(&t)).collect();
-                assert!(jaccard(&a, &b) <= 0.55, "near-duplicates kept: {} / {}", texts[i], texts[j]);
-            }
-        }
-        // and the summary is not just chunk 1: a guide should cover the source
-        let distinct_chunks: std::collections::BTreeSet<&str> =
-            g.summary.iter().map(|s| s.chunk_id.as_str()).collect();
-        assert!(distinct_chunks.len() >= 2, "summary stayed in one chunk");
-    }
-
-    #[test]
-    fn topics_are_content_words_with_locations_and_a_stable_order() {
-        let chunks = corpus();
-        let g1 = build(&src("s1", "text"), &chunks, &[]).unwrap();
-        let g2 = build(&src("s1", "text"), &chunks, &[]).unwrap();
-        assert_eq!(
-            g1.topics.iter().map(|t| t.term.clone()).collect::<Vec<_>>(),
-            g2.topics.iter().map(|t| t.term.clone()).collect::<Vec<_>>(),
-            "same input must give the same guide"
-        );
-        assert!(g1.topics.len() >= 3, "{:?}", g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>());
-        for t in &g1.topics {
-            assert!(!t.first_chunk_id.is_empty(), "topic {} has no location", t.term);
-            let lower = t.term.to_lowercase();
-            for stop in ["the", "and", "into", "which", "does"] {
-                assert_ne!(lower, stop, "stopword leaked into topics: {}", t.term);
-            }
-            assert!(t.chunks >= 2 || chunks.len() == 1, "topic {} appears in one chunk only", t.term);
-        }
-        // "Calvin cycle" is the recurring idea in this corpus: it must surface as the phrase,
-        // not as two unrelated words
-        assert!(
-            g1.topics.iter().any(|t| t.term.eq_ignore_ascii_case("calvin cycle")),
-            "expected a Calvin-cycle phrase, got {:?}",
-            g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>()
-        );
-        assert!(
-            !g1.topics.iter().any(|t| t.term.eq_ignore_ascii_case("calvin")
-                || t.term.eq_ignore_ascii_case("cycle")),
-            "the absorbed words must not be listed twice: {:?}",
-            g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn a_single_short_source_says_so_instead_of_padding() {
-        let chunks = vec![chunk("c1", "s1", 0, "Only one line about ATP.")];
-        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
-        assert!(g.warnings.iter().any(|w| w.contains("single passage")), "{:?}", g.warnings);
-        assert!(g.warnings.iter().any(|w| w.contains("very short")), "{:?}", g.warnings);
-        assert!(g.summary.is_empty(), "one sentence cannot be a multi-sentence summary");
-    }
-
-    #[test]
-    fn a_source_without_passages_refuses() {
-        assert!(build(&src("s1", "text"), &[], &[]).is_err());
-    }
-
-    #[test]
-    fn outline_uses_real_structure_only() {
-        let chunks = vec![
-            Chunk { locator: Locator::section("Intro", 0, 0), ..chunk("c1", "s1", 0, "Intro text about ATP hydrolysis in cells.") },
-            Chunk { locator: Locator::section("Methods", 0, 0), ..chunk("c2", "s1", 1, "Methods text about ATP assays in cells.") },
-        ];
-        let g = build(&src("s1", "markdown"), &chunks, &[]).unwrap();
-        assert_eq!(g.outline, vec!["Intro", "Methods"]);
-
-        let mut parsed = crate::tables::parse_xlsx(
-            &std::fs::read(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sales.xlsx"),
-            )
-            .unwrap(),
-            "s1",
-            "nb",
-        )
-        .unwrap();
-        parsed[1].hidden = true;
-        let g = build(&src("s1", "xlsx"), &corpus(), &parsed).unwrap();
-        assert!(g.outline.iter().any(|o| o.contains("sheet Sales")), "{:?}", g.outline);
-        assert!(g.outline.iter().any(|o| o.contains("Meta (1 row, hidden)")), "{:?}", g.outline);
-        assert_eq!(g.table_count, 2);
-    }
-
-    #[test]
-    fn suggested_questions_are_grounded_in_observed_topics_and_columns() {
-        let mut tables = crate::tables::parse_xlsx(
-            &std::fs::read(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sales.xlsx"),
-            )
-            .unwrap(),
-            "s1",
-            "nb",
-        )
-        .unwrap();
-        tables[1].hidden = true;
-        let g = build(&src("s1", "xlsx"), &corpus(), &tables).unwrap();
-        assert!(g.questions.len() <= MAX_QUESTIONS);
-        assert!(
-            g.questions.iter().any(|q| q.contains("total") && q.contains("Sales")),
-            "expected a table question, got {:?}",
-            g.questions
-        );
-        for q in &g.questions {
-            assert!(!q.contains("Meta"), "hidden sheets must not be suggested: {}", q);
-        }
-    }
-
-    #[test]
-    fn the_guide_json_is_complete_and_serialisable() {
-        let g = build(&src("s1", "text"), &corpus(), &[]).unwrap();
-        let json = g.to_json();
-        let text = crate::json::to_string(&json);
-        let back = crate::json::parse(&text).expect("guide json parses");
-        for key in ["source_id", "headline", "summary", "topics", "outline", "questions", "stats", "warnings"] {
-            assert!(back.get(key).is_some(), "missing {} in guide json", key);
-        }
-        assert_eq!(
-            back.get("stats").and_then(|s| s.get("chunks")).and_then(|x| x.as_f64()),
-            Some(3.0)
-        );
-    }
-}
-```
-
 ## `.gitignore`
 
 ```
@@ -839,6 +182,10 @@ const state = {
   conversationId: null,
   artifact: null,
   busy: false,
+  // Presentation controls, persisted for the session. They change how the verified
+  // evidence is laid out and how many passages are cited — never what is cited.
+  style: localStorage.getItem("forge.style") || "evidence",
+  length: localStorage.getItem("forge.length") || "standard",
 };
 
 // ---------------------------------------------------------------- dom helpers
@@ -1294,6 +641,12 @@ function renderSources(pane) {
 }
 
 // ---------------------------------------------------------------- chat
+function lengthHint(length) {
+  if (length === "brief") return "cites 1 passage";
+  if (length === "thorough") return "cites up to 4 passages";
+  return "cites up to 2 passages";
+}
+
 function renderChat(pane, onlyComposer = false) {
   const nb = state.nb;
   if (!pane) return;
@@ -1330,12 +683,15 @@ function renderChat(pane, onlyComposer = false) {
         question: q,
         conversation_id: state.conversationId,
         source_ids: [...state.selected],
+        style: state.style,
+        length: state.length,
       });
       state.conversationId = r.conversation_id;
       const msg = {
         role: "assistant", text: r.answer, citations: r.citations,
         abstained: r.abstained, coverage: r.coverage, engine: r.engine,
         computed: r.computed === true, problems: r.citation_problems,
+        settings: r.settings,
       };
       state.messages.push({ role: "user", text: q }, msg);
       pending.replaceWith(messageEl(msg));
@@ -1349,10 +705,38 @@ function renderChat(pane, onlyComposer = false) {
     }
   }
 
+  const styleSel = h("select", {
+    id: "chatStyle", "aria-label": "Answer style", title: "How the quoted evidence is laid out",
+    onchange: (e) => { state.style = e.target.value; localStorage.setItem("forge.style", state.style); },
+  }, ...[["evidence", "Evidence list"], ["concise", "Concise"], ["detailed", "Detailed"]].map(([v, label]) => {
+    const opt = h("option", { value: v }, label);
+    if (v === state.style) opt.selected = true;
+    return opt;
+  }));
+  const lengthSel = h("select", {
+    id: "chatLength", "aria-label": "Answer length", title: "How many passages are cited",
+    onchange: (e) => {
+      state.length = e.target.value;
+      localStorage.setItem("forge.length", state.length);
+      const hint = document.getElementById("styleHint");
+      if (hint) hint.textContent = lengthHint(state.length);
+    },
+  }, ...[["brief", "Brief"], ["standard", "Standard"], ["thorough", "Thorough"]].map(([v, label]) => {
+    const opt = h("option", { value: v }, label);
+    if (v === state.length) opt.selected = true;
+    return opt;
+  }));
+
   const composer = h("div", { class: "composer" },
     h("div", { class: "row" },
       ta,
       h("button", { class: "primary", onclick: send }, "Ask")),
+    h("div", { class: "row", style: "margin-top:7px;gap:8px;align-items:center" },
+      h("span", { class: "hint" }, "Style"),
+      styleSel,
+      h("span", { class: "hint" }, "Length"),
+      lengthSel,
+      h("span", { class: "hint", id: "styleHint" }, lengthHint(state.length))),
     h("div", { class: "row-between", style: "margin-top:7px" },
       h("span", { class: "hint" }, "Answers are extractive: sentences from your sources, never invented."),
       h("span", { class: "hint" }, `${state.selected.size} source(s) selected`)));
@@ -1389,7 +773,8 @@ function messageEl(m) {
   const meta = h("div", { class: "row-between", style: "margin-top:8px" },
     h("span", { class: "hint" },
       m.computed ? "computed from table cells · " : "",
-      m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : ""),
+      m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : "",
+      m.settings ? ` · ${m.settings.style}/${m.settings.length}` : ""),
     (m.problems || []).length ? h("span", { class: "badge warn" }, "citation check: " + m.problems.join("; ")) : null);
   return h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), body, cites, meta);
 }
@@ -5880,6 +5265,26 @@ impl Api {
             return Err(err(404, "not_found", "notebook not found"));
         }
 
+        // Presentation controls. Both are validated: an unknown value is rejected rather
+        // than silently replaced by the default, so the UI can never claim a style it got.
+        let style_raw = body.str_of("style").unwrap_or("").to_string();
+        let length_raw = body.str_of("length").unwrap_or("").to_string();
+        let Some(style) = grounded::Style::parse(&style_raw) else {
+            return Err(err(
+                422,
+                "bad_style",
+                &format!("unknown style \"{}\" (use evidence, concise or detailed)", style_raw),
+            ));
+        };
+        let Some(length) = grounded::Length::parse(&length_raw) else {
+            return Err(err(
+                422,
+                "bad_length",
+                &format!("unknown length \"{}\" (use brief, standard or thorough)", length_raw),
+            ));
+        };
+        let answer_opts = grounded::AnswerOptions { style, length };
+
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
         let instructions = self.store.read(|db| {
             db.notebooks
@@ -5939,9 +5344,17 @@ impl Api {
                 (a, problems)
             }
             None => {
-                let a = engine
-                    .answer(&question, &chunks, &sources, 4)
-                    .unwrap_or_else(|_| grounded::answer(&question, &chunks, &sources, 4));
+                // Our own engine is called directly so style/length are honoured; a
+                // provider (when one is reachable) only receives the citation budget.
+                let a = if engine.name() == "extractive" {
+                    grounded::answer_with(&question, &chunks, &sources, answer_opts)
+                } else {
+                    engine
+                        .answer(&question, &chunks, &sources, answer_opts.length.max_citations())
+                        .unwrap_or_else(|_| {
+                            grounded::answer_with(&question, &chunks, &sources, answer_opts)
+                        })
+                };
                 let problems = grounded::validate_citations(&a.citations, &chunks);
                 (a, problems)
             }
@@ -6013,6 +5426,11 @@ impl Api {
             "grounded" => true,
             "engine" => answer.engine.clone(),
             "engine_note" => engine_note.clone(),
+            "settings" => obj! {
+                "style" => answer_opts.style.as_str(),
+                "length" => answer_opts.length.as_str(),
+                "max_citations" => answer_opts.length.max_citations() as u64,
+            },
             "coverage" => answer.coverage as u64,
             "citation_problems" => Value::Arr(problems.iter().map(|p| Value::from(p.as_str())).collect()),
             "sources_considered" => sources.len() as u64,
@@ -6185,6 +5603,26 @@ impl Api {
         let body = parse_body(req)?;
         let kind = body.str_of("kind").unwrap_or("").to_string();
         let topic = body.str_of("topic").unwrap_or("").to_string();
+        // Presentation controls. Both are validated: an unknown value is rejected rather
+        // than silently replaced by the default, so the UI can never claim a style it got.
+        let style_raw = body.str_of("style").unwrap_or("").to_string();
+        let length_raw = body.str_of("length").unwrap_or("").to_string();
+        let Some(style) = grounded::Style::parse(&style_raw) else {
+            return Err(err(
+                422,
+                "bad_style",
+                &format!("unknown style \"{}\" (use evidence, concise or detailed)", style_raw),
+            ));
+        };
+        let Some(length) = grounded::Length::parse(&length_raw) else {
+            return Err(err(
+                422,
+                "bad_length",
+                &format!("unknown length \"{}\" (use brief, standard or thorough)", length_raw),
+            ));
+        };
+        let answer_opts = grounded::AnswerOptions { style, length };
+
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
 
         let (chunks, sources) = self.store.read(|db| {
@@ -8607,6 +8045,83 @@ pub struct Answer {
     pub coverage: usize,
 }
 
+/// How the verified evidence is presented. Style never changes *which* evidence is used —
+/// only how it is laid out — so every style is checkable against the same citations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    /// Quoted lines with numbered markers and a closing provenance note (the default).
+    Evidence,
+    /// One short paragraph of quotations, for skimming.
+    Concise,
+    /// Each quotation followed by its source title and locator, plus a sources-consulted line.
+    Detailed,
+}
+
+/// How much verified evidence to include. The number is a real citation count, not a
+/// prose hint: a shorter answer cites fewer passages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Length {
+    Brief,
+    Standard,
+    Thorough,
+}
+
+impl Style {
+    pub fn parse(raw: &str) -> Option<Style> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "evidence" => Some(Style::Evidence),
+            "concise" | "short" => Some(Style::Concise),
+            "detailed" | "explained" => Some(Style::Detailed),
+            _ => None,
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Style::Evidence => "evidence",
+            Style::Concise => "concise",
+            Style::Detailed => "detailed",
+        }
+    }
+}
+
+impl Length {
+    pub fn parse(raw: &str) -> Option<Length> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "standard" => Some(Length::Standard),
+            "brief" | "shorter" => Some(Length::Brief),
+            "thorough" | "longer" => Some(Length::Thorough),
+            _ => None,
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Length::Brief => "brief",
+            Length::Standard => "standard",
+            Length::Thorough => "thorough",
+        }
+    }
+    /// Maximum citations this length may use.
+    pub fn max_citations(&self) -> usize {
+        match self {
+            Length::Brief => 1,
+            Length::Standard => 2,
+            Length::Thorough => 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnswerOptions {
+    pub style: Style,
+    pub length: Length,
+}
+
+impl Default for AnswerOptions {
+    fn default() -> Self {
+        AnswerOptions { style: Style::Evidence, length: Length::Standard }
+    }
+}
+
 /// Minimum BM25 score for a passage to count as evidence at all.
 pub const EVIDENCE_FLOOR: f64 = 0.35;
 
@@ -8615,6 +8130,26 @@ pub const EVIDENCE_FLOOR: f64 = 0.35;
 pub const SENTENCE_OVERLAP_FLOOR: f64 = 0.30;
 
 pub fn answer(question: &str, chunks: &[Chunk], sources: &[Source], max_citations: usize) -> Answer {
+    answer_limited(question, chunks, sources, max_citations, Style::Evidence)
+}
+
+/// Answer with an explicit presentation style and citation budget.
+pub fn answer_with(
+    question: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    opts: AnswerOptions,
+) -> Answer {
+    answer_limited(question, chunks, sources, opts.length.max_citations(), opts.style)
+}
+
+fn answer_limited(
+    question: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    max_citations: usize,
+    style: Style,
+) -> Answer {
     let hits = retrieve::search(chunks, question, 12);
     let strong: Vec<_> = hits.into_iter().filter(|h| h.score >= EVIDENCE_FLOOR).collect();
 
@@ -8704,25 +8239,62 @@ pub fn answer(question: &str, chunks: &[Chunk], sources: &[Source], max_citation
     };
 
     let mut text = String::new();
-    if distinct_sources > 1 {
-        text.push_str(&format!(
-            "From {} sources, the passages that bear on this question are:\n\n",
-            distinct_sources
-        ));
-    } else {
-        text.push_str("Based on the selected sources:\n\n");
+    match style {
+        Style::Evidence => {
+            if distinct_sources > 1 {
+                text.push_str(&format!(
+                    "From {} sources, the passages that bear on this question are:\n\n",
+                    distinct_sources
+                ));
+            } else {
+                text.push_str("Based on the selected sources:\n\n");
+            }
+            for s in &sentences {
+                text.push_str("- ");
+                text.push_str(s);
+                text.push('\n');
+            }
+            text.push_str(&format!(
+                "\nEvery statement above is quoted from the notebook's evidence ({} citation{}). \
+                 Forge does not add outside knowledge in grounded mode.",
+                citations.len(),
+                if citations.len() == 1 { "" } else { "s" }
+            ));
+        }
+        Style::Concise => {
+            // same quotations, laid out as one paragraph; no framing claim is added
+            text.push_str(&sentences.join(" "));
+            text.push_str(&format!(
+                "\n\n— quoted from {} passage{} of the notebook's evidence.",
+                citations.len(),
+                if citations.len() == 1 { "" } else { "s" }
+            ));
+        }
+        Style::Detailed => {
+            text.push_str(&format!(
+                "{} passage{} bear on this question. Each is quoted below with its location; \
+                 nothing is paraphrased.\n",
+                citations.len(),
+                if citations.len() == 1 { "" } else { "s" }
+            ));
+            for (i, c) in citations.iter().enumerate() {
+                text.push_str(&format!(
+                    "\n{}. “{}”\n   — {} · {}\n",
+                    i + 1,
+                    c.quote,
+                    c.source_title,
+                    c.locator.human()
+                ));
+            }
+            let mut used: Vec<&str> = citations.iter().map(|c| c.source_title.as_str()).collect();
+            used.dedup();
+            text.push_str(&format!(
+                "\nSources consulted: {}. Quotation only — Forge adds no outside knowledge while \
+                 grounded mode is on.",
+                used.join("; ")
+            ));
+        }
     }
-    for s in &sentences {
-        text.push_str("- ");
-        text.push_str(s);
-        text.push('\n');
-    }
-    text.push_str(&format!(
-        "\nEvery statement above is quoted from the notebook's evidence ({} citation{}). \
-         Forge does not add outside knowledge in grounded mode.",
-        citations.len(),
-        if citations.len() == 1 { "" } else { "s" }
-    ));
 
     Answer {
         text,
@@ -8831,6 +8403,108 @@ mod tests {
             text: text.into(),
             locator: Locator::page(page, 0, text.len() as u32),
         }
+    }
+
+    fn three_passage_corpus() -> (Vec<Chunk>, Vec<Source>) {
+        let chunks = vec![
+            chunk(
+                "k1",
+                "s1",
+                "The retrieval pipeline ranks candidate spans with BM25 and then builds bounded model context. Ranking happens before any generation step.",
+                1,
+            ),
+            chunk(
+                "k2",
+                "s2",
+                "Candidate spans are ranked by BM25 so that the model only sees context that matched the question. Ranking is deterministic and testable.",
+                2,
+            ),
+            chunk(
+                "k3",
+                "s1",
+                "A bounded context window keeps retrieval ranking honest: spans compete for a fixed budget. Retrieval evidence is quoted verbatim.",
+                3,
+            ),
+        ];
+        (chunks, vec![src("s1", "Retrieval notes"), src("s2", "Pipeline paper")])
+    }
+
+    #[test]
+    fn length_changes_how_many_passages_are_cited() {
+        let (chunks, sources) = three_passage_corpus();
+        let mut counts = Vec::new();
+        for length in [Length::Brief, Length::Standard, Length::Thorough] {
+            let a = answer_with(
+                "how are candidate spans ranked by BM25 for retrieval",
+                &chunks,
+                &sources,
+                AnswerOptions { style: Style::Evidence, length },
+            );
+            assert!(!a.abstained, "{:?}: {}", length, a.text);
+            counts.push(a.citations.len());
+        }
+        assert_eq!(counts[0], 1, "brief means one citation");
+        assert!(counts[1] <= 2 && counts[1] >= counts[0], "standard: {:?}", counts);
+        assert!(counts[2] >= counts[1], "thorough cites at least as much: {:?}", counts);
+        assert_eq!(Length::Brief.max_citations(), 1);
+        assert_eq!(Length::Thorough.max_citations(), 4);
+    }
+
+    #[test]
+    fn style_changes_presentation_and_never_the_evidence() {
+        let (chunks, sources) = three_passage_corpus();
+        let q = "how are candidate spans ranked by BM25 for retrieval";
+        let opts = |style| AnswerOptions { style, length: Length::Standard };
+        let evidence = answer_with(q, &chunks, &sources, opts(Style::Evidence));
+        let concise = answer_with(q, &chunks, &sources, opts(Style::Concise));
+        let detailed = answer_with(q, &chunks, &sources, opts(Style::Detailed));
+
+        // identical evidence: same citations, same order, same quotes
+        let quotes = |a: &Answer| a.citations.iter().map(|c| (c.chunk_id.clone(), c.quote.clone())).collect::<Vec<_>>();
+        assert_eq!(quotes(&evidence), quotes(&concise), "style must not change the evidence");
+        assert_eq!(quotes(&evidence), quotes(&detailed), "style must not change the evidence");
+
+        // but the rendering is visibly different
+        assert!(evidence.text.contains("\n- "), "evidence style lists quotes");
+        assert!(!concise.text.contains("\n- "), "concise has no bullet list");
+        assert!(concise.text.len() < evidence.text.len(), "concise must be shorter");
+        assert!(detailed.text.contains("Sources consulted:"), "{}", detailed.text);
+        assert!(detailed.text.contains(&detailed.citations[0].locator.human()), "detailed shows locations");
+        assert!(detailed.text.contains(&detailed.citations[0].source_title), "detailed names the source");
+
+        // every style stays verifiable: quotes are in their chunks, citations resolve
+        for a in [&evidence, &concise, &detailed] {
+            assert!(validate_citations(&a.citations, &chunks).is_empty());
+            for c in &a.citations {
+                let chunk = chunks.iter().find(|k| k.id == c.chunk_id).unwrap();
+                assert!(chunk.text.contains(&c.quote));
+                assert!(a.text.contains(&c.quote), "each quote appears in the rendered text");
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_style_and_length_values_are_rejected() {
+        assert_eq!(Style::parse("bullets"), None);
+        assert_eq!(Style::parse("Evidence"), Some(Style::Evidence));
+        assert_eq!(Style::parse(""), Some(Style::Evidence));
+        assert_eq!(Length::parse("long"), None);
+        assert_eq!(Length::parse("thorough"), Some(Length::Thorough));
+        assert_eq!(Length::parse("shorter"), Some(Length::Brief));
+    }
+
+    #[test]
+    fn a_styled_answer_still_abstains_without_evidence() {
+        let (chunks, sources) = three_passage_corpus();
+        let a = answer_with(
+            "what is the capital of France",
+            &chunks,
+            &sources,
+            AnswerOptions { style: Style::Concise, length: Length::Thorough },
+        );
+        assert!(a.abstained);
+        assert!(a.citations.is_empty());
+        assert!(!a.text.contains("Sources consulted"), "no skeleton answer when abstaining");
     }
 
     #[test]
@@ -8947,6 +8621,663 @@ mod tests {
     fn degenerate_question_is_detected() {
         assert!(is_degenerate_question("the of and"));
         assert!(!is_degenerate_question("what is BM25"));
+    }
+}
+```
+
+## `crates/forge-core/src/guide.rs`
+
+```rust
+//! Source Guide: a per-source orientation built **only** from the source itself.
+//!
+//! The reference product shows a guide/summary when a source is opened. Forge cannot
+//! reach a model provider (no TLS client, no key), so pretending to summarise with an
+//! LLM would be a lie. What this module produces instead is a deterministic,
+//! extractive guide:
+//!
+//! * every sentence in the summary is **quoted verbatim** from one chunk and carries
+//!   that chunk's id and human locator, so the user can jump to it and check;
+//! * topics are term frequencies with the chunk where each first appears;
+//! * the outline comes from real structure the parser recorded (sections, sheets,
+//!   pages), never from guesswork;
+//! * suggested questions are templates over observed topics, labelled as suggestions.
+//!
+//! The output always says `generated_by: "extractive"` and `model: null`. Nothing here
+//! paraphrases, and nothing is inferred about the source's meaning.
+
+use crate::domain::{Chunk, Source};
+use crate::json::Value;
+use crate::obj;
+use crate::retrieve;
+use crate::tables::Table;
+use std::collections::BTreeMap;
+
+/// Default shape of a guide. Small on purpose: a guide that restates the whole source is
+/// just the source again.
+pub const MAX_SUMMARY_SENTENCES: usize = 5;
+pub const MAX_TOPICS: usize = 8;
+pub const MAX_QUESTIONS: usize = 5;
+
+#[derive(Debug, Clone)]
+pub struct GuideSentence {
+    pub text: String,
+    pub chunk_id: String,
+    pub locator: String,
+    pub ordinal: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuideTopic {
+    /// Surface form shown to the user (most frequent original casing). For a phrase this
+    /// is the words joined, e.g. "Calvin cycle".
+    pub term: String,
+    /// Stemmed words the term is made of (one for a single word, two for a phrase).
+    pub stems: Vec<String>,
+    pub count: usize,
+    /// Chunks containing the term.
+    pub chunks: usize,
+    pub first_chunk_id: String,
+    pub first_locator: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Guide {
+    pub source_id: String,
+    pub title: String,
+    pub kind: String,
+    pub headline: Option<GuideSentence>,
+    pub summary: Vec<GuideSentence>,
+    pub topics: Vec<GuideTopic>,
+    pub outline: Vec<String>,
+    pub questions: Vec<String>,
+    pub word_count: usize,
+    pub chunk_count: usize,
+    pub table_count: usize,
+    pub table_row_count: usize,
+    pub warnings: Vec<String>,
+}
+
+impl Guide {
+    pub fn to_json(&self) -> Value {
+        let sentence_json = |s: &GuideSentence| {
+            obj! {
+                "text" => s.text.as_str(),
+                "chunk_id" => s.chunk_id.as_str(),
+                "locator" => s.locator.as_str(),
+                "ordinal" => s.ordinal as u64,
+            }
+        };
+        obj! {
+            "source_id" => self.source_id.as_str(),
+            "title" => self.title.as_str(),
+            "kind" => self.kind.as_str(),
+            // Honesty fields, read by the UI: this text is quoted, not generated.
+            "generated_by" => "extractive",
+            "model" => Value::Null,
+            "deterministic" => true,
+            "headline" => match &self.headline { Some(s) => sentence_json(s), None => Value::Null },
+            "summary" => Value::Arr(self.summary.iter().map(sentence_json).collect()),
+            "topics" => Value::Arr(self.topics.iter().map(|t| obj! {
+                "term" => t.term.as_str(),
+                "count" => t.count as u64,
+                "chunks" => t.chunks as u64,
+                "chunk_id" => t.first_chunk_id.as_str(),
+                "locator" => t.first_locator.as_str(),
+            }).collect()),
+            "outline" => Value::Arr(self.outline.iter().map(|o| Value::from(o.as_str())).collect()),
+            "questions" => Value::Arr(self.questions.iter().map(|q| Value::from(q.as_str())).collect()),
+            "stats" => obj! {
+                "words" => self.word_count as u64,
+                "chunks" => self.chunk_count as u64,
+                "tables" => self.table_count as u64,
+                "table_rows" => self.table_row_count as u64,
+            },
+            "warnings" => Value::Arr(self.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
+        }
+    }
+}
+
+/// A sentence candidate: score, chunk index, position inside the chunk, text.
+struct Candidate {
+    score: f64,
+    chunk_idx: usize,
+    text: String,
+}
+
+fn jaccard(a: &[String], b: &[String]) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let mut inter = 0usize;
+    for x in a {
+        if b.contains(x) {
+            inter += 1;
+        }
+    }
+    let union = a.len() + b.len() - inter;
+    if union == 0 {
+        0.0
+    } else {
+        inter as f64 / union as f64
+    }
+}
+
+/// Choose the surface form to display for a stemmed term: most frequent original casing,
+/// preferring a capitalised form when counts tie (so "BM25" beats "bm25").
+fn surface_forms(chunks: &[Chunk]) -> BTreeMap<String, BTreeMap<String, usize>> {
+    let mut forms: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    for c in chunks {
+        for raw in retrieve::tokenize(&c.text) {
+            if raw.len() < 3 {
+                continue;
+            }
+            let stem = retrieve::stem(&raw);
+            *forms.entry(stem).or_default().entry(raw.clone()).or_insert(0) += 1;
+        }
+    }
+    forms
+}
+
+/// Count content words (stemmed) and adjacent two-word phrases, with chunk coverage.
+fn ngram_counts(chunks: &[Chunk], n: usize) -> BTreeMap<String, (usize, usize)> {
+    // stem-key -> (total occurrences, chunks containing it)
+    let mut totals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for c in chunks {
+        let stems: Vec<String> = retrieve::terms(&c.text).into_iter().map(|t| retrieve::stem(&t)).collect();
+        let mut seen: Vec<String> = Vec::new();
+        for i in 0..stems.len() {
+            if i + n > stems.len() {
+                break;
+            }
+            let key = stems[i..i + n].join(" ");
+            let e = totals.entry(key.clone()).or_insert((0, 0));
+            e.0 += 1;
+            if !seen.contains(&key) {
+                seen.push(key);
+                e.1 += 1;
+            }
+        }
+    }
+    totals
+}
+
+fn surface_of(stem: &str, forms: &BTreeMap<String, BTreeMap<String, usize>>) -> String {
+    forms
+        .get(stem)
+        .and_then(|m| m.iter().max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0))).map(|(k, _)| k.clone()))
+        .unwrap_or_else(|| stem.to_string())
+}
+
+/// Topics for display, and the unigram weights used to score sentences.
+///
+/// A phrase ("calvin cycle") is preferred over its parts when it recurs: a guide that
+/// lists "calvin" and "cycle" separately is less useful than one that lists the phrase.
+fn topic_terms(chunks: &[Chunk]) -> (Vec<GuideTopic>, Vec<(String, f64)>) {
+    let forms = surface_forms(chunks);
+    let min_chunks = if chunks.len() > 1 { 2 } else { 1 };
+    let unigrams = ngram_counts(chunks, 1);
+    let bigrams = ngram_counts(chunks, 2);
+
+    let mut topics: Vec<GuideTopic> = Vec::new();
+    let mut absorbed: Vec<String> = Vec::new();
+    let mut phrases: Vec<(String, usize, usize, Vec<String>)> = Vec::new();
+    for (key, (count, chunk_count)) in &bigrams {
+        if *chunk_count < min_chunks || *count < 2 {
+            continue;
+        }
+        let parts: Vec<String> = key.split(' ').map(|x| x.to_string()).collect();
+        // a phrase made of one-word parts that never occur alone would be noise
+        if parts.iter().any(|p| p.len() < 3) {
+            continue;
+        }
+        phrases.push((key.clone(), *count, *chunk_count, parts));
+    }
+    phrases.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    phrases.truncate(4);
+
+    for (key, count, chunk_count, parts) in &phrases {
+        let surface: Vec<String> = parts.iter().map(|p| surface_of(p, &forms)).collect();
+        for p in parts {
+            // the phrase usually accounts for this word; listing both would be repetition
+            if let Some((uni_count, _)) = unigrams.get(p) {
+                if count * 2 >= *uni_count {
+                    absorbed.push(p.clone());
+                }
+            }
+        }
+        topics.push(GuideTopic {
+            term: surface.join(" "),
+            stems: parts.clone(),
+            count: *count,
+            chunks: *chunk_count,
+            first_chunk_id: String::new(),
+            first_locator: String::new(),
+        });
+        let _ = key;
+    }
+
+    for (stem, (count, chunk_count)) in &unigrams {
+        if *chunk_count < min_chunks || stem.len() < 3 || absorbed.contains(stem) {
+            continue;
+        }
+        topics.push(GuideTopic {
+            term: surface_of(stem, &forms),
+            stems: vec![stem.clone()],
+            count: *count,
+            chunks: *chunk_count,
+            first_chunk_id: String::new(),
+            first_locator: String::new(),
+        });
+    }
+
+    topics.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.term.cmp(&b.term)));
+    topics.truncate(MAX_TOPICS);
+
+    // sentence scoring keeps every unigram, including ones absorbed into a phrase
+    let mut weights: Vec<(String, f64)> = unigrams
+        .iter()
+        .filter(|(stem, (count, chunk_count))| *chunk_count >= min_chunks && stem.len() >= 3 && *count > 0)
+        .map(|(stem, (count, _))| (stem.clone(), (*count as f64).sqrt()))
+        .collect();
+    weights.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
+    (topics, weights)
+}
+
+/// Does this chunk mention the topic (all words of a phrase, in any order)?
+fn mentions(chunk: &Chunk, topic: &GuideTopic) -> bool {
+    let stems: Vec<String> = retrieve::terms(&chunk.text).into_iter().map(|t| retrieve::stem(&t)).collect();
+    topic.stems.iter().all(|want| stems.contains(want))
+}
+
+fn sentences_in(chunk: &Chunk) -> Vec<String> {
+    retrieve::split_sentences(&chunk.text)
+        .into_iter()
+        .filter(|s| {
+            let words = s.split_whitespace().count();
+            (4..=60).contains(&words)
+        })
+        .collect()
+}
+
+/// Rank sentences by how much of the source's core vocabulary they carry, but keep them
+/// in document order in the output so the guide reads like the source, not like a ranking.
+fn ranked_sentences(chunks: &[Chunk], weights: &[(String, f64)]) -> Vec<Candidate> {
+    let weight: BTreeMap<String, f64> = weights.iter().cloned().collect();
+
+    let mut out: Vec<Candidate> = Vec::new();
+    for (idx, c) in chunks.iter().enumerate() {
+        for s in sentences_in(c) {
+            let toks: Vec<String> = retrieve::terms(&s).into_iter().map(|t| retrieve::stem(&t)).collect();
+            if toks.is_empty() {
+                continue;
+            }
+            let mut score = 0.0f64;
+            let mut covered = 0usize;
+            for t in &toks {
+                if let Some(w) = weight.get(t) {
+                    score += w;
+                    covered += 1;
+                }
+            }
+            if covered == 0 {
+                continue; // a sentence sharing nothing with the source's vocabulary is noise
+            }
+            let distinct: Vec<String> = {
+                let mut d = toks.clone();
+                d.sort();
+                d.dedup();
+                d
+            };
+            // length normalisation + a bonus for covering many distinct core terms
+            score *= 1.0 + (distinct.len() as f64).sqrt() / 4.0;
+            score /= (toks.len() as f64).sqrt();
+            out.push(Candidate { score, chunk_idx: idx, text: s });
+        }
+    }
+    out.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.chunk_idx.cmp(&b.chunk_idx))
+            .then(a.text.cmp(&b.text))
+    });
+    out
+}
+
+fn pick_summary(chunks: &[Chunk], candidates: Vec<Candidate>, limit: usize) -> Vec<GuideSentence> {
+    let mut chosen: Vec<(u32, usize, GuideSentence)> = Vec::new();
+    let mut seen: Vec<Vec<String>> = Vec::new();
+    for cand in candidates {
+        if chosen.len() >= limit {
+            break;
+        }
+        let toks: Vec<String> = retrieve::terms(&cand.text).into_iter().map(|t| retrieve::stem(&t)).collect();
+        // near-duplicates make a summary look padded; one paraphrase per idea is enough
+        if seen.iter().any(|s| jaccard(s, &toks) > 0.55) {
+            continue;
+        }
+        seen.push(toks);
+        let c = &chunks[cand.chunk_idx];
+        let at = c.text.find(&cand.text).unwrap_or(usize::MAX);
+        chosen.push((
+            c.ordinal,
+            at,
+            GuideSentence {
+                text: cand.text,
+                chunk_id: c.id.clone(),
+                locator: c.locator.human(),
+                ordinal: c.ordinal,
+            },
+        ));
+    }
+    // read in document order: a score ranking jumps around and reads like a list of
+    // unrelated lines; the source's own order keeps the meaning intact
+    chosen.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    chosen.into_iter().map(|(_, _, s)| s).collect()
+}
+
+/// Real structure the parser recorded: sections/slides, then sheets, then pages.
+fn outline_of(source: &Source, chunks: &[Chunk], tables: &[Table]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in chunks {
+        if let Some(section) = &c.locator.section {
+            if !section.trim().is_empty() && !out.iter().any(|x| x.eq_ignore_ascii_case(section)) {
+                out.push(section.clone());
+            }
+        }
+    }
+    for t in tables {
+        out.push(format!(
+            "sheet {} ({} row{}{})",
+            t.sheet,
+            t.rows.len(),
+            if t.rows.len() == 1 { "" } else { "s" },
+            if t.hidden { ", hidden" } else { "" }
+        ));
+    }
+    if out.is_empty() && source.page_count > 1 {
+        out.push(format!("{} pages", source.page_count));
+    }
+    out.truncate(40);
+    out
+}
+
+fn questions_for(topics: &[GuideTopic], tables: &[Table]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in tables.iter().filter(|t| !t.hidden) {
+        // suggest a computation only when a numeric column actually exists
+        for (i, header) in t.headers.iter().enumerate() {
+            let numeric = t
+                .rows
+                .iter()
+                .filter(|r| t.cell(r, i).map(|c| c.is_number()).unwrap_or(false))
+                .count();
+            if numeric >= 2 && out.len() < MAX_QUESTIONS {
+                out.push(format!("What is the total {} in {}?", header, t.sheet));
+                break;
+            }
+        }
+    }
+    for topic in topics {
+        if out.len() >= MAX_QUESTIONS {
+            break;
+        }
+        out.push(format!("What does {} say about {}?", "this source", topic.term));
+    }
+    out.truncate(MAX_QUESTIONS);
+    out
+}
+
+/// Build the guide for one source.
+///
+/// Returns an error when there is nothing to orient the user in — an empty guide would be
+/// worse than no guide.
+pub fn build(source: &Source, chunks: &[Chunk], tables: &[Table]) -> Result<Guide, String> {
+    let mut own: Vec<Chunk> = chunks.iter().filter(|c| c.source_id == source.id).cloned().collect();
+    own.sort_by_key(|c| c.ordinal);
+    if own.is_empty() {
+        return Err("this source has no indexed passages yet".into());
+    }
+    let mine: Vec<Table> = tables.iter().filter(|t| t.source_id == source.id).cloned().collect();
+
+    let word_count = own.iter().map(|c| retrieve::tokenize(&c.text).len()).sum();
+    let (mut topics, weights) = topic_terms(&own);
+    for t in topics.iter_mut() {
+        if let Some(c) = own.iter().find(|c| mentions(c, t)) {
+            t.first_chunk_id = c.id.clone();
+            t.first_locator = c.locator.human();
+        }
+    }
+
+    let candidates = ranked_sentences(&own, &weights);
+    let mut summary = pick_summary(&own, candidates, MAX_SUMMARY_SENTENCES);
+    // The highest-ranked line is the headline; the rest are the summary.
+    let headline = if summary.is_empty() { None } else { Some(summary.remove(0)) };
+
+    let mut warnings: Vec<String> = Vec::new();
+    if own.len() == 1 {
+        warnings.push("single passage: topics cannot be cross-checked across the source".into());
+    }
+    if word_count < 40 {
+        warnings.push("very short source: the guide is close to quoting it in full".into());
+    }
+    let mut guide = Guide {
+        source_id: source.id.clone(),
+        title: source.title.clone(),
+        kind: source.kind.clone(),
+        headline,
+        summary,
+        topics,
+        outline: outline_of(source, &own, &mine),
+        questions: Vec::new(),
+        word_count,
+        chunk_count: own.len(),
+        table_count: mine.len(),
+        table_row_count: mine.iter().map(|t| t.rows.len()).sum(),
+        warnings: Vec::new(),
+    };
+    guide.questions = questions_for(&guide.topics, &mine);
+    for w in source.warnings.iter().chain(warnings.iter()) {
+        if !guide.warnings.contains(w) {
+            guide.warnings.push(w.clone());
+        }
+    }
+    Ok(guide)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::Locator;
+
+    fn src(id: &str, kind: &str) -> Source {
+        Source { id: id.into(), kind: kind.into(), title: "Doc".into(), status: "ready".into(), ..Default::default() }
+    }
+
+    fn chunk(id: &str, sid: &str, ordinal: u32, text: &str) -> Chunk {
+        Chunk {
+            id: id.into(),
+            source_id: sid.into(),
+            notebook_id: "nb".into(),
+            ordinal,
+            text: text.into(),
+            locator: Locator::paragraph(ordinal, 0, 0),
+        }
+    }
+
+    fn corpus() -> Vec<Chunk> {
+        vec![
+            chunk(
+                "c1",
+                "s1",
+                0,
+                "Photosynthesis converts light energy into chemical energy inside chloroplasts. \
+                 Chlorophyll absorbs light most strongly in the blue and red bands. \
+                 The Calvin cycle fixes carbon dioxide into glucose using ATP and NADPH.",
+            ),
+            chunk(
+                "c2",
+                "s1",
+                1,
+                "Chlorophyll reflects green light, which is why leaves look green. \
+                 The Calvin cycle runs in the stroma and does not require light directly. \
+                 Carbon dioxide enters through stomata.",
+            ),
+            chunk(
+                "c3",
+                "s1",
+                2,
+                "Light reactions produce ATP and NADPH for the Calvin cycle. \
+                 Stomata close under drought stress, limiting carbon dioxide uptake.",
+            ),
+        ]
+    }
+
+    #[test]
+    fn every_summary_sentence_is_a_verbatim_quote_with_a_real_locator() {
+        let chunks = corpus();
+        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        let all: Vec<&GuideSentence> = g.headline.iter().chain(g.summary.iter()).collect();
+        assert!(!all.is_empty());
+        for s in all {
+            let c = chunks.iter().find(|c| c.id == s.chunk_id).expect("chunk exists");
+            assert!(c.text.contains(&s.text), "quote must appear verbatim in its chunk: {}", s.text);
+            assert_eq!(s.locator, c.locator.human());
+        }
+        let json = g.to_json();
+        assert_eq!(json.str_of("generated_by"), Some("extractive"), "never claims to be a model summary");
+        assert!(json.get("model").map(|m| m.is_null()).unwrap_or(false));
+    }
+
+    #[test]
+    fn summary_prefers_distinct_ideas_over_repeats() {
+        let chunks = corpus();
+        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        let texts: Vec<String> = g.summary.iter().map(|s| s.text.clone()).collect();
+        assert!(texts.len() >= 2, "summary too short: {:?}", texts);
+        for i in 0..texts.len() {
+            for j in (i + 1)..texts.len() {
+                let a: Vec<String> = retrieve::terms(&texts[i]).into_iter().map(|t| retrieve::stem(&t)).collect();
+                let b: Vec<String> = retrieve::terms(&texts[j]).into_iter().map(|t| retrieve::stem(&t)).collect();
+                assert!(jaccard(&a, &b) <= 0.55, "near-duplicates kept: {} / {}", texts[i], texts[j]);
+            }
+        }
+        // and the summary is not just chunk 1: a guide should cover the source
+        let distinct_chunks: std::collections::BTreeSet<&str> =
+            g.summary.iter().map(|s| s.chunk_id.as_str()).collect();
+        assert!(distinct_chunks.len() >= 2, "summary stayed in one chunk");
+    }
+
+    #[test]
+    fn topics_are_content_words_with_locations_and_a_stable_order() {
+        let chunks = corpus();
+        let g1 = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        let g2 = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        assert_eq!(
+            g1.topics.iter().map(|t| t.term.clone()).collect::<Vec<_>>(),
+            g2.topics.iter().map(|t| t.term.clone()).collect::<Vec<_>>(),
+            "same input must give the same guide"
+        );
+        assert!(g1.topics.len() >= 3, "{:?}", g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>());
+        for t in &g1.topics {
+            assert!(!t.first_chunk_id.is_empty(), "topic {} has no location", t.term);
+            let lower = t.term.to_lowercase();
+            for stop in ["the", "and", "into", "which", "does"] {
+                assert_ne!(lower, stop, "stopword leaked into topics: {}", t.term);
+            }
+            assert!(t.chunks >= 2 || chunks.len() == 1, "topic {} appears in one chunk only", t.term);
+        }
+        // "Calvin cycle" is the recurring idea in this corpus: it must surface as the phrase,
+        // not as two unrelated words
+        assert!(
+            g1.topics.iter().any(|t| t.term.eq_ignore_ascii_case("calvin cycle")),
+            "expected a Calvin-cycle phrase, got {:?}",
+            g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>()
+        );
+        assert!(
+            !g1.topics.iter().any(|t| t.term.eq_ignore_ascii_case("calvin")
+                || t.term.eq_ignore_ascii_case("cycle")),
+            "the absorbed words must not be listed twice: {:?}",
+            g1.topics.iter().map(|t| &t.term).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_single_short_source_says_so_instead_of_padding() {
+        let chunks = vec![chunk("c1", "s1", 0, "Only one line about ATP.")];
+        let g = build(&src("s1", "text"), &chunks, &[]).unwrap();
+        assert!(g.warnings.iter().any(|w| w.contains("single passage")), "{:?}", g.warnings);
+        assert!(g.warnings.iter().any(|w| w.contains("very short")), "{:?}", g.warnings);
+        assert!(g.summary.is_empty(), "one sentence cannot be a multi-sentence summary");
+    }
+
+    #[test]
+    fn a_source_without_passages_refuses() {
+        assert!(build(&src("s1", "text"), &[], &[]).is_err());
+    }
+
+    #[test]
+    fn outline_uses_real_structure_only() {
+        let chunks = vec![
+            Chunk { locator: Locator::section("Intro", 0, 0), ..chunk("c1", "s1", 0, "Intro text about ATP hydrolysis in cells.") },
+            Chunk { locator: Locator::section("Methods", 0, 0), ..chunk("c2", "s1", 1, "Methods text about ATP assays in cells.") },
+        ];
+        let g = build(&src("s1", "markdown"), &chunks, &[]).unwrap();
+        assert_eq!(g.outline, vec!["Intro", "Methods"]);
+
+        let mut parsed = crate::tables::parse_xlsx(
+            &std::fs::read(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sales.xlsx"),
+            )
+            .unwrap(),
+            "s1",
+            "nb",
+        )
+        .unwrap();
+        parsed[1].hidden = true;
+        let g = build(&src("s1", "xlsx"), &corpus(), &parsed).unwrap();
+        assert!(g.outline.iter().any(|o| o.contains("sheet Sales")), "{:?}", g.outline);
+        assert!(g.outline.iter().any(|o| o.contains("Meta (1 row, hidden)")), "{:?}", g.outline);
+        assert_eq!(g.table_count, 2);
+    }
+
+    #[test]
+    fn suggested_questions_are_grounded_in_observed_topics_and_columns() {
+        let mut tables = crate::tables::parse_xlsx(
+            &std::fs::read(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sales.xlsx"),
+            )
+            .unwrap(),
+            "s1",
+            "nb",
+        )
+        .unwrap();
+        tables[1].hidden = true;
+        let g = build(&src("s1", "xlsx"), &corpus(), &tables).unwrap();
+        assert!(g.questions.len() <= MAX_QUESTIONS);
+        assert!(
+            g.questions.iter().any(|q| q.contains("total") && q.contains("Sales")),
+            "expected a table question, got {:?}",
+            g.questions
+        );
+        for q in &g.questions {
+            assert!(!q.contains("Meta"), "hidden sheets must not be suggested: {}", q);
+        }
+    }
+
+    #[test]
+    fn the_guide_json_is_complete_and_serialisable() {
+        let g = build(&src("s1", "text"), &corpus(), &[]).unwrap();
+        let json = g.to_json();
+        let text = crate::json::to_string(&json);
+        let back = crate::json::parse(&text).expect("guide json parses");
+        for key in ["source_id", "headline", "summary", "topics", "outline", "questions", "stats", "warnings"] {
+            assert!(back.get(key).is_some(), "missing {} in guide json", key);
+        }
+        assert_eq!(
+            back.get("stats").and_then(|s| s.get("chunks")).and_then(|x| x.as_f64()),
+            Some(3.0)
+        );
     }
 }
 ```
@@ -17455,6 +17786,105 @@ Gas exchange measurements record carbon dioxide uptake per leaf area, so a droug
     assert_eq!(st, 409, "{:?}", body);
     assert_eq!(body.str_of("code"), Some("guide_unavailable"));
 }
+
+/// Chat presentation controls are real: they change the answer and are validated.
+#[test]
+fn chat_style_and_length_are_effective_and_validated() {
+    let dir = tempdir("style");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[("title", Value::from("Style"))])),
+    );
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Retrieval notes")),
+            (
+                "text",
+                Value::from(
+                    "The retrieval pipeline ranks candidate spans with BM25 and then builds bounded model context.\n\n\
+                     Candidate spans are ranked by BM25 so that the model only sees context that matched the question.\n\n\
+                     A bounded context window keeps retrieval ranking honest: spans compete for a fixed budget.",
+                ),
+            ),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let question = "how are candidate spans ranked by BM25";
+
+    let ask = |extra: Vec<(&str, Value)>| {
+        let mut fields = vec![("question", Value::from(question))];
+        fields.extend(extra);
+        s.json("POST", &format!("/api/notebooks/{}/chat", nb_id), Some(obj(&fields)))
+    };
+
+    // default settings are echoed back
+    let (st, base) = ask(vec![]);
+    assert_eq!(st, 200, "{:?}", base);
+    let settings = base.get("settings").expect("settings echoed");
+    assert_eq!(settings.str_of("style"), Some("evidence"));
+    assert_eq!(settings.str_of("length"), Some("standard"));
+
+    // brief = one citation, thorough = more
+    let (st, brief) = ask(vec![("length", Value::from("brief"))]);
+    assert_eq!(st, 200);
+    let brief_cites = brief.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()).unwrap_or(0);
+    assert_eq!(brief_cites, 1, "{:?}", brief);
+    assert_eq!(
+        brief.get("settings").and_then(|s| s.get("max_citations")).and_then(|x| x.as_f64()),
+        Some(1.0)
+    );
+    let (st, thorough) = ask(vec![("length", Value::from("thorough"))]);
+    assert_eq!(st, 200);
+    let thorough_cites = thorough.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()).unwrap_or(0);
+    assert!(thorough_cites >= brief_cites, "{} vs {}", thorough_cites, brief_cites);
+
+    // styles change the rendering while citing the same passages
+    let (st, detailed) = ask(vec![("style", Value::from("detailed"))]);
+    assert_eq!(st, 200);
+    let detailed_text = detailed.str_of("answer").unwrap().to_string();
+    assert!(detailed_text.contains("Sources consulted:"), "{}", detailed_text);
+    assert!(
+        detailed_text.contains("—"),
+        "detailed answers name the source and location: {}",
+        detailed_text
+    );
+    let (st, concise) = ask(vec![("style", Value::from("concise"))]);
+    assert_eq!(st, 200);
+    let concise_text = concise.str_of("answer").unwrap().to_string();
+    assert!(!concise_text.contains("\n- "), "concise has no bullet list: {}", concise_text);
+    assert_eq!(
+        detailed.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()),
+        concise.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()),
+        "style must not change the evidence"
+    );
+
+    // unknown values are refused, not silently defaulted
+    let (st, bad_style) = ask(vec![("style", Value::from("bullets"))]);
+    assert_eq!(st, 422, "{:?}", bad_style);
+    assert_eq!(bad_style.str_of("code"), Some("bad_style"));
+    let (st, bad_length) = ask(vec![("length", Value::from("long"))]);
+    assert_eq!(st, 422, "{:?}", bad_length);
+    assert_eq!(bad_length.str_of("code"), Some("bad_length"));
+
+    // an invalid setting must not leave a half-written conversation behind
+    let (_, convs) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    let messages: usize = convs
+        .get("conversations")
+        .and_then(|c| c.as_arr())
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| c.get("message_count").and_then(|m| m.as_f64()))
+                .map(|n| n as usize)
+                .sum()
+        })
+        .unwrap_or(0);
+    assert_eq!(messages, 10, "five accepted asks (2 messages each), rejections store nothing");
+}
 ```
 
 ## `crates/forge-server/Cargo.toml`
@@ -18267,6 +18697,34 @@ could; it can only show what recurs and what the structure is. That limitation i
 badge ("extractive · quoted, not generated"). When a provider is configured, a model-written
 guide becomes possible — but it must be a *separate*, clearly labelled field, never a silent
 upgrade of this one.
+
+## D17 — Style and length are validated controls over the same evidence
+
+**Date.** 2026-10-31. **Background.** §7.5 lists "configurable style/length" and "streaming
+answer; stop" as P0 chat features. An extractive engine cannot choose words, so any control
+that claims to change *tone* would be cosmetic — or worse, an invitation to decorate quotes with
+generated prose.
+
+**Chosen.** Two controls, both real and both checked:
+
+* `length` = **how much evidence is cited**: `brief` 1 passage, `standard` 2, `thorough` 4. The
+  budget is enforced in the engine and echoed back as `settings.max_citations`.
+* `style` = **how that evidence is laid out**: `evidence` (numbered bullet quotations, the
+  default and the previous behaviour), `concise` (one paragraph of quotations), `detailed`
+  (each quotation followed by its source title and locator, plus a sources-consulted line).
+
+A test asserts that all three styles return **identical citations, quotes and order** for the
+same request, so style can never quietly change what is claimed. Unknown values are rejected
+with `422 bad_style` / `422 bad_length` instead of falling back to a default: a UI that says
+"concise" must not receive something else. Rejected requests write nothing to the conversation.
+
+**Rejected.** (a) Free-text "tone" passed to a nonexistent model. (b) A `style` value that
+changes the *evidence* (e.g. "thorough" re-ranking differently) — it would make the control a
+retrieval knob wearing a presentation label. (c) Accepting any string and ignoring it.
+
+**Consequences.** With a reachable provider, the citation budget is forwarded and the style
+vocabulary does not apply (documented in `UNKNOWN_AND_LIMITATIONS.md`); the provider path is
+marked partial in the feature matrix. Streaming remains unimplemented and is not claimed.
 ```
 
 ## `docs/FEATURE_PARITY.md`
@@ -21347,7 +21805,7 @@ curl is out of scope for this layer.
 ```markdown
 # Status — Forge (NLLM2)
 
-Last updated: 2026-10-31 (spreadsheet tables + Source Guide).
+Last updated: 2026-10-31 (spreadsheet tables, Source Guide, chat style/length).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -21366,11 +21824,12 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **181 passing, 0 failing** (26 `bininspect` + 138 lib + 12 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **62 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **186 passing, 0 failing** (26 `bininspect` + 142 lib + 13 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **70 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
+| Chat style / length | `style` (evidence · concise · detailed) and `length` (brief · standard · thorough = 1/2/4 citations) are validated, echoed back, and change the rendered answer without ever changing which passages are cited | `grounded::AnswerOptions` + e2e `chat_style_and_length_are_effective_and_validated` |
 | Source Guide | per-source orientation: verbatim quoted headline + summary with locators, recurring terms (incl. two-word phrases), real outline (sections/sheets), suggested questions | `guide` (8 tests) + e2e `source_guide_quotes_the_source_and_refuses_when_empty` + UI smoke (9 assertions) |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
@@ -21397,7 +21856,7 @@ notebooklm      15
 fetch           11
 retrieve         9
 guide            8
-grounded         8
+grounded        12
 artifacts        7
 security         6
 json             6
@@ -21413,12 +21872,12 @@ ingest           3   (PDF + dispatch)
 ingest::zip      2
 inflate          2
 --------------------
-lib total      138
+lib total      142
 bininspect      26   (separate crate)
-e2e (HTTP)      12
+e2e (HTTP)      13
 server           5
 ====================
-total          181
+total          186
 ```
 
 ## Not available, with reasons
@@ -21436,6 +21895,8 @@ total          181
 | `.xls` (BIFF), ODS, Google Sheets | no parser written; binary formats out of scope for now | upload is rejected by kind detection with a clear error, never half-indexed |
 | Data Tables artifact (schema-inferred extraction, charts) | not implemented | reported as `planned`; existing spreadsheets are queried directly instead |
 | Model-written source summaries | no reachable LLM (no TLS client, no key) | the Source Guide is **extractive**: every line is a quotation with its locator, and the payload says `generated_by: extractive`, `model: null` |
+| Streaming / stop | the HTTP layer is a hand-written buffered responder, so answers return whole | not claimed anywhere; `settings` states what was applied, and the answer is instant because it is extractive |
+| Style / length for a remote provider | no provider is reachable | the citation budget is passed to a provider when one is used; the style vocabulary is documented as extractive-engine only |
 | Calling NotebookLM / Gemini Notebook | `notebooklm.google.com`, `gemini.google.com`, `accounts.google.com` all return HTTP 000; no TLS client; REA has no browser to attach to | protocol implemented and inspectable via `GET /api/notebooklm/status` and `POST /api/notebooklm/preview` (returns the exact wire request, `sent:false`) |
 
 ## Immediate next steps
@@ -21457,7 +21918,7 @@ total          181
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 181 tests: 138 lib + 12 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 186 tests: 142 lib + 13 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -21468,7 +21929,7 @@ FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
 FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 53 assertions
 ```
 
-## Unit tests (138) — exact names from `cargo test --lib -- --list`
+## Unit tests (142) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -21679,6 +22140,33 @@ citation`, `viewer renders the real grid`, `grid keeps original row numbers`, `g
 cached formula value`, `grid cells expose their A1 reference`, `hidden sheets are labelled
 when shown`.
 
+## Chat presentation controls (4 unit tests + 1 e2e + 8 UI assertions)
+
+`grounded::AnswerOptions` — `style` (evidence · concise · detailed) and `length`
+(brief = 1 citation, standard = 2, thorough = 4).
+
+* `length_changes_how_many_passages_are_cited` — brief gives exactly one citation; standard
+  and thorough never give fewer; the budget is a real citation count.
+* `style_changes_presentation_and_never_the_evidence` — the same request in all three styles
+  returns **identical citations, quotes and order**, while the rendering differs (bullet list
+  vs paragraph vs per-quote source + locator); each quote is still a substring of its chunk and
+  the citation validator reports nothing.
+* `unknown_style_and_length_values_are_rejected` — `bullets` and `long` are `None` (the API
+  turns that into `422`), aliases (`shorter`, `thorough`) resolve.
+* `a_styled_answer_still_abstains_without_evidence` — a styled question with no evidence
+  produces no answer skeleton.
+
+Over HTTP: `chat_style_and_length_are_effective_and_validated` — `settings` echoed with the
+defaults; `length: brief` → exactly one citation and `max_citations: 1`; `style: detailed`
+contains "Sources consulted:" and the locator; `style: concise` has no bullet list and the
+**same** citation count as `detailed`; `style: bullets` → `422 bad_style`, `length: long` →
+`422 bad_length`; rejected requests write nothing to the conversation.
+
+UI: `composer exposes a style control`, `composer exposes a length control`, `length control
+explains its effect`, `brief answer cites exactly one passage`, `brief answer reports its
+settings`, `detailed style shows where each quote came from`, `detailed answer still cites real
+passages`, `detailed answer reports its settings`.
+
 ## Source Guide (8 unit tests + 1 e2e + 9 UI assertions)
 
 `guide` module. Every line of the guide is a **quotation** from an indexed passage with that
@@ -21728,6 +22216,7 @@ endpoint (raw bytes, base64 JSON, wrong method, empty body, unknown format).
   LibreOffice was tested (no authorized sample), so merged cells, date serials, sheet-scoped
   named ranges and shared-formula groups remain unverified.
 * No `.xls`/ODS fixtures at all — those formats have no parser here.
+* No streaming test: there is no streaming implementation to test.
 ```
 
 ## `docs/UNKNOWN_AND_LIMITATIONS.md`
@@ -21884,6 +22373,20 @@ producers emit is unverified.
 * No caching: a guide is recomputed per request. It is deterministic, so two requests return
   identical content (covered by a test), but a very large source costs a full re-tokenisation
   each time.
+
+## Chat style and length (2026-10-31)
+
+* `style` changes **layout only**: evidence list, one paragraph, or per-quote source + locator.
+  It cannot make an answer warmer, more formal, or simpler — an extractive engine quotes, it
+  does not compose. A test asserts the citation set is identical across styles.
+* `length` sets a citation **count** (1 / 2 / 4). It is not a word count; a two-sentence
+  passage and a forty-word passage count the same.
+* With a configured-but-unreachable provider, only the citation budget is forwarded; the style
+  vocabulary does not reach the provider (`partial`, see the feature matrix).
+* Notebook instructions are stored and echoed in the chat response, but they cannot steer the
+  extractive engine; no test claims they do.
+* No streaming: the answer is computed, verified, then returned in one response. There is no
+  "stop" button, and none is shown.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -26129,8 +26632,8 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |
 | CHAT-04 | source selection scopes chat | documented | done | `app.js` + api | UI |
 | CHAT-05 | conversation persistence / history | documented | done | `store.rs` | e2e |
-| CHAT-06 | streaming + stop | documented | planned | — | — |
-| CHAT-07 | style / length / custom instructions | documented | partial (notebook instructions only) | `api.rs` | — |
+| CHAT-06 | streaming + stop | documented | planned — the HTTP responder is buffered; answers return whole (and are instant because they are extractive) | — | — |
+| CHAT-07 | style / length / custom instructions | documented | **partial** — style (evidence/concise/detailed) and length (brief/standard/thorough) are real and validated over the extractive engine; custom instructions are stored and echoed but cannot steer a model that is not reachable | `grounded.rs`, `api::chat`, UI selects | 4 unit + e2e + 8 UI |
 | CHAT-08 | **table answers** (aggregation over source cells) | documented ("table answers" in the answer modes; Data Tables journey I) | **partial** — sum/average/min/max/count over an existing grid, optional group-by; no schema inference, no charts | `tables::try_answer`, `api::chat` | 22 unit + e2e + UI |
 | NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
 | NOTE-02 | save answer as note | documented | done | UI | UI smoke |
@@ -28670,6 +29173,49 @@ async function main() {
   check("guide links quotes to passages", !!guide?.querySelector(".guide-quote"));
   byText(".viewer header button", "✕").click();
   await wait(200);
+
+  // --- chat presentation controls are real (they change the answer)
+  check("composer exposes a style control", !!$("#chatStyle") && !!$("#chatStyle").getAttribute("aria-label"));
+  check("composer exposes a length control", !!$("#chatLength"));
+  const setLen = (v) => {
+    const sel = $("#chatLength");
+    sel.value = v;
+    sel.dispatchEvent(new window.Event("change", { bubbles: true }));
+  };
+  const setStyle = (v) => {
+    const sel = $("#chatStyle");
+    sel.value = v;
+    sel.dispatchEvent(new window.Event("change", { bubbles: true }));
+  };
+  setLen("brief");
+  await wait(50);
+  check("length control explains its effect", /cites 1 passage/.test($("#styleHint")?.textContent || ""), $("#styleHint")?.textContent);
+  const askAgain = $(".composer textarea");
+  askAgain.value = "What does the Calvin cycle fix?";
+  byText(".composer button", "Ask").click();
+  await wait(900);
+  const briefAnswers = $$(".msg.assistant");
+  const briefMsg = briefAnswers[briefAnswers.length - 1];
+  check("brief answer cites exactly one passage", briefMsg.querySelectorAll(".cite").length === 1,
+    `cites=${briefMsg.querySelectorAll(".cite").length}`);
+  check("brief answer reports its settings", /evidence\/brief/.test(briefMsg.textContent), briefMsg.textContent.slice(-120));
+
+  setStyle("detailed");
+  setLen("thorough");
+  await wait(50);
+  const askThird = $(".composer textarea");
+  askThird.value = "What does the Calvin cycle fix?";
+  byText(".composer button", "Ask").click();
+  await wait(900);
+  const detailedAnswers = $$(".msg.assistant");
+  const detailedMsg = detailedAnswers[detailedAnswers.length - 1];
+  check("detailed style shows where each quote came from", /Sources consulted:/.test(detailedMsg.textContent),
+    detailedMsg.textContent.slice(0, 200));
+  check("detailed answer still cites real passages", detailedMsg.querySelectorAll(".cite").length >= 1);
+  check("detailed answer reports its settings", /detailed\/thorough/.test(detailedMsg.textContent));
+  setStyle("evidence");
+  setLen("standard");
+  await wait(50);
 
   // --- study tools
   byText(".tabs button", "Study").click();

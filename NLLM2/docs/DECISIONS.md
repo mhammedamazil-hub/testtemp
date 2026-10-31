@@ -257,3 +257,31 @@ could; it can only show what recurs and what the structure is. That limitation i
 badge ("extractive · quoted, not generated"). When a provider is configured, a model-written
 guide becomes possible — but it must be a *separate*, clearly labelled field, never a silent
 upgrade of this one.
+
+## D17 — Style and length are validated controls over the same evidence
+
+**Date.** 2026-10-31. **Background.** §7.5 lists "configurable style/length" and "streaming
+answer; stop" as P0 chat features. An extractive engine cannot choose words, so any control
+that claims to change *tone* would be cosmetic — or worse, an invitation to decorate quotes with
+generated prose.
+
+**Chosen.** Two controls, both real and both checked:
+
+* `length` = **how much evidence is cited**: `brief` 1 passage, `standard` 2, `thorough` 4. The
+  budget is enforced in the engine and echoed back as `settings.max_citations`.
+* `style` = **how that evidence is laid out**: `evidence` (numbered bullet quotations, the
+  default and the previous behaviour), `concise` (one paragraph of quotations), `detailed`
+  (each quotation followed by its source title and locator, plus a sources-consulted line).
+
+A test asserts that all three styles return **identical citations, quotes and order** for the
+same request, so style can never quietly change what is claimed. Unknown values are rejected
+with `422 bad_style` / `422 bad_length` instead of falling back to a default: a UI that says
+"concise" must not receive something else. Rejected requests write nothing to the conversation.
+
+**Rejected.** (a) Free-text "tone" passed to a nonexistent model. (b) A `style` value that
+changes the *evidence* (e.g. "thorough" re-ranking differently) — it would make the control a
+retrieval knob wearing a presentation label. (c) Accepting any string and ignoring it.
+
+**Consequences.** With a reachable provider, the citation budget is forwarded and the style
+vocabulary does not apply (documented in `UNKNOWN_AND_LIMITATIONS.md`); the provider path is
+marked partial in the feature matrix. Streaming remains unimplemented and is not claimed.
