@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 200 tests: 154 lib + 15 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 241 tests: 184 lib + 26 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 79 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 127 assertions
 ```
 
-## Unit tests (154) — exact names from `cargo test --lib -- --list`
+## Unit tests (184) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -368,6 +368,45 @@ read (`media`) from what was not (`notes.decoded_frames: 0`, `captions: "not rea
 UI: `capabilities discloses the media-metadata scope`, `capabilities marks video ingestion
 unsupported with a reason`.
 
+## Acceptance journeys over HTTP (§14)
+
+`cargo test --offline --test e2e journey_` runs all eleven. Each drives the real router over a
+TCP socket, so a regression in routing, auth or serialisation fails here.
+
+| Journey | Test | What would fail without the feature |
+|---|---|---|
+| A | `journey_a_first_notebook_survives_a_restart_without_demo_data` | create/rename/reopen, and `/api/notebooks` returning sample data |
+| B | `journey_b_pdf_page_two_is_cited_and_unsupported_questions_abstain` | the `page` locator, and an answer invented for an unsupported question |
+| C | `journey_c_conflicting_sources_are_shown_side_by_side` | the `conflicts` block and "does not choose between them" |
+| D | `journey_d_note_edits_are_what_get_cited_and_exclusion_removes_influence` | note→source conversion, and scope exclusion |
+| E | `journey_e_transcript_cites_timecodes_and_refuses_visual_claims` | the `timestamp` locator, `00:42` in the citation, and the video refusal |
+| F | `journey_f_cards_reviews_and_quiz_survive_a_restart` | review marks after reopen, and the recorded difficulty |
+| G | `journey_g_mindmap_exports_and_reopens` | SVG export, and the 409 when a non-mindmap asks for SVG |
+| H | `journey_h_slides_are_editable_versioned_and_exportable` | edit/reorder/delete/restore, the version bump, and the 501 for PPTX |
+| I | `journey_i_discovery_offers_provenanced_candidates_and_exports_a_report` | `from_url` provenance, the media filter, and report citations |
+| J | `journey_j_share_links_are_scoped_by_role_and_revocable` | 401/403 per role, notebook scoping, revocation, and the streaming path |
+| K | `journey_k_interrupted_ingestion_is_recovered_and_retry_is_idempotent` | recovery on reopen, retry idempotency, and chunk de-duplication |
+
+## New modules added for those journeys
+
+### `auth` (8)
+`owner_mode_allows_everything`, `missing_token_is_401`, `wrong_token_is_401`,
+`share_token_scopes_to_its_notebook`, `viewer_cannot_write`, `editor_cannot_manage`,
+`revoked_grant_is_refused`, `tokens_are_compared_in_constant_time` — the last one guards the
+comparison used for every credential check.
+
+### `discovery` (3)
+`resolves_relative_forms_against_the_seed`, `candidates_carry_provenance_and_skip_media`,
+`host_reports_the_origin_including_a_port`.
+
+### `ingest::transcript` (4)
+`parses_vtt_cues_with_millisecond_offsets`, `parses_srt_with_comma_decimals_and_indices`,
+`rejects_text_without_timestamps`, `blocks_carry_timestamp_locators`.
+
+### `export` (7)
+Markdown for flashcards/slides/report payloads, filename slugs, and the SVG path; PPTX/PDF are
+absent from the module on purpose.
+
 ## Not covered (honest gaps)
 
 * No real browser engine: CSS layout is asserted at the media-query level only.
@@ -383,6 +422,13 @@ unsupported with a reason`.
 * No decoded pixel, caption or transcript is produced by the product. Frame decoding was used
   **only** as research tooling on a fixture we encoded ourselves (`docs/reference/VIDEO_RESEARCH.md`);
   no vision model, no ASR, no authorized third-party footage.
+* No test drives two browsers against one server at once; share links are tested
+  sequentially, so a race between revocation and an in-flight request is not covered.
+* Discovery is tested against loopback fixture pages only. It has never been run against a
+  real-world page, so its tolerance for odd anchors, `<base href>` or JS-rendered link lists is
+  unmeasured.
+* The transcript parser handles the two dominant caption formats; karaoke-style inline
+  timestamps (`<00:00:01.000>` mid-cue) are stripped rather than used to split a cue.
 * Media parsing is MP4-family only; Matroska/WebM, MPEG-TS and AVI are detected and refused, so
   their durations and codecs are genuinely unknown here rather than merely untested.
 * No corrupted-but-parseable video fixtures (e.g. a valid `moov` with wrong `stco` offsets):

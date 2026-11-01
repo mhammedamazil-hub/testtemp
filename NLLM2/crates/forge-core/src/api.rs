@@ -5,6 +5,9 @@
 //! a machine-readable reason.
 
 use crate::artifacts;
+use crate::auth;
+use crate::discovery;
+use crate::ingest::text;
 use crate::domain::*;
 use crate::fetch::{self, FetchedMeta};
 use crate::grounded;
@@ -59,6 +62,15 @@ fn apply_fetch_meta(src: &mut Source, fetched: &Option<FetchedMeta>) {
     }
 }
 
+/// Close an ingestion job: one place that stamps the end time and final status.
+fn finish_job(db: &mut Db, job_id: &str, status: &str, error: &str) {
+    if let Some(job) = db.jobs.iter_mut().find(|j| j.id == job_id) {
+        job.status = status.to_string();
+        job.error = error.to_string();
+        job.finished_at = now_iso();
+    }
+}
+
 fn err(status: u16, code: &str, msg: &str) -> Response {
     Response::json(
         status,
@@ -89,6 +101,7 @@ struct ChatTurn {
     settings: grounded::AnswerOptions,
     instructions: String,
     conv_id: Option<String>,
+    conflicts: Vec<crate::contradictions::Conflict>,
     sources_considered: usize,
     chunks_considered: usize,
     tables_considered: usize,
@@ -142,6 +155,18 @@ fn chat_json(turn: &ChatTurn, conversation_id: &str, persisted: bool) -> Value {
         "sources_considered" => turn.sources_considered as u64,
         "chunks_considered" => turn.chunks_considered as u64,
         "tables_considered" => turn.tables_considered as u64,
+        "conflicts" => Value::Arr(turn.conflicts.iter().map(|c| obj! {
+            "kind" => c.kind.as_str(),
+            "topic" => c.topic.as_str(),
+            "claims" => Value::Arr(c.claims.iter().map(|k| obj! {
+                "source_id" => k.source_id.as_str(),
+                "source_title" => k.source_title.as_str(),
+                "chunk_id" => k.chunk_id.as_str(),
+                "quote" => k.quote.as_str(),
+                "locator_label" => k.locator.human(),
+                "number" => Value::from(k.number.unwrap_or(0.0)),
+            }).collect()),
+        }).collect()),
         "computed" => turn.engine == "table",
         "note" => turn.assistant_msg.note.clone(),
         "notebook_instructions" => turn.instructions.clone(),
@@ -176,6 +201,92 @@ impl Api {
     /// Entry point for the server. Buffered for every route except the chat stream, which
     /// needs chunked delivery (`Reply::Stream`). `handle()` stays available for tests and
     /// callers that want the buffered shape.
+    /// Resolve who is asking. Single-user mode (no `owner.token`) treats every request as the
+    /// operator, which is the deployment the README describes; once a token exists, anonymous
+    /// requests are refused. `/api/capabilities` reports which mode is active.
+    fn authenticate(&self, req: &Request) -> Result<auth::Identity, (u16, &'static str, String)> {
+        let owner = self.store.owner_token();
+        let enforced = owner.is_some();
+        // The capability page and the auth status are deliberately readable without a token:
+        // they are how a client (and a person) discovers *what it may do* and whether sharing
+        // is enforced. Neither reads a notebook, a source or a count.
+        let public = matches!(req.path.trim_end_matches('/'), "/api/capabilities" | "/api/auth")
+            && auth::presented_token(req).is_none()
+            && auth::presented_share(req).is_none();
+        if public {
+            return Ok(auth::Identity::Owner);
+        }
+        let grants = self.store.read(|db| db.shares.clone());
+        auth::resolve(req, enforced, owner.as_deref(), &grants)
+    }
+
+    /// Notebook a route acts on, following ids through the store.
+    fn route_notebook(&self, segs: &[&str]) -> Option<String> {
+        self.store.read(|db| match segs {
+            ["api", "notebooks", id, ..] => Some((*id).to_string()),
+            ["api", "sources", sid, ..] => {
+                db.sources.iter().find(|s| s.id == *sid).map(|s| s.notebook_id.clone())
+            }
+            ["api", "notes", nid, ..] => {
+                db.notes.iter().find(|n| n.id == *nid).map(|n| n.notebook_id.clone())
+            }
+            ["api", "artifacts", aid, ..] => {
+                db.artifacts.iter().find(|a| a.id == *aid).map(|a| a.notebook_id.clone())
+            }
+            ["api", "conversations", cid, ..] => {
+                db.conversations.iter().find(|c| c.id == *cid).map(|c| c.notebook_id.clone())
+            }
+            ["api", "jobs", jid, ..] => {
+                db.jobs.iter().find(|j| j.id == *jid).map(|j| j.notebook_id.clone())
+            }
+            ["api", "shares", gid, ..] => {
+                db.shares.iter().find(|g| g.id == *gid).map(|g| g.notebook_id.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// The coarse verb a route needs: read, write, or manage (owner only).
+    fn route_action(method: &str, segs: &[&str]) -> &'static str {
+        match (method, segs) {
+            ("GET", _) | ("HEAD", _) => "read",
+            ("POST", ["api", "notebooks"]) => "manage",
+            ("POST", ["api", "notebooks", _, "chat"]) => "read",
+            ("POST", ["api", "notebooks", _, "chat", "stream"]) => "read",
+            ("POST", ["api", "notebooks", _, "sources", ..]) => "write",
+            ("POST", ["api", "notebooks", _, "shares"]) => "manage",
+            ("DELETE", ["api", "notebooks", ..]) => "manage",
+            ("PATCH", ["api", "notebooks", ..]) => "manage",
+            ("DELETE", ["api", "shares", ..]) => "manage",
+            ("POST", ["api", "import"]) | ("POST", ["api", "backup"]) => "manage",
+            ("POST", ["api", "providers"]) | ("DELETE", ["api", "providers", ..]) => "manage",
+            ("POST", ["api", "notebooklm", ..]) => "manage",
+            ("POST", ["api", "media", "inspect"]) => "manage",
+            ("POST", ["api", "auth", ..]) => "manage",
+            _ => "write",
+        }
+    }
+
+    /// Refuse a request the identity may not make. `None` means "go ahead".
+    fn guard(&self, identity: &auth::Identity, req: &Request, segs: &[&str]) -> Option<Response> {
+        if identity.is_owner() {
+            return None;
+        }
+        // Health and capability pages are how a shared client discovers what it may do.
+        if matches!(segs, ["api", "health"] | ["api", "capabilities"] | ["api", "auth"]) {
+            return None;
+        }
+        if matches!(segs, ["api", "notebooks"]) && req.method == "GET" {
+            return None; // filtered to the shared notebook in list_notebooks
+        }
+        let action = Self::route_action(&req.method, segs);
+        let notebook = self.route_notebook(segs);
+        match auth::allow(identity, notebook.as_deref(), action) {
+            Ok(()) => None,
+            Err((status, code, msg)) => Some(err(status, code, &msg)),
+        }
+    }
+
     pub fn route(&self, req: &Request) -> Reply {
         let path = req.path.trim_end_matches('/').to_string();
         let segs: Vec<&str> = path
@@ -185,6 +296,13 @@ impl Api {
             .collect();
         if req.method == "POST" {
             if let ["api", "notebooks", id, "chat", "stream"] = segs.as_slice() {
+                let identity = match self.authenticate(req) {
+                    Ok(i) => i,
+                    Err((status, code, msg)) => return Reply::Full(err(status, code, &msg)),
+                };
+                if let Some(denied) = self.guard(&identity, req, &segs) {
+                    return Reply::Full(denied);
+                }
                 return self.chat_stream(id, req);
             }
         }
@@ -196,10 +314,18 @@ impl Api {
         let path = if path.is_empty() { "/".to_string() } else { path };
         let segs: Vec<&str> = path.trim_start_matches('/').split('/').filter(|s| !s.is_empty()).collect();
 
+        let identity = match self.authenticate(req) {
+            Ok(i) => i,
+            Err((status, code, msg)) => return err(status, code, &msg),
+        };
+        if let Some(denied) = self.guard(&identity, req, &segs) {
+            return denied;
+        }
+
         let result = match (req.method.as_str(), segs.as_slice()) {
             ("GET", ["api", "health"]) => Ok(self.health()),
             ("GET", ["api", "capabilities"]) => Ok(ok(self.capabilities())),
-            ("GET", ["api", "notebooks"]) => Ok(ok(self.list_notebooks())),
+            ("GET", ["api", "notebooks"]) => Ok(ok(self.list_notebooks(&identity))),
             ("POST", ["api", "notebooks"]) => self.create_notebook(req),
             ("GET", ["api", "notebooks", id]) => Ok(self.get_notebook(id)),
             ("PATCH", ["api", "notebooks", id]) => self.update_notebook(id, req),
@@ -218,6 +344,9 @@ impl Api {
             ("DELETE", ["api", "notes", nid]) => Ok(self.delete_note(nid)),
             ("POST", ["api", "notes", nid, "to-source"]) => self.note_to_source(nid),
             ("POST", ["api", "notebooks", id, "artifacts"]) => self.create_artifact(id, req),
+            ("PATCH", ["api", "artifacts", aid]) => self.update_artifact(aid, req),
+            ("POST", ["api", "artifacts", aid, "review"]) => self.review_card(aid, req),
+            ("GET", ["api", "artifacts", aid, "export"]) => Ok(self.export_artifact(aid, req)),
             ("GET", ["api", "notebooks", id, "artifacts"]) => Ok(ok(self.list_artifacts(id))),
             ("GET", ["api", "artifacts", aid]) => Ok(self.get_artifact(aid)),
             ("GET", ["api", "sources", sid]) => Ok(self.get_source(sid)),
@@ -227,6 +356,14 @@ impl Api {
             ("DELETE", ["api", "sources", sid]) => Ok(self.delete_source(sid)),
             ("PATCH", ["api", "sources", sid]) => self.update_source(sid, req),
             ("POST", ["api", "sources", sid, "refresh"]) => self.refresh_source(sid),
+            ("POST", ["api", "sources", sid, "retry"]) => self.retry_source(sid),
+            ("POST", ["api", "notebooks", id, "shares"]) => self.create_share(id, req),
+            ("GET", ["api", "notebooks", id, "shares"]) => Ok(ok(self.list_shares(id))),
+            ("DELETE", ["api", "shares", gid]) => Ok(self.revoke_share(gid)),
+            ("POST", ["api", "discovery", "crawl"]) => self.crawl(req),
+            ("GET", ["api", "auth"]) => Ok(ok(self.auth_json())),
+            ("POST", ["api", "auth", "owner-token"]) => self.auth_endpoint(req),
+            ("GET", ["api", "notebooks", id, "jobs"]) => Ok(ok(self.list_jobs(id))),
             ("GET", ["api", "notebooks", id, "export"]) => Ok(self.export_notebook(id)),
             ("POST", ["api", "import"]) => self.import_notebook(req),
             ("GET", ["api", "search"]) => Ok(self.search(req)),
@@ -278,6 +415,12 @@ impl Api {
                 "locator" => "cell (A1 range, e.g. Sales!C2:C6)",
                 "note" => "computed over numeric cells only: empty cells and placeholders are excluded (never counted as zero), a column that mixes units is refused, and a cached column total is excluded to avoid double counting",
             },
+            "auth" => self.auth_json(),
+            "discovery" => obj! {
+                "status" => "partial",
+                "endpoint" => "/api/discovery/crawl",
+                "note" => "reads the outbound links of pages you supply and offers them, with provenance, as candidates to import. No search engine is queried and no result list is invented, so 'search the web' remains unsupported",
+            },
             "media" => obj! {
                 "status" => "partial",
                 "endpoint" => "/api/media/inspect",
@@ -289,8 +432,12 @@ impl Api {
                 "html" => obj!{ "status" => "supported", "locator" => "paragraph+section" },
                 "csv" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "RFC 4180 quoting, delimiter sniffed; the grid is kept for aggregation" },
                 "pdf" => obj!{ "status" => "supported", "locator" => "page", "note" => "text-layer PDFs; no OCR" },
-                "video" => obj!{ "status" => "unsupported", "note" => "no video ingestion: downloading platform video needs an authorized extractor and per-source permission; container metadata can be inspected with POST /api/media/inspect" },
-                "audio" => obj!{ "status" => "unsupported", "note" => "no speech-to-text engine is available offline" },
+                "transcript" => obj!{
+                    "status" => "supported",
+                    "locator" => "timestamp",
+                    "formats" => "WebVTT (.vtt), SubRip (.srt)",
+                    "note" => "user-supplied caption files are indexed with their millisecond offsets, so a citation reads \"00:42\". Forge does not download video or captions, and it does not analyse frames: a citation means \"spoken at 00:42\", never \"shown at 00:42\""
+                },
                 "url" => obj!{
                     "status" => if fetch::transport_available() { "supported" } else { "unsupported" },
                     "locator" => "section+paragraph",
@@ -303,7 +450,7 @@ impl Api {
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
                 "audio" => obj!{ "status" => "unsupported", "reason" => "no ASR engine available offline" },
                 "video" => obj!{ "status" => "unsupported",
-                    "reason" => "container metadata is readable via /api/media/inspect, but video is not a source: no frame decoding, no captions, no transcription, and no authorized extractor for platform video" },
+                    "reason" => "no video ingestion: container metadata is readable via /api/media/inspect, but video is not a source — no frame decoding, no captions, no transcription, and no authorized extractor for platform video. Supply a timed transcript (.vtt/.srt) to cite what was said" },
                 "image_ocr" => obj!{ "status" => "unsupported", "reason" => "no OCR engine available" },
             },
             "providers" => self.provider_status(),
@@ -355,11 +502,15 @@ impl Api {
     }
 
     // --------------------------------------------------------- notebooks
-    fn list_notebooks(&self) -> Value {
+    fn list_notebooks(&self, identity: &auth::Identity) -> Value {
         self.store.read(|db| {
+            let scope = identity.notebook();
             let items: Vec<Value> = db
                 .notebooks
                 .iter()
+                // A share link sees exactly one notebook. Listing the rest would leak titles,
+                // counts and activity that were never shared.
+                .filter(|n| scope.map(|s| s == n.id).unwrap_or(true))
                 .map(|n| {
                     let sources = db.sources.iter().filter(|s| s.notebook_id == n.id).count();
                     let notes = db.notes.iter().filter(|x| x.notebook_id == n.id).count();
@@ -455,14 +606,21 @@ impl Api {
                 }
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
-        if found {
-            Ok(ok(obj! { "id" => id, "updated" => true }))
-        } else {
-            Err(err(404, "not_found", "notebook not found"))
+        if !found {
+            return Err(err(404, "not_found", "notebook not found"));
         }
+        // Return the notebook itself, not just an acknowledgement: a client that renamed it
+        // should not have to guess whether the new title was accepted.
+        Ok(self.store.read(|db| match db.notebooks.iter().find(|n| n.id == id) {
+            Some(n) => ok(obj! { "id" => n.id.as_str(), "title" => n.title.as_str(), "updated" => true }),
+            None => err(404, "not_found", "notebook not found"),
+        }))
     }
 
     fn delete_notebook(&self, id: &str) -> Response {
+        let orphaned: Vec<String> = self.store.read(|db| {
+            db.sources.iter().filter(|s| s.notebook_id == id).map(|s| s.id.clone()).collect()
+        });
         let removed = self
             .store
             .write(|db| {
@@ -479,6 +637,11 @@ impl Api {
             })
             .unwrap_or(false);
         if removed {
+            // The notebook's retained uploads go with it; nothing should linger on disk after
+            // a delete that the UI reports as complete.
+            for sid in orphaned {
+                self.store.remove_blob(&sid);
+            }
             ok(obj! { "deleted" => true })
         } else {
             err(404, "not_found", "notebook not found")
@@ -737,6 +900,410 @@ impl Api {
         }))
     }
 
+    /// Re-run an ingestion that failed or was interrupted.
+    ///
+    /// Retry is idempotent with respect to records: the same source id is re-used and its
+    /// chunks are replaced, so a retried ingest can never duplicate a source (Journey K).
+    /// The retained upload is preferred; URL sources are re-fetched from their canonical URL.
+    fn retry_source(&self, sid: &str) -> Result<Response, Response> {
+        let (nb, title, kind, origin, status, canonical) = self
+            .store
+            .read(|db| match db.sources.iter().find(|s| s.id == sid) {
+                None => None,
+                Some(s) => Some((
+                    s.notebook_id.clone(),
+                    s.title.clone(),
+                    s.kind.clone(),
+                    s.origin.clone(),
+                    s.status.clone(),
+                    s.canonical_url.clone(),
+                )),
+            })
+            .ok_or_else(|| err(404, "not_found", "source not found"))?;
+        if status == "ready" {
+            return Err(err(409, "already_ready", "this source is already indexed"));
+        }
+
+        let bytes = match self.store.read_blob(sid) {
+            Some(b) => b,
+            None if !canonical.is_empty() => {
+                let fetched = fetch::fetch(&canonical).map_err(|e| {
+                    let status = match e {
+                        fetch::FetchError::Rejected(_) => 422,
+                        fetch::FetchError::NoTransport(_) => 501,
+                        fetch::FetchError::Limit(_) => 413,
+                        fetch::FetchError::Failed(_) => 502,
+                    };
+                    err(status, e.code(), &e.message().to_string())
+                })?;
+                fetched.body
+            }
+            None => {
+                return Err(err(
+                    409,
+                    "not_retryable",
+                    "this source has no retained file and no URL; add it again",
+                ))
+            }
+        };
+
+        let attempts = self.store.read(|db| {
+            db.jobs
+                .iter()
+                .filter(|j| j.source_id == sid)
+                .map(|j| j.attempts)
+                .max()
+                .unwrap_or(0)
+        });
+        let job_id = new_id("job");
+        let started_at = now_iso();
+        self.store
+            .write(|db| {
+                db.jobs.push(Job {
+                    id: job_id.clone(),
+                    notebook_id: nb.clone(),
+                    source_id: sid.to_string(),
+                    kind: "ingest".into(),
+                    status: "running".into(),
+                    started_at: started_at.clone(),
+                    finished_at: String::new(),
+                    error: String::new(),
+                    attempts: attempts + 1,
+                });
+                if let Some(src) = db.sources.iter_mut().find(|s| s.id == sid) {
+                    src.status = "processing".into();
+                    src.error = String::new();
+                }
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+
+        let parsed = match ingest::extract(&kind, &title, &bytes) {
+            Ok(p) if !p.blocks.is_empty() => p,
+            Ok(_) => {
+                let msg = "no readable text could be extracted from this file";
+                let _ = self.store.write(|db| {
+                    if let Some(src) = db.sources.iter_mut().find(|s| s.id == sid) {
+                        src.status = "failed".into();
+                        src.error = msg.into();
+                    }
+                    finish_job(db, &job_id, "failed", msg);
+                });
+                return Err(err(422, "empty_extraction", msg));
+            }
+            Err(e) => {
+                let _ = self.store.write(|db| {
+                    if let Some(src) = db.sources.iter_mut().find(|s| s.id == sid) {
+                        src.status = "failed".into();
+                        src.error = e.clone();
+                    }
+                    finish_job(db, &job_id, "failed", &e);
+                });
+                return Err(err(422, "extract_failed", &e));
+            }
+        };
+
+        let chunk_count = parsed.blocks.len() as u32;
+        let page_count = parsed.page_count;
+        let warnings = parsed.warnings.clone();
+        let mut tables = parsed.tables;
+        for t in tables.iter_mut() {
+            t.source_id = sid.to_string();
+            t.notebook_id = nb.clone();
+            t.id = format!("tbl_{}", crate::domain::short_hash(&format!("{}|{}", t.source_id, t.sheet)));
+        }
+        let chunks: Vec<Chunk> = parsed
+            .blocks
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| Chunk {
+                id: new_id("chk"),
+                source_id: sid.to_string(),
+                notebook_id: nb.clone(),
+                ordinal: i as u32,
+                text: b.text,
+                locator: b.locator,
+            })
+            .collect();
+        self.store
+            .write(|db| {
+                db.chunks.retain(|c| c.source_id != sid);
+                db.tables.retain(|t| t.source_id != sid);
+                db.chunks.extend(chunks);
+                db.tables.extend(tables);
+                if let Some(src) = db.sources.iter_mut().find(|s| s.id == sid) {
+                    src.status = "ready".into();
+                    src.error = String::new();
+                    src.warnings = warnings;
+                    src.page_count = page_count;
+                    src.chunk_count = chunk_count;
+                }
+                finish_job(db, &job_id, "done", "");
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        Ok(ok(obj! {
+            "source_id" => sid,
+            "status" => "ready",
+            "kind" => kind,
+            "origin" => origin,
+            "chunk_count" => chunk_count as u64,
+            "attempts" => (attempts + 1) as u64,
+        }))
+    }
+
+    /// Create a share link. The plaintext token is returned **once**; only its hash is stored.
+    fn create_share(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let role = body.str_of("role").unwrap_or("viewer").trim().to_ascii_lowercase();
+        if role != "viewer" && role != "editor" {
+            return Err(err(422, "bad_role", "role must be viewer or editor"));
+        }
+        let exists = self.store.read(|db| db.notebooks.iter().any(|n| n.id == nb));
+        if !exists {
+            return Err(err(404, "not_found", "notebook not found"));
+        }
+        let token = auth::fresh_token();
+        let grant = auth::ShareGrant {
+            id: new_id("shr"),
+            notebook_id: nb.to_string(),
+            role: role.clone(),
+            token_sha256: hashes::sha256(token.as_bytes()),
+            token_prefix: token.chars().take(6).collect(),
+            created_at: now_iso(),
+            revoked_at: String::new(),
+        };
+        let id = grant.id.clone();
+        let prefix = grant.token_prefix.clone();
+        self.store
+            .write(|db| db.shares.push(grant))
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        Ok(created(obj! {
+            "id" => id,
+            "notebook_id" => nb,
+            "role" => role,
+            // shown once; the server never has the plaintext again
+            "token" => token,
+            "token_prefix" => prefix,
+            "link" => format!("#/share/{}", ""),
+            "note" => "the token is shown once and stored only as a hash; revoke to disable it",
+        }))
+    }
+
+    fn list_shares(&self, nb: &str) -> Value {
+        // Built outside the store closure: `capabilities()` must never be called while the
+        // database lock is held.
+        let auth = self.auth_json();
+        self.store.read(|db| {
+            obj! {
+                "shares" => Value::Arr(db.shares.iter()
+                    .filter(|g| g.notebook_id == nb)
+                    .map(auth::grant_json)
+                    .collect()),
+                "auth" => auth.clone(),
+            }
+        })
+    }
+
+    fn revoke_share(&self, gid: &str) -> Response {
+        let done = self
+            .store
+            .write(|db| match db.shares.iter_mut().find(|g| g.id == gid) {
+                Some(g) => {
+                    if g.revoked_at.is_empty() {
+                        g.revoked_at = now_iso();
+                    }
+                    true
+                }
+                None => false,
+            })
+            .unwrap_or(false);
+        if done {
+            ok(obj! { "id" => gid, "revoked" => true })
+        } else {
+            err(404, "not_found", "share not found")
+        }
+    }
+
+    /// Turn enforcement on (or report it). Setting a token is only possible while the app is
+    /// in single-user mode or by the current owner; that is the one action that cannot be
+    /// delegated, because it defines who the owner is.
+    fn auth_endpoint(&self, req: &Request) -> Result<Response, Response> {
+        if req.method == "GET" {
+            return Ok(ok(self.auth_json()));
+        }
+        let body = parse_body(req)?;
+        let configured = self.store.owner_token();
+        if configured.is_some() {
+            if let Some(token) = auth::presented_token(req) {
+                if let Some(current) = configured.as_deref() {
+                    if !auth::token_eq(&token, current) {
+                        return Err(err(401, "unauthorized", "only the owner can change the token"));
+                    }
+                }
+            } else {
+                return Err(err(401, "unauthorized", "only the owner can change the token"));
+            }
+        }
+        let token = body
+            .str_of("token")
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(auth::fresh_token);
+        if token.len() < 16 {
+            return Err(err(422, "weak_token", "use at least 16 characters"));
+        }
+        self.store
+            .set_owner_token(&token)
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        Ok(ok(obj! {
+            "enforced" => true,
+            "token" => token,
+            "note" => "store this token; it is required from now on and is shown once here",
+        }))
+    }
+
+    fn auth_json(&self) -> Value {
+        let enforced = self.store.owner_token().is_some();
+        obj! {
+            "mode" => if enforced { "token" } else { "single-user" },
+            "enforced" => enforced,
+            "note" => if enforced {
+                "requests need the owner token or a share token; share links are scoped to one notebook"
+            } else {
+                "no owner token is configured, so every request is the operator. Share a notebook only after setting a token; until then anyone who can reach the port has full access"
+            },
+        }
+    }
+
+    /// `POST /api/discovery/crawl` — read the links of pages the user chose.
+    ///
+    /// No search engine is queried (see `discovery`): every candidate carries the page it was
+    /// found on, so a reader can check where "discovery" came from.
+    fn crawl(&self, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let seeds = parse_str_list(body.get("seed_urls"));
+        if seeds.is_empty() {
+            return Err(err(422, "missing_seeds", "seed_urls must contain at least one URL"));
+        }
+        if seeds.len() > 5 {
+            return Err(err(422, "too_many_seeds", "at most five seed pages per request"));
+        }
+        let limit = body
+            .get("limit")
+            .and_then(|l| l.as_f64())
+            .unwrap_or(20.0)
+            .clamp(1.0, 50.0) as usize;
+        let per_seed = limit.div_ceil(seeds.len()).max(1);
+
+        let mut reports: Vec<Value> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
+        let mut candidates: Vec<discovery::Candidate> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for raw in seeds.iter().take(5) {
+            let parsed = match security::parse_url(raw) {
+                Ok(p) => p,
+                Err(e) => {
+                    warnings.push(format!("{} — {}", raw, e));
+                    reports.push(obj! {
+                        "url" => raw.as_str(), "status" => 0u64, "title" => "",
+                        "error" => e.as_str(), "links_seen" => 0u64, "links_kept" => 0u64,
+                    });
+                    continue;
+                }
+            };
+            let url = parsed.to_url();
+            match fetch::fetch(&url) {
+                Ok(page) => {
+                    let ctype = page.content_type.to_ascii_lowercase();
+                    let looks_html = ctype.contains("html") || page.body.starts_with(b"<");
+                    if !looks_html {
+                        let msg = format!(
+                            "not a web page ({}), so it has no links to offer",
+                            if ctype.is_empty() { "unknown content type".to_string() } else { ctype }
+                        );
+                        warnings.push(format!("{} — {}", url, msg));
+                        reports.push(obj! {
+                            "url" => url.as_str(), "status" => page.status as u64,
+                            "title" => "", "error" => msg.as_str(),
+                            "links_seen" => 0u64, "links_kept" => 0u64,
+                        });
+                        continue;
+                    }
+                    let html = String::from_utf8_lossy(&page.body);
+                    let (found, seen_links, mut warns) = discovery::candidates_from(&page.final_url, &html, per_seed);
+                    let mut kept = 0usize;
+                    for c in found {
+                        if candidates.len() >= limit {
+                            break;
+                        }
+                        let key = c.url.trim_end_matches('/').to_ascii_lowercase();
+                        if seen.insert(key) {
+                            candidates.push(c);
+                            kept += 1;
+                        }
+                    }
+                    warnings.append(&mut warns);
+                    reports.push(obj! {
+                        "url" => url.as_str(),
+                        "final_url" => page.final_url.as_str(),
+                        "status" => page.status as u64,
+                        "title" => text::html_title(&html).unwrap_or_default(),
+                        "error" => "",
+                        "links_seen" => seen_links as u64,
+                        "links_kept" => kept as u64,
+                    });
+                }
+                Err(e) => {
+                    warnings.push(format!("{} — {}", url, e.message()));
+                    reports.push(obj! {
+                        "url" => url.as_str(), "status" => 0u64, "title" => "",
+                        "error" => e.message().as_str(),
+                        "links_seen" => 0u64, "links_kept" => 0u64,
+                    });
+                }
+            }
+        }
+
+        let mut hosts: Vec<String> = candidates.iter().map(|c| c.host.clone()).collect();
+        hosts.sort();
+        hosts.dedup();
+        Ok(ok(obj! {
+            "searched_engine" => Value::Null,
+            "note" => "Forge does not query a search engine. These candidates are the outbound links of the seed pages you supplied, each with the page it was found on; nothing was ranked or generated.",
+            "seed_count" => seeds.len() as u64,
+            "candidates" => Value::Arr(candidates.iter().map(|c| obj! {
+                "url" => c.url.as_str(),
+                "host" => c.host.as_str(),
+                "anchor" => c.anchor.as_str(),
+                "from_url" => c.from_url.as_str(),
+            }).collect()),
+            "candidate_hosts" => hosts.len() as u64,
+            "hosts" => json_str_list(&hosts),
+            "seeds" => Value::Arr(reports),
+            "warnings" => json_str_list(&warnings),
+        }))
+    }
+
+    fn list_jobs(&self, nb: &str) -> Value {
+        self.store.read(|db| {
+            obj! {
+                "jobs" => Value::Arr(db.jobs.iter()
+                    .filter(|j| j.notebook_id == nb)
+                    .map(|j| obj! {
+                        "id" => j.id.as_str(),
+                        "source_id" => j.source_id.as_str(),
+                        "kind" => j.kind.as_str(),
+                        "status" => j.status.as_str(),
+                        "started_at" => j.started_at.as_str(),
+                        "finished_at" => j.finished_at.as_str(),
+                        "error" => j.error.as_str(),
+                        "attempts" => j.attempts as u64,
+                    })
+                    .collect())
+            }
+        })
+    }
+
     fn delete_source(&self, sid: &str) -> Response {
         let removed = self
             .store
@@ -746,10 +1313,12 @@ impl Api {
                 let existed = db.sources.len() != before;
                 db.chunks.retain(|c| c.source_id != sid);
                 db.tables.retain(|t| t.source_id != sid);
+                db.jobs.retain(|j| j.source_id != sid);
                 existed
             })
             .unwrap_or(false);
         if removed {
+            self.store.remove_blob(sid);
             ok(obj! { "deleted" => true })
         } else {
             err(404, "not_found", "source not found")
@@ -785,8 +1354,15 @@ impl Api {
             .map(percent_decode)
             .unwrap_or_else(|| "upload.txt".to_string());
         let safe_name = security::clean_filename(&filename);
+        // Media containers are not prose. Decoding an MP4 as lossy text would let the UI quote
+        // binary garbage as evidence, so it is refused with a reason (Journey E).
+        if let Some(reason) = ingest::unsupported_media(&safe_name) {
+            return Err(err(422, "unsupported_source_kind", &reason));
+        }
         let kind = SourceKind::from_filename(&safe_name).as_str().to_string();
-        self.ingest_bytes(nb, &safe_name, &kind, &safe_name, &req.body, "upload")
+        // origin is the *provenance* ("upload"), not the file name: the UI and the export
+        // both rely on it, and it is what decides whether the bytes are retained for retry.
+        self.ingest_bytes(nb, &safe_name, &kind, "upload", &req.body, &safe_name)
     }
 
     fn add_url_source(&self, nb: &str, req: &Request) -> Result<Response, Response> {
@@ -904,6 +1480,48 @@ impl Api {
             return Err(err(404, "not_found", "notebook not found"));
         }
         let source_id = new_id("src");
+        let job_id = new_id("job");
+        let started_at = now_iso();
+        // Persist the attempt *before* parsing. If the process dies during extraction, the
+        // next start finds a "processing" source and a "running" job and turns them into a
+        // clear, retryable failure instead of a spinner that never resolves (D21).
+        let pending = Source {
+            id: source_id.clone(),
+            notebook_id: nb.to_string(),
+            title: title.to_string(),
+            kind: kind.to_string(),
+            origin: origin.to_string(),
+            byte_len: bytes.len(),
+            status: "processing".into(),
+            error: String::new(),
+            warnings: vec![],
+            added_at: started_at.clone(),
+            page_count: 0,
+            chunk_count: 0,
+            content_hash: hashes::sha256(bytes),
+            ..Default::default()
+        };
+        self.store
+            .write(|db| {
+                db.sources.push(pending);
+                db.jobs.push(Job {
+                    id: job_id.clone(),
+                    notebook_id: nb.to_string(),
+                    source_id: source_id.clone(),
+                    kind: "ingest".into(),
+                    status: "running".into(),
+                    started_at: started_at.clone(),
+                    finished_at: String::new(),
+                    error: String::new(),
+                    attempts: 1,
+                });
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        // Keep the bytes so `retry` can re-ingest without asking the user to upload again.
+        if origin == "upload" || origin == "paste" || origin == "note" {
+            let _ = self.store.save_blob(&source_id, bytes);
+        }
+
         let parsed = match ingest::extract(kind, title, bytes) {
             Ok(p) => p,
             Err(e) => {
@@ -925,7 +1543,12 @@ impl Api {
                     ..Default::default()
                 };
                 apply_fetch_meta(&mut failed, &fetched);
-                let _ = self.store.write(|db| db.sources.push(failed));
+                let _ = self.store.write(|db| {
+                    if let Some(slot) = db.sources.iter_mut().find(|s| s.id == source_id) {
+                        *slot = failed;
+                    }
+                    finish_job(db, &job_id, "failed", &e);
+                });
                 return Err(err(422, "extract_failed", &e));
             }
         };
@@ -949,7 +1572,12 @@ impl Api {
                 ..Default::default()
             };
             apply_fetch_meta(&mut failed, &fetched);
-            let _ = self.store.write(|db| db.sources.push(failed));
+            let _ = self.store.write(|db| {
+                if let Some(slot) = db.sources.iter_mut().find(|s| s.id == source_id) {
+                    *slot = failed;
+                }
+                finish_job(db, &job_id, "failed", msg);
+            });
             return Err(err(422, "empty_extraction", msg));
         }
 
@@ -999,8 +1627,11 @@ impl Api {
             .collect();
         self.store
             .write(|db| {
-                db.sources.push(source);
+                if let Some(slot) = db.sources.iter_mut().find(|s| s.id == source_id) {
+                    *slot = source;
+                }
                 db.chunks.extend(chunks);
+                finish_job(db, &job_id, "done", "");
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
 
@@ -1158,7 +1789,7 @@ impl Api {
         // real cells. This runs before text retrieval because the text path can only ever
         // quote a row, not add one up.
         let computed = crate::tables::try_answer(&question, &tables, &sources);
-        let (answer, problems) = match computed {
+        let (mut answer, mut problems) = match computed {
             Some(a) => {
                 let problems = crate::tables::validate(&a, &tables);
                 (a, problems)
@@ -1179,6 +1810,17 @@ impl Api {
                 (a, problems)
             }
         };
+
+        // Never reconcile silently: if the retrieved passages disagree, both sides are quoted
+        // with their own citations and the answer says it does not choose (D20, Journey C).
+        let mut conflicts: Vec<crate::contradictions::Conflict> = Vec::new();
+        if answer.engine == "extractive" && !answer.abstained {
+            conflicts = crate::contradictions::find(&question, &chunks, &sources);
+            if !conflicts.is_empty() {
+                crate::contradictions::attach(&mut answer, &conflicts);
+                problems = grounded::validate_citations(&answer.citations, &chunks);
+            }
+        }
 
         let now = now_iso();
         let user_msg = Message {
@@ -1223,6 +1865,7 @@ impl Api {
             settings: answer_opts,
             instructions,
             conv_id,
+            conflicts,
             sources_considered: sources.len(),
             chunks_considered: chunks.len(),
             tables_considered: tables.len(),
@@ -1472,6 +2115,27 @@ impl Api {
         let body = parse_body(req)?;
         let kind = body.str_of("kind").unwrap_or("").to_string();
         let topic = body.str_of("topic").unwrap_or("").to_string();
+        let difficulty_raw = body.str_of("difficulty").unwrap_or("").to_string();
+        let Some(difficulty) = artifacts::Difficulty::parse(&difficulty_raw) else {
+            return Err(err(
+                422,
+                "bad_difficulty",
+                &format!("unknown difficulty \"{}\" (use easy, normal or hard)", difficulty_raw),
+            ));
+        };
+        let audience_raw = body.str_of("audience").unwrap_or("").to_string();
+        let audience = match audience_raw.trim().to_ascii_lowercase().as_str() {
+            "" | "general" => "general",
+            "executive" => "executive",
+            "technical" => "technical",
+            _ => {
+                return Err(err(
+                    422,
+                    "bad_audience",
+                    &format!("unknown audience \"{}\" (use general, executive or technical)", audience_raw),
+                ))
+            }
+        };
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
 
         let (chunks, sources) = self.store.read(|db| {
@@ -1494,8 +2158,9 @@ impl Api {
         if chunks.is_empty() {
             return Err(err(409, "no_sources", "select at least one ready source"));
         }
-        let (title, payload) = artifacts::generate(&kind, &chunks, &sources, &topic)
-            .map_err(|e| err(422, "bad_kind", &e))?;
+        let (title, payload) =
+            artifacts::generate_full(&kind, &chunks, &sources, &topic, difficulty, audience)
+                .map_err(|e| err(422, "bad_kind", &e))?;
         let art = Artifact {
             id: new_id("art"),
             notebook_id: nb.to_string(),
@@ -1505,6 +2170,7 @@ impl Api {
             source_ids: sources.iter().map(|s| s.id.clone()).collect(),
             payload,
             stale: false,
+            ..Artifact::default()
         };
         let id = art.id.clone();
         let payload_out = art.payload.clone();
@@ -1516,6 +2182,7 @@ impl Api {
             "id" => id,
             "kind" => kind,
             "title" => title_out,
+            "difficulty" => difficulty.as_str(),
             "payload" => payload_out,
         }))
     }
@@ -1530,6 +2197,13 @@ impl Api {
                     "created_at" => a.created_at.as_str(),
                     "source_ids" => json_str_list(&a.source_ids),
                     "stale" => a.stale,
+                    "version" => a.version as u64,
+                    "updated_at" => a.updated_at.as_str(),
+                    "review_counts" => obj! {
+                        "known" => a.reviews.values().filter(|v| v.as_str() == "known").count() as u64,
+                        "unknown" => a.reviews.values().filter(|v| v.as_str() == "unknown").count() as u64,
+                    },
+                    "reviews" => Value::Obj(a.reviews.iter().map(|(k, v)| (k.clone(), Value::from(v.as_str()))).collect()),
                 }).collect())
             }
         })
@@ -1538,14 +2212,220 @@ impl Api {
     fn get_artifact(&self, aid: &str) -> Response {
         self.store.read(|db| match db.artifacts.iter().find(|a| a.id == aid) {
             None => err(404, "not_found", "artifact not found"),
-            Some(a) => ok(obj! {
-                "id" => a.id.as_str(),
-                "notebook_id" => a.notebook_id.as_str(),
-                "kind" => a.kind.as_str(),
-                "title" => a.title.as_str(),
-                "created_at" => a.created_at.as_str(),
-                "payload" => a.payload.clone(),
-            }),
+            Some(a) => ok(artifact_json(a)),
+        })
+    }
+
+    /// Record a learner's known/unknown mark for one card. This is user data, not a statistic
+    /// we compute: it is stored with the artifact and survives a restart (Journey F).
+    fn review_card(&self, aid: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let card_id = body.str_of("card_id").unwrap_or("").to_string();
+        if card_id.is_empty() {
+            return Err(err(422, "missing_card", "card_id is required"));
+        }
+        let Some(known) = body.get("known").and_then(|k| k.as_bool()) else {
+            return Err(err(422, "missing_known", "known must be true or false"));
+        };
+        let mark = if known { "known" } else { "unknown" };
+        let out = self.store.write(|db| {
+            let Some(art) = db.artifacts.iter_mut().find(|a| a.id == aid) else {
+                return Err(err(404, "not_found", "artifact not found"));
+            };
+            let exists = art
+                .payload
+                .get("cards")
+                .and_then(|c| c.as_arr())
+                .map(|cards| cards.iter().any(|c| c.str_of("id") == Some(card_id.as_str())))
+                .unwrap_or(false)
+                || art
+                    .payload
+                    .get("questions")
+                    .and_then(|c| c.as_arr())
+                    .map(|qs| qs.iter().any(|q| q.str_of("id") == Some(card_id.as_str())))
+                    .unwrap_or(false);
+            if !exists {
+                return Err(err(422, "unknown_card", &format!("no card {} in this artifact", card_id)));
+            }
+            art.reviews.insert(card_id.clone(), mark.to_string());
+            art.updated_at = now_iso();
+            let known_n = art.reviews.values().filter(|v| v.as_str() == "known").count();
+            let unknown_n = art.reviews.values().filter(|v| v.as_str() == "unknown").count();
+            Ok(ok(obj! {
+                "artifact_id" => aid,
+                "card_id" => card_id.as_str(),
+                "known" => known,
+                "version" => art.version as u64,
+                "counts" => obj! {
+                    "known" => known_n as u64,
+                    "unknown" => unknown_n as u64,
+                    "total" => art.reviews.len() as u64,
+                },
+            }))
+        }).map_err(|e| err(500, "storage", &e.to_string()))?;
+        out
+    }
+
+    /// Edit an artifact. Slide decks support element-level operations; every accepted edit
+    /// bumps `version`, so a client can tell two decks apart (Journey H steps 6–9).
+    fn update_artifact(&self, aid: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        self.store
+            .write(|db| {
+                let Some(art) = db.artifacts.iter_mut().find(|a| a.id == aid) else {
+                    return Err(err(404, "not_found", "artifact not found"));
+                };
+                if let Some(t) = body.str_of("title") {
+                    if !t.trim().is_empty() {
+                        art.title = t.trim().to_string();
+                    }
+                }
+                let op = body.str_of("op").unwrap_or("");
+                if !op.is_empty() {
+                    if art.kind != "slides" {
+                        return Err(err(422, "unsupported_op", "slide operations apply to slide decks"));
+                    }
+                    let Some(slides) = art.payload.get("slides").and_then(|s| s.as_arr()).cloned() else {
+                        return Err(err(409, "no_slides", "this deck has no slides"));
+                    };
+                    let mut slides = slides;
+                    let index = body.get("index").and_then(|i| i.as_f64()).unwrap_or(-1.0);
+                    let idx = if index >= 0.0 { Some(index as usize) } else { None };
+                    match op {
+                        "edit" => {
+                            let Some(i) = idx.filter(|i| *i < slides.len()) else {
+                                return Err(err(422, "bad_index", "index out of range"));
+                            };
+                            if let Some(title) = body.str_of("slide_title") {
+                                if let Value::Obj(m) = &mut slides[i] {
+                                    m.insert("title".into(), Value::from(title));
+                                }
+                            }
+                            if let Some(notes) = body.str_of("notes") {
+                                if let Value::Obj(m) = &mut slides[i] {
+                                    m.insert("notes".into(), Value::from(notes));
+                                }
+                            }
+                            if let Some(bullets) = body.get("bullets").and_then(|b| b.as_arr()) {
+                                let rebuilt: Vec<Value> = bullets
+                                    .iter()
+                                    .map(|b| match b {
+                                        Value::Str(text) => obj! { "text" => text.as_str(), "citation" => Value::Null },
+                                        other => other.clone(),
+                                    })
+                                    .collect();
+                                if let Value::Obj(m) = &mut slides[i] {
+                                    m.insert("bullets".into(), Value::Arr(rebuilt));
+                                }
+                            }
+                        }
+                        "delete" => {
+                            let Some(i) = idx.filter(|i| *i < slides.len()) else {
+                                return Err(err(422, "bad_index", "index out of range"));
+                            };
+                            let removed = slides.remove(i);
+                            if let Value::Obj(m) = &mut art.payload {
+                                if let Some(arr) = m.get_mut("removed") {
+                                    if let Value::Arr(a) = arr {
+                                        a.push(removed);
+                                    }
+                                } else {
+                                    m.insert("removed".into(), Value::Arr(vec![removed]));
+                                }
+                            }
+                        }
+                        "restore" => {
+                            let removed = art
+                                .payload
+                                .get("removed")
+                                .and_then(|r| r.as_arr())
+                                .cloned()
+                                .unwrap_or_default();
+                            let Some(i) = idx.filter(|i| *i < removed.len()) else {
+                                return Err(err(422, "bad_index", "index out of range"));
+                            };
+                            slides.push(removed[i].clone());
+                            if let Value::Obj(m) = &mut art.payload {
+                                if let Some(Value::Arr(a)) = m.get_mut("removed") {
+                                    a.remove(i);
+                                }
+                            }
+                        }
+                        "reorder" => {
+                            let from = body.get("from").and_then(|i| i.as_f64()).unwrap_or(-1.0);
+                            let to = body.get("to").and_then(|i| i.as_f64()).unwrap_or(-1.0);
+                            if from < 0.0 || to < 0.0 || from as usize >= slides.len() || to as usize >= slides.len() {
+                                return Err(err(422, "bad_index", "from/to out of range"));
+                            }
+                            let slide = slides.remove(from as usize);
+                            slides.insert(to as usize, slide);
+                        }
+                        other => return Err(err(422, "bad_op", &format!("unknown op {}", other))),
+                    }
+                    if let Value::Obj(m) = &mut art.payload {
+                        m.insert("slides".into(), Value::Arr(slides.clone()));
+                        m.insert("slide_count".into(), Value::from(slides.len() as f64));
+                    }
+                } else if let Some(payload) = body.get("payload") {
+                    art.payload = payload.clone();
+                }
+                art.version += 1;
+                art.updated_at = now_iso();
+                Ok(ok(artifact_json(art)))
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?
+    }
+
+    /// `GET /api/artifacts/:id/export?format=md|json|svg`
+    ///
+    /// Markdown and JSON are always available; SVG only for concept maps. PPTX and PDF are
+    /// refused with a reason rather than producing a file that looks official and is wrong.
+    fn export_artifact(&self, aid: &str, req: &Request) -> Response {
+        let format = req.query_get("format").unwrap_or("md").to_ascii_lowercase();
+        self.store.read(|db| {
+            let Some(art) = db.artifacts.iter().find(|a| a.id == aid) else {
+                return err(404, "not_found", "artifact not found");
+            };
+            let sources: Vec<Source> = db
+                .sources
+                .iter()
+                .filter(|s| art.source_ids.contains(&s.id))
+                .cloned()
+                .collect();
+            let base = format!("forge-{}-v{}", crate::export::slug(&art.title), art.version);
+            match format.as_str() {
+                "md" | "markdown" => {
+                    let body = crate::export::to_markdown(art, &sources);
+                    Response::new(200, "text/markdown; charset=utf-8", body.into_bytes()).with_header(
+                        "Content-Disposition",
+                        &format!("attachment; filename=\"{}.md\"", base),
+                    )
+                }
+                "json" => Response::json(200, &artifact_json(art)).with_header(
+                    "Content-Disposition",
+                    &format!("attachment; filename=\"{}.json\"", base),
+                ),
+                "svg" => match crate::export::mindmap_svg(art) {
+                    Some(svg) => Response::new(200, "image/svg+xml", svg.into_bytes()).with_header(
+                        "Content-Disposition",
+                        &format!("attachment; filename=\"{}.svg\"", base),
+                    ),
+                    None => err(
+                        409,
+                        "format_unavailable",
+                        "SVG export exists for concept maps only; this artifact has no diagram",
+                    ),
+                },
+                "pptx" | "pdf" | "png" => err(
+                    501,
+                    "format_unsupported",
+                    &format!(
+                        "this build has no {} renderer; export Markdown (format=md) and convert outside Forge",
+                        format
+                    ),
+                ),
+                other => err(422, "bad_format", &format!("unknown format {}", other)),
+            }
         })
     }
 
@@ -1699,7 +2579,14 @@ impl Api {
                         .filter_map(|s| id_map.get(&s).cloned())
                         .collect(),
                     payload: a.get("payload").cloned().unwrap_or(Value::Null),
-            stale: false,
+                    stale: false,
+                    reviews: a
+                        .get("reviews")
+                        .and_then(|r| r.as_obj())
+                        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+                        .unwrap_or_default(),
+                    version: 1,
+                    updated_at: String::new(),
                 });
             }
         }
@@ -2131,6 +3018,9 @@ fn artifact_json(a: &Artifact) -> Value {
         "source_ids" => json_str_list(&a.source_ids),
         "stale" => a.stale,
         "payload" => a.payload.clone(),
+        "version" => a.version as u64,
+        "updated_at" => a.updated_at.as_str(),
+        "reviews" => Value::Obj(a.reviews.iter().map(|(k, v)| (k.clone(), Value::from(v.as_str()))).collect()),
     }
 }
 

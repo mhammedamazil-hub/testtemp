@@ -1,5 +1,42 @@
 // Forge web client — no framework, no build step. Talks only to /api on the same origin.
 
+// The server can run in single-user mode (no token) or enforced mode. In enforced mode the
+// owner token, or a share token opened from a link, rides on every request. Both live in
+// localStorage so a reload does not lose access; neither is ever written to the page.
+function authHeaders() {
+  const headers = {};
+  const owner = localStorage.getItem("forge.ownerToken");
+  if (owner) headers["Authorization"] = "Bearer " + owner;
+  const share = localStorage.getItem("forge.shareToken");
+  if (share) headers["X-Forge-Share"] = share;
+  return headers;
+}
+
+function hasCredential() {
+  return !!(localStorage.getItem("forge.ownerToken") || localStorage.getItem("forge.shareToken"));
+}
+
+/// Shown when the server refuses a request for want of a token. It is a gate, not a modal
+/// dialog: nothing behind it pretends to have loaded.
+function showTokenPrompt(message) {
+  if (document.getElementById("tokenGate")) return;
+  const input = h("input", { type: "password", id: "tokenInput", placeholder: "Owner or share token", "aria-label": "Access token" });
+  const gate = h("div", { class: "token-gate", id: "tokenGate", role: "alert" },
+    h("div", { style: "flex:1" },
+      h("strong", {}, "This Forge instance requires a token"),
+      h("div", { class: "hint" }, message || "Paste the owner token, or open a share link, to continue.")),
+    input,
+    h("button", { class: "primary", onclick: () => {
+      const value = input.value.trim();
+      if (!value) return;
+      // A share token and an owner token look alike, so let the server decide: try it as the
+      // owner first and fall back to a share grant on the next 401.
+      localStorage.setItem("forge.ownerToken", value);
+      location.reload();
+    } }, "Use token"));
+  document.body.prepend(gate);
+}
+
 const api = {
   async call(path, { method = "GET", body, raw } = {}) {
     const init = { method, headers: {} };
@@ -12,6 +49,7 @@ const api = {
         init.headers["Content-Type"] = "application/json";
       }
     }
+    Object.assign(init.headers, authHeaders());
     const res = await fetch("/api" + path, init);
     const text = await res.text();
     let data = null;
@@ -21,6 +59,7 @@ const api = {
       const err = new Error(msg);
       err.code = data && data.code;
       err.status = res.status;
+      if (res.status === 401) showTokenPrompt(msg);
       throw err;
     }
     return data;
@@ -95,6 +134,7 @@ function parseHash() {
   const raw = location.hash.replace(/^#\/?/, "");
   const parts = raw.split("/").filter(Boolean).map(decodeURIComponent);
   if (parts[0] === "capabilities") return { view: "capabilities" };
+  if (parts[0] === "share" && parts[1]) return { view: "share", token: parts[1] };
   if (parts[0] === "nb" && parts[1]) return { view: "notebook", id: parts[1], artifact: parts[3] || null };
   return { view: "library" };
 }
@@ -104,6 +144,13 @@ async function route() {
   const app = document.getElementById("app");
   app.replaceChildren(h("div", { class: "library" }, h("p", { class: "empty" }, "Loading…")));
   try {
+    if (r.view === "share" && r.token) {
+      // A share link carries its own credential. Storing it and clearing the fragment keeps
+      // the token out of the visible URL after the first paint.
+      localStorage.setItem("forge.shareToken", r.token);
+      window.history.replaceState(null, "", "#/");
+      return await renderLibrary(app);
+    }
     if (r.view === "capabilities") return renderCapabilities(app);
     if (r.view === "notebook") return await openNotebook(app, r.id, r.artifact);
     await renderLibrary(app);
@@ -393,7 +440,7 @@ function renderSources(pane) {
     } }, "Import text"));
 
   const fileInput = h("input", {
-    type: "file", accept: ".pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.html,.htm,.csv,.tsv", class: "sr-only", id: "fileInput",
+    type: "file", accept: ".pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.html,.htm,.csv,.tsv,.vtt,.srt", class: "sr-only", id: "fileInput",
     onchange: async (e) => {
       const f = e.target.files[0];
       if (!f) return;
@@ -414,8 +461,9 @@ function renderSources(pane) {
   const uploadRow = h("div", { class: "stack", style: "margin-top:9px" },
     fileInput,
     h("label", { for: "fileInput", class: "sr-only" }, "Upload a file"),
-    h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, MD, TXT, HTML, CSV)"),
-    h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"));
+    h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, MD, TXT, HTML, CSV, VTT, SRT)"),
+    h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"),
+    h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover links…"));
 
   const urlRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
   const urlInput = h("input", { type: "url", id: "urlInput", placeholder: "https://…", "aria-label": "Web page URL" });
@@ -490,6 +538,20 @@ function renderSources(pane) {
               }
             } }, "Sync now"))
         : null,
+      s.status === "failed" ? h("div", { class: "row", style: "gap:6px;margin-top:4px" },
+        h("button", { class: "primary", title: "Re-run ingestion for this source", onclick: async (e) => {
+          const btn = e.target;
+          btn.disabled = true; btn.textContent = "Retrying…";
+          try {
+            const r = await api.post(`/sources/${s.id}/retry`, {});
+            toast(`Re-ingested ${r.chunk_count} passages (attempt ${r.attempts})`);
+            await openNotebook(document.getElementById("app"), nb.id);
+          } catch (err) {
+            toast(err.message, "err");
+            btn.disabled = false; btn.textContent = "Retry ingest";
+          }
+        } }, "Retry ingest"),
+        s.attempts ? h("span", { class: "hint" }, `attempt ${s.attempts}`) : null) : null,
       s.error ? h("div", { class: "sub", style: "color:var(--err)" }, s.error) : null,
       (s.warnings || []).length ? h("div", { class: "sub", style: "color:var(--warn)" }, s.warnings.join(" · ")) : null);
     pane.append(item);
@@ -498,6 +560,212 @@ function renderSources(pane) {
   if (!(nb.sources || []).length) {
     pane.append(h("p", { class: "empty" }, "No sources yet. Paste text or upload a file to give this notebook something to read."));
   }
+
+  renderJobs(pane);
+  const shareRow = h("div", { class: "row", style: "gap:6px;margin-top:14px;flex-wrap:wrap" },
+    h("button", { class: "ghost", id: "shareBtn", onclick: () => openSharePanel() }, "Share…"));
+  pane.append(shareRow);
+}
+
+/// Discovery reads the links of a page the user chose. It is deliberately not a search box:
+/// there is no search engine behind it, and the panel says so instead of implying one.
+async function openDiscovery() {
+  const nb = state.nb;
+  const body = h("div", { class: "content stack" });
+  const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    h("div", { class: "viewer" },
+      h("header", {},
+        h("div", { style: "flex:1" },
+          h("div", { style: "font-weight:600" }, "Discover sources from a page"),
+          h("div", { class: "hint" }, "Forge reads the outbound links of pages you supply — it does not search the web")),
+        h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+      body));
+  document.body.append(overlay);
+
+  const seed = h("input", { type: "url", placeholder: "https://… a page you already trust", "aria-label": "Seed page URL" });
+  const results = h("div", { class: "stack" });
+  const go = h("button", { class: "primary", onclick: async () => {
+    const url = seed.value.trim();
+    if (!url) return;
+    go.disabled = true; go.textContent = "Reading…";
+    results.replaceChildren(spinner("Reading links"));
+    try {
+      const r = await api.post("/discovery/crawl", { seed_urls: [url], limit: 20 });
+      paintResults(r);
+    } catch (e) {
+      toast(e.message, "err");
+      results.replaceChildren();
+    }
+    go.disabled = false; go.textContent = "Read links";
+  } }, "Read links");
+
+  function paintResults(r) {
+    const parts = [];
+    parts.push(h("p", { class: "hint" }, r.note ||
+      "Forge does not query a search engine. These are the outbound links of the page you supplied."));
+    const seeds = r.seeds || [];
+    for (const sd of seeds) {
+      parts.push(h("div", { class: "note-item" },
+        h("h4", {}, sd.title || sd.url),
+        h("div", { class: "hint" }, `${sd.status ? "HTTP " + sd.status : "fetch failed"} · ${sd.links_seen} links seen · ${sd.links_kept} offered`),
+        sd.error ? h("div", { class: "hint", style: "color:var(--err)" }, sd.error) : null));
+    }
+    const cands = r.candidates || [];
+    if (!cands.length) {
+      parts.push(h("p", { class: "empty" }, "No importable page links were found on that page."));
+    } else {
+      parts.push(h("h3", { style: "font-size:13px;margin:0" },
+        `${cands.length} candidate${cands.length === 1 ? "" : "s"} from ${r.candidate_hosts} host${r.candidate_hosts === 1 ? "" : "s"}`));
+      const checked = new Set(cands.map((c) => c.url));
+      for (const c of cands) {
+        parts.push(h("div", { class: "note-item candidate", dataset: { url: c.url } },
+          h("div", { class: "row", style: "gap:6px;align-items:flex-start" },
+            h("input", { type: "checkbox", checked: true, "aria-label": `Import ${c.url}`,
+              onchange: (e) => { if (e.target.checked) checked.add(c.url); else checked.delete(c.url); } }),
+            h("div", { style: "flex:1;min-width:0" },
+              h("div", { style: "font-weight:600" }, c.anchor || c.url),
+              h("div", { class: "hint" }, c.url),
+              h("div", { class: "hint" }, `found on ${c.from_url} · host ${c.host}`)))));
+      }
+      parts.push(h("button", { class: "primary", id: "importCandidates", onclick: async (e) => {
+        const btn = e.target;
+        btn.disabled = true;
+        let ok = 0, failed = [];
+        for (const url of checked) {
+          try {
+            await api.post(`/notebooks/${nb.id}/sources/url`, { url });
+            ok += 1;
+          } catch (err) { failed.push(`${url}: ${err.message}`); }
+        }
+        toast(`Imported ${ok} source${ok === 1 ? "" : "s"}${failed.length ? `, ${failed.length} failed` : ""}`, failed.length ? "err" : "");
+        if (failed.length) console.warn("discovery import failures", failed);
+        overlay.remove();
+        await openNotebook(document.getElementById("app"), nb.id);
+      } }, "Import selected"));
+    }
+    for (const w of r.warnings || []) parts.push(h("p", { class: "hint", style: "color:var(--warn)" }, w));
+    results.replaceChildren(...parts);
+  }
+
+  body.append(
+    h("p", { class: "hint" },
+      "There is no search engine behind this panel. Paste a page you already trust (a reading list, a " +
+      "bibliography, a project page); Forge fetches it, lists its real outbound links with the page they came " +
+      "from, and imports only the ones you tick."),
+    seed, go, results);
+}
+
+/// The job log is shown, not hidden: if an ingest was interrupted by a crash the user can see
+/// that it happened and retry, instead of wondering why a source vanished from retrieval.
+async function renderJobs(pane) {
+  const host = h("div", { class: "stack", id: "jobs", style: "margin-top:16px" });
+  pane.append(host);
+  try {
+    const r = await api.get(`/notebooks/${state.nb.id}/jobs`);
+    const jobs = (r.jobs || []).slice(-8).reverse();
+    if (!jobs.length) { host.hidden = true; return; }
+    host.append(
+      h("h3", { style: "font-size:13px;margin:0" }, "Ingestion jobs"),
+      h("p", { class: "hint" }, "Every ingest attempt is recorded. An interrupted job is marked as such — it is never silently forgotten."));
+    for (const j of jobs) {
+      host.append(h("div", { class: "job", dataset: { status: j.status } },
+        h("span", { class: "badge " + (j.status === "done" ? "ok" : j.status === "running" ? "" : "warn") }, j.status),
+        h("span", { class: "hint" }, `${j.kind} · attempt ${j.attempts}`),
+        j.error ? h("div", { class: "sub", style: "color:var(--err)" }, j.error) : null));
+    }
+  } catch { host.hidden = true; }
+}
+
+/// Sharing is an owner action. The panel states the truth about the deployment: in single-user
+/// mode there is no enforcement, so a "link" would be theatre. Set a token first.
+async function openSharePanel() {
+  const nb = state.nb;
+  const body = h("div", { class: "content stack" });
+  const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    h("div", { class: "viewer" },
+      h("header", {},
+        h("div", { style: "flex:1" },
+          h("div", { style: "font-weight:600" }, `Share “${nb.title}”`),
+          h("div", { class: "hint" }, "a link is scoped to this notebook and to one role")),
+        h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+      body));
+  document.body.append(overlay);
+
+  // A token is only ever returned once, so the panel keeps the freshly created link on screen
+  // across its own refresh instead of throwing the only copy away.
+  let pendingLink = null;
+
+  async function reload() {
+    body.replaceChildren(spinner("Loading share links"));
+    let data;
+    try { data = await api.get(`/notebooks/${nb.id}/shares`); }
+    catch (e) { body.replaceChildren(h("p", { class: "hint", style: "color:var(--err)" }, e.message)); return; }
+    const auth = data.auth || {};
+    const shares = data.shares || [];
+    const parts = [];
+
+    if (!auth.enforced) {
+      const tokenInput = h("input", { type: "password", placeholder: "at least 16 characters", "aria-label": "Owner token" });
+      parts.push(h("div", { class: "note-item", id: "enforceBox" },
+        h("h4", {}, "Sharing is not enforced yet"),
+        h("p", { class: "hint" },
+          "This instance has no owner token, so it treats everyone who can reach the port as the operator. " +
+          "A share link would not restrict anything. Set a token first — it is required on every request from then on."),
+        h("div", { class: "row", style: "gap:6px" }, tokenInput,
+          h("button", { class: "primary", onclick: async () => {
+            try {
+              const r = await api.post("/auth/owner-token", { token: tokenInput.value.trim() });
+              localStorage.setItem("forge.ownerToken", r.token);
+              toast("Owner token set — this browser is now the owner");
+              reload();
+            } catch (e) { toast(e.message, "err"); }
+          } }, "Set owner token"))));
+    } else {
+      parts.push(h("p", { class: "hint" }, auth.note || ""));
+    }
+
+    const roleSelect = h("select", { "aria-label": "Share role" },
+      h("option", { value: "viewer" }, "viewer — may read and ask questions"),
+      h("option", { value: "editor" }, "editor — may also add sources and artifacts"));
+    parts.push(h("div", { class: "row", style: "gap:6px;margin-top:10px" }, roleSelect,
+      h("button", { class: "primary", id: "createShareBtn", onclick: async () => {
+        try {
+          const g = await api.post(`/notebooks/${nb.id}/shares`, { role: roleSelect.value });
+          pendingLink = { role: g.role, link: `${location.origin}/#/share/${g.token}` };
+          await reload();
+        } catch (e) { toast(e.message, "err"); }
+      } }, "Create link")));
+
+    if (pendingLink) {
+      const link = pendingLink.link;
+      parts.unshift(h("div", { class: "note-item", id: "newShare" },
+        h("h4", {}, `New ${pendingLink.role} link — shown once`),
+        h("p", { class: "hint" }, "The server stores only a hash of this token, so it cannot be shown again. Send it now, or revoke it and make another."),
+        h("input", { type: "text", value: link, readOnly: true, "aria-label": "Share link" }),
+        h("button", { class: "ghost", onclick: async () => {
+          try { await navigator.clipboard.writeText(link); toast("Link copied"); }
+          catch { toast("Copy blocked — select the text instead", "err"); }
+        } }, "Copy link")));
+    }
+
+    parts.push(h("h3", { style: "font-size:13px;margin:14px 0 0" }, `Links (${shares.length})`));
+    if (!shares.length) parts.push(h("p", { class: "empty" }, "No share links yet."));
+    for (const g of shares) {
+      parts.push(h("div", { class: "note-item", dataset: { share: g.id } },
+        h("div", { class: "row-between" },
+          h("span", {}, h("span", { class: "badge" }, g.role), ` ${g.token_prefix}…`),
+          g.revoked_at
+            ? h("span", { class: "badge warn" }, "revoked")
+            : h("button", { class: "ghost danger", onclick: async () => {
+                try { await api.del(`/shares/${g.id}`); toast("Link revoked"); reload(); }
+                catch (e) { toast(e.message, "err"); }
+              } }, "revoke")),
+        h("div", { class: "hint" }, `created ${fmtDate(g.created_at)}${g.revoked_at ? ` · revoked ${fmtDate(g.revoked_at)}` : ""}`)));
+    }
+    body.replaceChildren(...parts);
+  }
+
+  await reload();
 }
 
 // ---------------------------------------------------------------- chat streaming
@@ -623,7 +891,7 @@ function renderChat(pane, onlyComposer = false) {
               role: "assistant", text: ev.answer, citations: ev.citations,
               abstained: ev.abstained, coverage: ev.coverage, engine: ev.engine,
               computed: ev.computed === true, problems: ev.citation_problems,
-              settings: ev.settings, streamed: true,
+              settings: ev.settings, streamed: true, conflicts: ev.conflicts,
             };
           }
         },
@@ -719,13 +987,28 @@ function messageEl(m) {
       h("span", { class: "src" }, c.source_title || c.source_id),
       h("span", { class: "hint" }, c.locator_label || "")));
   });
+  // A disagreement between sources is shown as its own labelled block, above the citation
+  // chips, so it cannot be mistaken for ordinary prose (Journey C).
+  let conflictBlock = null;
+  if ((m.conflicts || []).length) {
+    conflictBlock = h("div", { class: "conflicts", role: "group", "aria-label": "Sources disagree" },
+      h("div", { class: "conflicts-title" }, "Sources disagree"),
+      ...(m.conflicts || []).map((c) =>
+        h("div", { class: "conflict" },
+          h("div", { class: "hint" }, `${c.topic} · ${c.kind}`),
+          ...(c.claims || []).map((k) =>
+            h("div", { class: "claim" },
+              h("span", { class: "quote" }, `“${k.quote}”`),
+              h("span", { class: "hint" }, ` — ${k.source_title} · ${k.locator_label}`))))),
+      h("p", { class: "hint" }, "Forge does not choose between them; open both passages and decide."));
+  }
   const meta = h("div", { class: "row-between", style: "margin-top:8px" },
     h("span", { class: "hint" },
       m.computed ? "computed from table cells · " : "",
       m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : "",
       m.settings ? ` · ${m.settings.style}/${m.settings.length}` : ""),
     (m.problems || []).length ? h("span", { class: "badge warn" }, "citation check: " + m.problems.join("; ")) : null);
-  return h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), body, cites, meta);
+  return h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), body, conflictBlock, cites, meta);
 }
 
 // ---------------------------------------------------------------- side panel
@@ -791,10 +1074,17 @@ function renderNotes(el) {
   if (!(nb.notes || []).length) el.append(h("p", { class: "empty" }, "No notes yet."));
 }
 
-async function generate(kind, topic = "") {
+async function generate(kind, topic = "", extra = {}) {
   const nb = state.nb;
   if (!state.selected.size) throw new Error("Select at least one source first");
-  const r = await api.post(`/notebooks/${nb.id}/artifacts`, { kind, topic, source_ids: [...state.selected] });
+  // difficulty and audience reach the generator, not the renderer: they change which cards
+  // and how many bullets exist, and the server records the value on the artifact.
+  const r = await api.post(`/notebooks/${nb.id}/artifacts`, {
+    kind, topic,
+    difficulty: extra.difficulty || "normal",
+    audience: extra.audience || "general",
+    source_ids: [...state.selected],
+  });
   return r;
 }
 
@@ -875,6 +1165,7 @@ function renderStudy(el) {
     ["flashcards", "Flashcards"],
     ["quiz", "Quiz"],
     ["mindmap", "Concept map"],
+    ["slides", "Slides"],
     ["faq", "FAQ"],
     ["study_guide", "Study guide"],
   ];
@@ -884,19 +1175,77 @@ function renderStudy(el) {
       e.target.disabled = true;
       out.replaceChildren(spinner(`Building ${label.toLowerCase()}`));
       try {
-        const r = await generate(kind);
-        out.replaceChildren(renderArtifact(r.payload));
-      } catch (err) { toast(err.message, "err"); out.replaceChildren(); }
+        const r = await generate(kind, "", {
+          difficulty: document.getElementById("artifactDifficulty")?.value || "normal",
+          audience: document.getElementById("artifactAudience")?.value || "general",
+        });
+        // Reload the stored artifact so review marks and the recorded difficulty are the
+        // server's, not this tab's guess.
+        const art = await api.get(`/artifacts/${r.id}`);
+        out.replaceChildren(renderArtifact(art.payload, art));
+      } catch (err) {
+        toast(err.message, "err");
+        out.replaceChildren();
+      }
       e.target.disabled = false;
     } }, label));
   }
-  wrap.append(row, h("p", { class: "hint" }, "Generated from the selected sources only. Click any citation marker to open its evidence."));
+
+  const difficulty = h("select", { id: "artifactDifficulty", "aria-label": "Difficulty" },
+    [["easy", "easy"], ["normal", "normal"], ["hard", "hard"]]
+      .map(([v, label]) => h("option", { value: v, selected: v === "normal" }, label)));
+  const audience = h("select", { id: "artifactAudience", "aria-label": "Slide audience" },
+    [["general", "general"], ["executive", "executive"], ["technical", "technical"]]
+      .map(([v, label]) => h("option", { value: v }, label)));
+
+  wrap.append(
+    row,
+    h("div", { class: "row", style: "gap:8px;margin-top:8px;flex-wrap:wrap" },
+      h("span", { class: "hint" }, "Difficulty"), difficulty,
+      h("span", { class: "hint" }, "Slide audience"), audience),
+    h("p", { class: "hint" },
+      "Difficulty changes how many cards are built and whether cloze recall comes first. " +
+      "Audience changes how many bullets go on a slide. Generated from the selected sources only; " +
+      "click any citation marker to open its evidence."));
 }
 
-function renderArtifact(payload) {
+function renderArtifact(payload, art = null) {
   const box = h("div", { class: "stack" });
   if (payload.kind === "flashcards") {
+    // Review marks are the learner's own data: they live on the artifact (Journey F), so
+    // reopening it shows what was already marked instead of starting over.
+    const marks = Object.assign({}, (art && art.reviews) || {});
+    const summary = h("div", { class: "hint", id: "reviewSummary" });
+    const paint = () => {
+      const total = (payload.cards || []).length;
+      const known = Object.values(marks).filter((v) => v === "known").length;
+      const unknown = Object.values(marks).filter((v) => v === "unknown").length;
+      summary.textContent =
+        `Marked ${known + unknown} of ${total}: ${known} known · ${unknown} to review` +
+        (payload.difficulty ? ` · built at ${payload.difficulty} difficulty` : "");
+      summary.dataset.known = String(known);
+      summary.dataset.unknown = String(unknown);
+    };
+    const mark = async (cardId, known, badge) => {
+      if (!art) {
+        toast("Review marks are stored with the artifact — reopen it from the notebook", "err");
+        return;
+      }
+      try {
+        const r = await api.post(`/artifacts/${art.id}/review`, { card_id: cardId, known });
+        marks[cardId] = known ? "known" : "unknown";
+        badge.textContent = known ? "known" : "to review";
+        badge.className = "badge " + (known ? "ok" : "warn");
+        paint();
+        summary.dataset.serverKnown = String(r.counts.known);
+      } catch (e) { toast(e.message, "err"); }
+    };
     for (const c of payload.cards || []) {
+      const state0 = marks[c.id];
+      const badge = h("span", {
+        class: "badge" + (state0 === "known" ? " ok" : state0 === "unknown" ? " warn" : ""),
+        "data-card": c.id,
+      }, state0 === "known" ? "known" : state0 === "unknown" ? "to review" : "");
       const inner = h("div", { class: "inner" }, h("div", {}, c.front));
       let shown = false;
       inner.addEventListener("click", () => {
@@ -907,8 +1256,14 @@ function renderArtifact(payload) {
         h("div", { class: "row-between", style: "margin-top:4px" },
           h("span", { class: "hint" }, "click to flip"),
           h("button", { class: "cite", onclick: () => openViewer(c.citation.source_id, c.citation.chunk_id) },
-            `[${c.citation.n}] ${c.citation.locator_label}`))));
+            `[${c.citation.n}] ${c.citation.locator_label}`)),
+        h("div", { class: "row", style: "gap:6px;margin-top:6px;align-items:center" },
+          h("button", { class: "ghost", title: "I knew this card", onclick: () => mark(c.id, true, badge) }, "knew it"),
+          h("button", { class: "ghost", title: "Mark for another pass", onclick: () => mark(c.id, false, badge) }, "review again"),
+          badge)));
     }
+    paint();
+    box.append(summary);
   } else if (payload.kind === "quiz") {
     for (const q of payload.questions || []) {
       const opts = h("div", { class: "opts" });
@@ -929,6 +1284,8 @@ function renderArtifact(payload) {
     }
   } else if (payload.kind === "mindmap") {
     box.append(renderMindmap(payload));
+  } else if (payload.kind === "slides") {
+    box.append(renderSlides(payload, art));
   } else if (payload.kind === "faq") {
     for (const it of payload.items || []) {
       box.append(h("div", { class: "note-item" },
@@ -961,6 +1318,121 @@ function renderArtifact(payload) {
     box.append(h("pre", { style: "font-size:12px;overflow:auto" }, JSON.stringify(payload, null, 2)));
   }
   return box;
+}
+
+/// A deck built from quotations. Every mutation goes through the server (`PATCH
+/// /api/artifacts/:id` with an `op`) so the edit is versioned and survives a reload; the
+/// panel only re-renders what the server sent back.
+function renderSlides(payload, art) {
+  const deck = h("div", { class: "stack" });
+  const status = h("div", { class: "hint", id: "slideStatus" });
+  const list = h("div", { class: "stack" });
+  const removedBox = h("div", { class: "stack" });
+
+  let slides = (payload.slides || []).slice();
+  let removed = (payload.removed || []).slice();
+  let version = art ? art.version : null;
+
+  const paintStatus = () => {
+    status.textContent = `${slides.length} slide${slides.length === 1 ? "" : "s"}` +
+      (removed.length ? ` · ${removed.length} removed` : "") +
+      ` · version ${version == null ? "—" : version}` +
+      (payload.audience ? ` · ${payload.audience} audience` : "");
+  };
+
+  const apply = async (body) => {
+    if (!art) { toast("Slide edits are saved with the artifact — reopen it from the notebook", "err"); return; }
+    try {
+      const r = await api.patch(`/artifacts/${art.id}`, body);
+      slides = (r.payload.slides || []).slice();
+      removed = (r.payload.removed || []).slice();
+      version = r.version;
+      paint();
+    } catch (e) { toast(e.message, "err"); }
+  };
+
+  const slideEl = (sl, i) => {
+    const title = h("input", {
+      type: "text", value: sl.title || "", class: "slide-title", "aria-label": `Slide ${i + 1} title`,
+      onchange: (e) => {
+        const v = e.target.value.trim();
+        if (v && v !== sl.title) apply({ op: "edit", index: i, slide_title: v });
+      },
+    });
+    const notes = h("textarea", {
+      class: "slide-notes", "aria-label": `Slide ${i + 1} speaker notes`,
+      onchange: (e) => apply({ op: "edit", index: i, notes: e.target.value }),
+    }, sl.notes || "");
+    const bullets = h("ul", { class: "slide-bullets" }, (sl.bullets || []).map((b) => h("li", {},
+      h("span", {}, b.text),
+      b.citation ? h("button", {
+        class: "cite", onclick: () => openViewer(b.citation.source_id, b.citation.chunk_id),
+      }, `[${b.citation.n}] ${b.citation.locator_label || ""}`) : null)));
+    return h("div", { class: "slide", dataset: { index: String(i) } },
+      h("div", { class: "row-between" },
+        h("span", { class: "hint" }, `Slide ${i + 1}`),
+        h("div", { class: "row", style: "gap:4px" },
+          h("button", { class: "ghost", title: "Move up", disabled: i === 0, onclick: () => apply({ op: "reorder", from: i, to: i - 1 }) }, "↑"),
+          h("button", { class: "ghost", title: "Move down", disabled: i === slides.length - 1, onclick: () => apply({ op: "reorder", from: i, to: i + 1 }) }, "↓"),
+          h("button", { class: "ghost danger", title: "Delete slide", onclick: () => apply({ op: "delete", index: i }) }, "✕"))),
+      title, bullets,
+      h("div", { class: "hint" }, "speaker notes"), notes);
+  };
+
+  const paint = () => {
+    list.replaceChildren(...slides.map(slideEl));
+    if (removed.length) {
+      removedBox.replaceChildren(
+        h("div", { class: "hint" }, "Removed slides — restore puts one back at the end"),
+        ...removed.map((sl, i) => h("div", { class: "row-between slide-removed" },
+          h("span", {}, sl.title || "(untitled)"),
+          h("button", { class: "ghost", onclick: () => apply({ op: "restore", index: i }) }, "restore"))));
+      removedBox.hidden = false;
+    } else {
+      removedBox.replaceChildren();
+      removedBox.hidden = true;
+    }
+    paintStatus();
+  };
+
+  paint();
+  deck.append(
+    list, removedBox, status,
+    h("p", { class: "hint" },
+      "Every bullet is a quotation carrying its own citation. Markdown and JSON export exactly this deck; " +
+      "PPTX and PDF are refused by the server (501 format_unsupported) rather than producing a file that looks official and is wrong."));
+  return deck;
+}
+
+/// Fetch an export with the same credentials as every other call, then show the exact bytes
+/// in the page. The download is a convenience; the preview is what makes the export auditable
+/// where the browser blocks downloads.
+async function downloadArtifact(id, format) {
+  if (!id) { toast("Save the artifact first", "err"); return; }
+  try {
+    const res = await fetch(`/api/artifacts/${id}/export?format=${format}`, { headers: authHeaders() });
+    if (!res.ok) {
+      let data = null;
+      try { data = await res.json(); } catch { /* non-JSON refusal */ }
+      throw new Error((data && (data.error || data.message)) || `HTTP ${res.status}`);
+    }
+    const text = await res.text();
+    const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+      h("div", { class: "viewer" },
+        h("header", {},
+          h("div", { style: "flex:1" },
+            h("div", { style: "font-weight:600" }, `Export · ${format.toUpperCase()}`),
+            h("div", { class: "hint" }, "the exact bytes the download contains")),
+          h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+        h("div", { class: "content" }, h("pre", { class: "export-body", style: "white-space:pre-wrap;font-size:12px" }, text))));
+    document.body.append(overlay);
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      const a = h("a", { href: url, download: `forge-artifact-${id}.${format}` });
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { /* downloads can be blocked; the preview above is still the export */ }
+  } catch (e) { toast(e.message, "err"); }
 }
 
 function renderScript(p) {
@@ -1178,10 +1650,13 @@ async function showArtifact(id) {
       h("div", { class: "viewer" },
         h("header", {},
           h("div", { style: "flex:1" }, h("div", { style: "font-weight:600" }, a.title),
-            h("div", { class: "hint" }, `${a.kind} · ${fmtDate(a.created_at)}`),
+            h("div", { class: "hint" }, `${a.kind} · v${a.version || 1} · ${fmtDate(a.updated_at || a.created_at)}`),
             a.stale ? h("div", { class: "hint", style: "color:var(--warn)" }, "A source changed after this artifact was generated — regenerate to refresh it.") : null),
+          h("button", { class: "ghost", title: "Export Markdown", onclick: () => downloadArtifact(a.id, "md") }, "md"),
+          h("button", { class: "ghost", title: "Export JSON", onclick: () => downloadArtifact(a.id, "json") }, "json"),
+          a.kind === "mindmap" ? h("button", { class: "ghost", title: "Export SVG", onclick: () => downloadArtifact(a.id, "svg") }, "svg") : null,
           h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
-        h("div", { class: "content" }, renderArtifact(a.payload))));
+        h("div", { class: "content" }, renderArtifact(a.payload, a))));
     document.body.append(overlay);
   } catch (e) { toast(e.message, "err"); }
 }
@@ -1205,6 +1680,16 @@ async function boot() {
     document.getElementById("engineBadge").textContent = `engine: ${caps.answering.engine}`;
     document.getElementById("engineBadge").classList.add("warn");
     document.getElementById("engineBadge").title = caps.answering.llm.reason || "";
+    const access = caps.auth || { mode: "single-user", enforced: false };
+    const accessBadge = document.getElementById("accessBadge");
+    if (accessBadge) {
+      accessBadge.textContent = access.enforced
+        ? (localStorage.getItem("forge.shareToken") && !localStorage.getItem("forge.ownerToken") ? "access: shared notebook" : "access: token required")
+        : "access: single-user";
+      accessBadge.title = access.note || "";
+      accessBadge.classList.toggle("warn", !!access.enforced);
+    }
+    if (access.enforced && !hasCredential()) showTokenPrompt(access.note);
   } catch (e) {
     document.getElementById("engineBadge").textContent = "engine: unknown";
     document.getElementById("engineBadge").classList.add("err");

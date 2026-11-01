@@ -45,6 +45,9 @@ pub struct MediaInfo {
     pub fragmented: bool,
     pub tracks: Vec<Track>,
     pub warnings: Vec<String>,
+    /// True when any box declared more bytes than the file contains. Exposed because a caller
+    /// reading `duration_ms` should be able to tell "no duration recorded" from "file cut short".
+    pub truncated: bool,
 }
 
 fn fourcc(b: &[u8]) -> String {
@@ -473,6 +476,9 @@ pub fn inspect(data: &[u8]) -> MediaInfo {
             warnings.push(format!("video track {} declares no display size", t.id));
         }
     }
+    info.truncated = top.iter().any(|b| b.truncated)
+        || find_all(&moov_boxes, "trak").iter().any(|b| b.truncated)
+        || warnings.iter().any(|w| w.contains("truncated"));
     info.warnings = warnings;
     let _ = is_container;
     let _ = MAX_DEPTH;
@@ -503,6 +509,7 @@ impl MediaInfo {
                 "sample_rate" => t.sample_rate.map(|r| Value::from(r as u64)).unwrap_or(Value::Null),
             }).collect()),
             "warnings" => Value::Arr(self.warnings.iter().map(|w| Value::from(w.as_str())).collect()),
+            "truncated" => self.truncated,
         }
     }
 }

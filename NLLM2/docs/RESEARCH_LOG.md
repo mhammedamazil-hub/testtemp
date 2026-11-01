@@ -95,3 +95,24 @@ Not research, but this log is the honest record of what the evidence changed:
    Learning Guide, Custom"; not verified this session).
 4. Whether URL sources for the *same* page under different query strings dedupe
    upstream (Forge keeps query strings distinct; see `fetch::canonicalize`).
+
+---
+
+## 2026-11-01 — sharing semantics: official docs, and where they disagree
+
+Read through the agent page/search tool; the sandbox itself still cannot reach these hosts.
+
+| What | Result | Label |
+|---|---|---|
+| Share dialog (consumer help, `support.google.com/gemininotebook/answer/16206563`) | Share → add an email → grant **Viewer** or **Editor**. "A viewer has read-only access to all the source documents and notes you shared". "An editor can view, add, or remove sources and notes in your shared notebook **as well as share it further with other users**" | `OFFICIAL_DOCUMENTED` |
+| Share dialog (Enterprise docs, `docs.cloud.google.com/gemini/enterprise/notebooklm-enterprise/docs/share-notebooks`) | Same two roles, but "Editors can't: delete notebooks, **share notebooks, revoke access**" | `OFFICIAL_DOCUMENTED` (product-specific) |
+| Conflict | The two official pages disagree on whether an editor may re-share. The Enterprise page forbids it; the consumer page allows it | `INFERRED`: the consumer surface and the Enterprise surface differ. **Forge takes the stricter reading** — sharing and revocation are owner-only (`DECISIONS.md` D20) — and states it rather than picking the more generous claim |
+| "Copy link" semantics | "The **Copy link** functionality in the sharing dialog works only for those already shared on the notebook"; a public notebook link still requires a signed-in Google account ([UMich KB](https://teamdynamix.umich.edu/TDClient/30/Portal/KB/Article/13790/Google-Using-Gemini-Notebook), `COMMUNITY_REPORTED`) | `OFFICIAL_DOCUMENTED` + `COMMUNITY_REPORTED` — Forge's link is a **bearer token** that works for whoever holds it. That is a real difference, recorded as a limitation rather than dressed up as parity |
+| Chat View | Official note: "viewers may still be able to access sources and artifacts… Chat View hides these materials for a focused experience, but it does not completely revoke a viewer's underlying access" | `OFFICIAL_DOCUMENTED`. Forge does not reproduce a "hidden but reachable" view: a share is scoped to the notebook and there is no second, less-guarded surface |
+| Notes | "Only individuals with the Editor role on a shared notebook can edit notes"; "Note edits sync in real time for all collaborators" | `COMMUNITY_REPORTED` (UMich). Forge: editors may write notes; there is **no** live sync and no presence — not claimed |
+| Personal-account cap | "Personal Gmail accounts can share a notebook with up to 50 users but can't share with Google Groups" | `OFFICIAL_DOCUMENTED`. Forge has no per-user sharing and therefore no cap; it has one owner token plus links |
+
+Consequence for §14 Journey J: the roles, the refusal a viewer gets, revocation and scoping are
+now implemented and tested (`journey_j_…`). What is *not* reimplemented is the account model
+behind them (email invites, groups, per-user identity); the link is the identity. That gap is in
+`UNKNOWN_AND_LIMITATIONS.md`.

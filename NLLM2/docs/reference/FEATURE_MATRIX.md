@@ -49,11 +49,17 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | ART-02 | mind map | documented | done | `artifacts.rs` | lib + UI |
 | ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |
 | ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** | `Artifact.stale` | e2e |
-| ART-05 | audio / video / slides / infographics | documented | blocked | — | no TTS/renderer |
+| ART-05 | audio / video overviews | documented | blocked | — | no TTS/ASR or renderer |
+| ART-07 | slides deck: generate, edit, reorder, delete/restore, version, export | documented | **partial** — quotation deck with per-bullet citations, audience setting, versioned slide ops, Markdown/JSON/SVG export; **no PPTX/PDF renderer** (501 `format_unsupported` rather than a fake file) | `artifacts::slides`, `api::update_artifact`, `export.rs` | 7 export unit + e2e Journey H + 6 UI |
+| ART-08 | difficulty / audience as generation parameters | documented (flashcards difficulty) | **done** — difficulty changes cards (easy drops cloze, hard puts cloze first) and is recorded on the artifact; audience changes bullets per slide | `artifacts::Difficulty`, `slides` | lib + e2e F/H + 4 UI |
+| ART-09 | learner review marks (known / unknown) | documented (study progress) | **done** — stored per card on the artifact, survives restart, counts returned | `Artifact.reviews`, `api::review_card` | e2e F + 5 UI |
 | ART-06 | data tables as an artifact (schema inference, per-cell evidence, export) | documented | planned — querying source grids is done (CHAT-08); *creating* a new table from prose is not | — | needs extraction + review UI |
 | RES-01 | Fast Research | documented | planned | — | no search provider |
 | RES-02 | Deep Research | documented | planned | — | no search provider |
-| SHARE-01 | roles, share links, revocation | documented | planned | — | needs identity first |
+| SHARE-01 | roles, share links, revocation | documented | **partial (honest)** — owner token + per-notebook links with `viewer`/`editor`, 401/403 per role, revocation checked per request, hashed tokens shown once; no accounts, groups or audit log | `auth.rs`, `api.rs` (`authenticate`/`guard`/`create_share`), UI share panel | 8 unit + e2e Journey J + 6 UI |
+| OPS-01 | durable ingestion job, crash recovery, retry (§14 K) | own policy (reliability) | **done** — source+job written before parsing, blob retained, `interrupted`/`failed` on reopen, in-place retry with `attempts` | `store::recover_interrupted`, `api::retry_source`, `list_jobs` | e2e Journey K + 4 UI |
+| SRC-22 | user-supplied timed transcript (`.vtt`/`.srt`) with timecode locators | documented (transcript import for a captioned video) | **partial (honest)** — the user supplies captions; Forge never downloads media or captions and has no frame analysis. Video/audio/image uploads as sources are refused with a reason | `ingest::transcript`, `ingest::unsupported_media` | 4 unit + e2e Journey E + 5 UI |
+| DISC-01 | discovery of further sources | documented (web search) | **partial (honest)** — `POST /api/discovery/crawl` lists the outbound links of seed pages the *user* chose, with anchor, host and provenance; no search engine is queried and the payload says `searched_engine: null` | `discovery.rs`, `api::crawl`, UI discovery panel | 3 unit + e2e Journey I + 6 UI |
 | SET-01 | provider config (write-only keys, 0600) | documented | done | `providers.rs` | e2e |
 | SET-02 | theme, language, accessibility settings | documented | partial (theme only) | `app.js` | UI smoke |
 | BIN-01 | APK / PE structural analysis | not in reference (Forge extra) | done | `bininspect` | 31 tests |

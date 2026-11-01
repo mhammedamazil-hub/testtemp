@@ -8,14 +8,16 @@ bug, or a limitation for a feature.
 1. **No crates.** `crates.io`, `static.crates.io`, `index.crates.io`, `docs.rs` are
    unreachable. Every dependency-free subsystem is hand-written; the cost is
    visible in `DECISIONS.md` D1.
-2. **No TLS.** The standard library has no TLS client and no crate can be added, so
-   HTTPS is impossible. Consequences: URL/YouTube/GitHub/Instagram ingestion,
-   remote LLM providers, and online source discovery are all unavailable, and the
-   API says so (`501`, `available:false`).
+2. **No TLS crate.** The standard library has no TLS client and no crate can be added, so
+   `https://` is fetched by shelling out to `curl`. Consequences: URL ingestion works only where
+   a `curl` binary exists **and** the host is reachable from this sandbox (a short allowlist),
+   remote LLM providers stay unavailable, and no search engine can be queried. The API reports
+   each of these (`fetch::transport_available`, `available:false`, `searched_engine: null`)
+   rather than failing silently.
 3. **No speech or vision engine.** `espeak`, `espeak-ng`, `ffmpeg`, `ffprobe` and
    `tesseract` are absent. No audio overviews, no transcription, no OCR.
-4. **No live NotebookLM access.** REA could not run (Node version floor, no
-   authenticated product session), so parity claims are REFERENCE-DOCUMENTED only.
+4. **No live NotebookLM access.** REA installs and starts, but there is no target and no
+   authenticated session, so parity claims are REFERENCE-DOCUMENTED / RE-OBSERVED only.
 5. **Ephemeral Rust toolchain.** It lives in `/tmp/forge-rust`; a sandbox recycle
    removes it. `scripts/install-rust.sh` re-creates it via the npm-hosted prebuilt
    binaries.
@@ -213,3 +215,41 @@ Honest limits:
 * **`?pace_ms=` exists for tests and debugging.** It sleeps between frames and changes nothing
   else. It is capped at 1 s and rejected above that.
 * **No resume/replay.** An interrupted stream cannot be continued; the user asks again.
+
+## Access control and sharing (2026-11-01)
+
+What was measured: `journey_j` drives the real router — an owner token, two share links (viewer,
+editor), the refusals each role gets, revocation, and the streaming endpoint (which is dispatched
+before the shared table, so it is guarded separately).
+
+Honest limits:
+
+* **There are no user accounts.** One owner token, plus links that grant one notebook. No
+  password reset, no per-user identity, no groups, no SSO.
+* **No audit log.** Forge cannot answer "who read this notebook and when". Revocation stops the
+  next request; it does not tell you what happened before it.
+* **An unenforced instance is open.** With no `owner.token`, anyone who can reach the port is the
+  operator. This is stated in `/api/auth`, in the header badge and in the share panel, but it is
+  still the default.
+* **Revocation is not retroactive.** A request already in flight completes.
+* **Links are bearer tokens.** Anyone holding one has that role until it is revoked. There is no
+  binding to an email address or a device — unlike the reference product, whose "Copy link"
+  works only for accounts already shared on the notebook (`RESEARCH_LOG.md`, 2026-11-01).
+* **No live collaboration.** Notes/sources edited by two people do not sync, and there is no
+  presence indicator; the reference product syncs note edits in real time. Each request reads the
+  current store, so a refresh shows the truth, but nothing pushes it.
+* **No rate limiting on token attempts.** A 32-hex-character token makes guessing impractical,
+  but nothing throttles the attempts.
+
+## Ingestion jobs and recovery (2026-11-01)
+
+* **Recovery is at start-up, not in-flight.** A crash is detected when the process next opens the
+  store. Nothing external (a supervisor, a client) is notified; the user sees `interrupted` in
+  the job log.
+* **Retained blobs are not garbage-collected.** A crash between writing the blob and the source
+  row can leave an orphan file under `<data>/blobs/`. It is never cited (it has no source row),
+  but it is not swept either.
+* **No progress percentage.** A job is `running`, then `done`/`failed`/`interrupted`; there is no
+  per-page progress, because parsing is one synchronous pass.
+* **Retry of a URL source re-fetches.** If the page changed since the failure, the retried source
+  is the new page, and the content hash changes. That is recorded on the source, not on the job.

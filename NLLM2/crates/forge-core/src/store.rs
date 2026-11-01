@@ -24,6 +24,10 @@ pub struct Db {
     /// Structured grids parsed from spreadsheet/CSV sources, stored verbatim so an
     /// aggregation after a restart uses the same cells it used before one.
     pub tables: Vec<crate::tables::Table>,
+    /// Ingestion attempts, including the ones a restart interrupted.
+    pub jobs: Vec<Job>,
+    /// Share links. Only token hashes are stored (see `auth.rs`).
+    pub shares: Vec<crate::auth::ShareGrant>,
 }
 
 /// `Clone` is cheap and shares the same in-memory database (`Arc<Mutex<Db>>`). It exists so a
@@ -45,7 +49,11 @@ impl Store {
             Err(_) => Db::default(),
         };
         let s = Store { dir, inner: Arc::new(Mutex::new(db)) };
-        if !s.path().exists() {
+        // Recovery: an ingestion that was running when the process stopped cannot still be
+        // running. Mark it interrupted, and mark its source failed with a retryable error, so
+        // the UI shows a clear state instead of a spinner that never resolves.
+        let recovered = s.recover_interrupted();
+        if !s.path().exists() || recovered > 0 {
             s.save()?;
         }
         Ok(s)
@@ -53,6 +61,81 @@ impl Store {
 
     pub fn path(&self) -> PathBuf {
         self.dir.join("db.json")
+    }
+
+    /// When this file exists, the server enforces tokens (`auth.rs`). Creating it turns the
+    /// app from "single operator on this machine" into "shared, scoped access".
+    pub fn owner_token_path(&self) -> PathBuf {
+        self.dir.join("owner.token")
+    }
+
+    pub fn owner_token(&self) -> Option<String> {
+        std::fs::read_to_string(self.owner_token_path())
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+    }
+
+    pub fn set_owner_token(&self, token: &str) -> std::io::Result<()> {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt;
+        let tmp = self.dir.join("owner.token.tmp");
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            f.write_all(token.as_bytes())?;
+            f.write_all(b"\n")?;
+        }
+        std::fs::rename(&tmp, self.owner_token_path())
+    }
+
+    /// Where an uploaded file is kept so a failed ingest can be retried without re-uploading.
+    pub fn blob_path(&self, source_id: &str) -> PathBuf {
+        self.dir.join("blobs").join(format!("{}.bin", source_id))
+    }
+
+    pub fn save_blob(&self, source_id: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let dir = self.dir.join("blobs");
+        fs::create_dir_all(&dir)?;
+        let tmp = dir.join(format!("{}.tmp", source_id));
+        fs::write(&tmp, bytes)?;
+        fs::rename(&tmp, self.blob_path(source_id))
+    }
+
+    pub fn read_blob(&self, source_id: &str) -> Option<Vec<u8>> {
+        fs::read(self.blob_path(source_id)).ok()
+    }
+
+    pub fn remove_blob(&self, source_id: &str) {
+        let _ = fs::remove_file(self.blob_path(source_id));
+    }
+
+    /// Move any "running" job to "interrupted" and any "processing" source to "failed".
+    /// Returns how many records changed.
+    fn recover_interrupted(&self) -> usize {
+        self.write(|db| {
+            let now = now_iso();
+            let mut changed = 0usize;
+            for job in db.jobs.iter_mut().filter(|j| j.status == "running") {
+                job.status = "interrupted".into();
+                job.finished_at = now.clone();
+                job.error = "the server stopped while this ingestion was running".into();
+                changed += 1;
+            }
+            for src in db.sources.iter_mut().filter(|s| s.status == "processing") {
+                src.status = "failed".into();
+                src.error =
+                    "interrupted: the server stopped while ingesting this source; retry to re-ingest"
+                        .into();
+                changed += 1;
+            }
+            changed
+        })
+        .unwrap_or(0)
     }
 
     pub fn read<R>(&self, f: impl FnOnce(&Db) -> R) -> R {
@@ -99,6 +182,8 @@ fn encode_db(db: &Db) -> Value {
     m.insert("notes".into(), Value::Arr(db.notes.iter().map(note_json).collect()));
     m.insert("artifacts".into(), Value::Arr(db.artifacts.iter().map(artifact_json).collect()));
     m.insert("tables".into(), Value::Arr(db.tables.iter().map(table_json).collect()));
+    m.insert("jobs".into(), Value::Arr(db.jobs.iter().map(job_json).collect()));
+    m.insert("shares".into(), Value::Arr(db.shares.iter().map(share_json).collect()));
     Value::Obj(m)
 }
 
@@ -113,6 +198,8 @@ fn decode_db(text: &str) -> Option<Db> {
         notes: arr("notes").iter().map(note_from).collect(),
         artifacts: arr("artifacts").iter().map(artifact_from).collect(),
         tables: arr("tables").iter().filter_map(table_from).collect(),
+        jobs: arr("jobs").iter().map(job_from).collect(),
+        shares: arr("shares").iter().map(share_from).collect(),
     })
 }
 
@@ -379,6 +466,58 @@ fn note_from(v: &Value) -> Note {
     }
 }
 
+fn share_json(g: &crate::auth::ShareGrant) -> Value {
+    obj! {
+        "id" => g.id.as_str(),
+        "notebook_id" => g.notebook_id.as_str(),
+        "role" => g.role.as_str(),
+        "token_sha256" => g.token_sha256.as_str(),
+        "token_prefix" => g.token_prefix.as_str(),
+        "created_at" => g.created_at.as_str(),
+        "revoked_at" => g.revoked_at.as_str(),
+    }
+}
+
+fn share_from(v: &Value) -> crate::auth::ShareGrant {
+    crate::auth::ShareGrant {
+        id: s(v, "id"),
+        notebook_id: s(v, "notebook_id"),
+        role: s(v, "role"),
+        token_sha256: s(v, "token_sha256"),
+        token_prefix: s(v, "token_prefix"),
+        created_at: s(v, "created_at"),
+        revoked_at: s(v, "revoked_at"),
+    }
+}
+
+fn job_json(j: &Job) -> Value {
+    obj! {
+        "id" => j.id.as_str(),
+        "notebook_id" => j.notebook_id.as_str(),
+        "source_id" => j.source_id.as_str(),
+        "kind" => j.kind.as_str(),
+        "status" => j.status.as_str(),
+        "started_at" => j.started_at.as_str(),
+        "finished_at" => j.finished_at.as_str(),
+        "error" => j.error.as_str(),
+        "attempts" => j.attempts as u64,
+    }
+}
+
+fn job_from(v: &Value) -> Job {
+    Job {
+        id: s(v, "id"),
+        notebook_id: s(v, "notebook_id"),
+        source_id: s(v, "source_id"),
+        kind: s(v, "kind"),
+        status: s(v, "status"),
+        started_at: s(v, "started_at"),
+        finished_at: s(v, "finished_at"),
+        error: s(v, "error"),
+        attempts: v.get("attempts").and_then(|a| a.as_f64()).unwrap_or(1.0) as u32,
+    }
+}
+
 fn artifact_json(a: &Artifact) -> Value {
     let mut m = BTreeMap::new();
     m.insert("id".into(), Value::from(a.id.as_str()));
@@ -389,6 +528,17 @@ fn artifact_json(a: &Artifact) -> Value {
     m.insert("source_ids".into(), json_str_list(&a.source_ids));
     m.insert("stale".into(), Value::Bool(a.stale));
     m.insert("payload".into(), a.payload.clone());
+    m.insert("version".into(), Value::from(a.version as f64));
+    m.insert("updated_at".into(), Value::from(a.updated_at.as_str()));
+    m.insert(
+        "reviews".into(),
+        Value::Obj(
+            a.reviews
+                .iter()
+                .map(|(k, v)| (k.clone(), Value::from(v.as_str())))
+                .collect(),
+        ),
+    );
     Value::Obj(m)
 }
 
@@ -402,6 +552,13 @@ fn artifact_from(v: &Value) -> Artifact {
         source_ids: parse_str_list(v.get("source_ids")),
         stale: v.get("stale").and_then(|b| b.as_bool()).unwrap_or(false),
         payload: v.get("payload").cloned().unwrap_or(Value::Null),
+        reviews: v
+            .get("reviews")
+            .and_then(|r| r.as_obj())
+            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+            .unwrap_or_default(),
+        version: v.get("version").and_then(|x| x.as_f64()).unwrap_or(1.0) as u32,
+        updated_at: s(v, "updated_at"),
     }
 }
 

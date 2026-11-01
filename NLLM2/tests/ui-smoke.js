@@ -209,6 +209,30 @@ async function main() {
   const countFinal = (convsFinal.conversations || []).reduce((n, c) => n + c.message_count, 0);
   check("a completed stream is saved once", countFinal === countBefore + 2,
     `messages before=${countBefore} after=${countFinal}`);
+  // --- contradictory sources are shown side by side (Journey C)
+  for (const [title, text] of [
+    ["Lab run A", "The Calvin cycle fixes 3 carbon dioxide molecules per turn of the cycle."],
+    ["Lab run B", "The Calvin cycle fixes 6 carbon dioxide molecules per turn of the cycle."],
+  ]) {
+    const box = $("#pasteText");
+    box.value = text;
+    $("#pasteTitle").value = title;
+    byText(".pane button", "Import text").click();
+    await wait(700);
+  }
+  const askConflict = $(".composer textarea");
+  askConflict.value = "how many carbon dioxide molecules does the calvin cycle fix";
+  byText(".composer button", "Ask").click();
+  await wait(900);
+  const conflictMsg = $$(".msg.assistant").pop();
+  check("sources that disagree produce a labelled block", !!conflictMsg.querySelector(".conflicts"),
+    conflictMsg.textContent.slice(0, 240));
+  check("the disagreement names both sides",
+    (conflictMsg.querySelectorAll(".conflicts .claim").length >= 2),
+    conflictMsg.querySelector(".conflicts")?.textContent);
+  check("the block says Forge does not choose",
+    /does not choose between them/.test(conflictMsg.querySelector(".conflicts")?.textContent || ""));
+
 
   // --- study tools
   byText(".tabs button", "Study").click();
@@ -223,6 +247,39 @@ async function main() {
     inner.click();
     check("flashcard flips", inner.textContent !== before, `${before} -> ${inner.textContent}`);
   }
+
+  // --- difficulty is a generation parameter, not a label on the output
+  const diffSel = $("#artifactDifficulty");
+  check("study tab exposes a difficulty control", !!diffSel && !!diffSel.getAttribute("aria-label"),
+    diffSel?.outerHTML?.slice(0, 120));
+  diffSel.value = "hard";
+  byText("#sideContent button", "Flashcards").click();
+  await wait(900);
+  check("hard difficulty is reported on the generated artifact",
+    /built at hard difficulty/.test($("#reviewSummary")?.textContent || ""), $("#reviewSummary")?.textContent);
+  const hardCards = $$(".flashcard");
+  check("hard difficulty still produces cards", hardCards.length > 0, `cards=${hardCards.length}`);
+
+  // --- a review mark is the learner's data: stored server-side, shown when reopened
+  hardCards[0].querySelectorAll("button.ghost")[0].click(); // "knew it"
+  await wait(500);
+  check("a card can be marked known", /known/.test(hardCards[0].querySelector(".badge")?.textContent || ""),
+    hardCards[0].querySelector(".badge")?.textContent);
+  check("the summary counts the mark", /1 known/.test($("#reviewSummary")?.textContent || ""), $("#reviewSummary")?.textContent);
+  const artList = await (await fetch(`${BASE}/api/notebooks/${nbId}/artifacts`)).json();
+  const cardArt = (artList.artifacts || []).filter((a) => a.kind === "flashcards").pop();
+  check("the review mark is persisted on the artifact", !!cardArt && Object.values(cardArt.reviews || {}).includes("known"),
+    JSON.stringify(cardArt?.reviews));
+  check("the server reports review counts", !!cardArt && (cardArt.review_counts?.known || 0) >= 1,
+    JSON.stringify(cardArt?.review_counts));
+  window.showArtifact(cardArt.id);
+  await wait(600);
+  check("reopening an artifact shows the saved mark",
+    /1 known/.test($(".overlay #reviewSummary")?.textContent || "") &&
+      $$(".overlay .flashcard .badge").some((b) => /known/.test(b.textContent)),
+    $(".overlay #reviewSummary")?.textContent);
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
 
   // --- quiz
   byText("#sideContent button", "Quiz").click();
@@ -241,6 +298,61 @@ async function main() {
   byText("#sideContent button", "Concept map").click();
   await wait(700);
   check("mindmap svg rendered", !!$(".mindmap svg circle"), "no svg nodes");
+
+  // --- slides: a deck of quotations you can edit, reorder, delete, restore and export
+  const audienceSel = $("#artifactAudience");
+  check("study tab exposes a slide audience control", !!audienceSel && !!audienceSel.getAttribute("aria-label"));
+  audienceSel.value = "technical";
+  byText("#sideContent button", "Slides").click();
+  await wait(1000);
+  const deckSlides = $$(".slide");
+  check("slides render as an editable deck", deckSlides.length >= 2, `slides=${deckSlides.length}`);
+  check("slide bullets carry their citations", !!deckSlides[1]?.querySelector("li .cite"),
+    deckSlides[1]?.textContent?.slice(0, 160));
+  const slideList = await (await fetch(`${BASE}/api/notebooks/${nbId}/artifacts`)).json();
+  const deck = (slideList.artifacts || []).filter((a) => a.kind === "slides").pop();
+  const deckFull = deck ? await (await fetch(`${BASE}/api/artifacts/${deck.id}`)).json() : null;
+  check("the deck records the audience it was built for", deckFull?.payload?.audience === "technical",
+    deckFull?.payload?.audience);
+
+  const firstTitle = $$(".slide input.slide-title")[0];
+  firstTitle.value = "Edited opening slide";
+  firstTitle.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await wait(700);
+  const afterEdit = await (await fetch(`${BASE}/api/artifacts/${deck.id}`)).json();
+  check("a slide title edit is saved and versioned",
+    afterEdit.payload?.slides?.[0]?.title === "Edited opening slide" && afterEdit.version > 1,
+    `title=${afterEdit.payload?.slides?.[0]?.title} v=${afterEdit.version}`);
+
+  const movedTitle = $$(".slide input.slide-title")[1]?.value;
+  $$(".slide")[0].querySelectorAll("button.ghost")[1].click(); // ↓
+  await wait(700);
+  check("reorder moves a slide and persists", $$(".slide input.slide-title")[0]?.value === movedTitle,
+    `now=${$$(".slide input.slide-title")[0]?.value} expected=${movedTitle}`);
+
+  const beforeDelete = $$(".slide").length;
+  const lastSlide = $$(".slide").pop();
+  lastSlide.querySelectorAll("button.ghost")[2].click(); // ✕
+  await wait(700);
+  check("a deleted slide leaves the deck", $$(".slide").length === beforeDelete - 1,
+    `slides=${$$(".slide").length}`);
+  check("a deleted slide is kept in a restore list", $$(".slide-removed").length === 1,
+    `removed=${$$(".slide-removed").length}`);
+  byText(".slide-removed button", "restore").click();
+  await wait(700);
+  check("restore brings the slide back", $$(".slide").length === beforeDelete, `slides=${$$(".slide").length}`);
+
+  window.showArtifact(deck.id);
+  await wait(600);
+  byText(".viewer header button", "md").click();
+  await wait(700);
+  check("markdown export shows the exact bytes", /Edited opening slide|Slide outline/.test($(".export-body")?.textContent || ""),
+    $(".export-body")?.textContent?.slice(0, 120));
+  check("export controls offer md and json only",
+    $$(".viewer header button").some((b) => b.textContent === "json") &&
+      !$$(".viewer header button").some((b) => /pptx/i.test(b.textContent)));
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
 
   // --- notes
   byText(".tabs button", "Notes").click();
@@ -309,6 +421,145 @@ async function main() {
   check("add-from-URL control exists", !!window.document.querySelector("#addUrlBtn"));
   check("URL input is labelled for assistive tech",
     !!window.document.querySelector('input[aria-label="Web page URL"]'));
+
+  // --- a failed ingest is visible, retryable, and honestly logged
+  const broken = await fetch(`${BASE}/api/notebooks/${nbId}/sources/upload?filename=broken.pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: Buffer.from("this is definitely not a pdf"),
+  });
+  check("a corrupt upload is refused", broken.status === 422, `status=${broken.status}`);
+  await window.openNotebook(window.document.getElementById("app"), nbId);
+  await wait(900);
+  const failedItem = $$(".source-item.failed").find((el) => /broken/i.test(el.textContent));
+  check("the failed source stays listed with its error", !!failedItem && /pdf|extract|readable/i.test(failedItem.textContent),
+    failedItem?.textContent?.slice(0, 200));
+  check("the failed source offers a retry control",
+    !!failedItem && [...failedItem.querySelectorAll("button")].some((b) => /retry/i.test(b.textContent)),
+    failedItem?.textContent?.slice(0, 160));
+  check("the job log shows the failed attempt", /failed/.test($("#jobs")?.textContent || "") && /attempt 1/.test($("#jobs")?.textContent || ""),
+    $("#jobs")?.textContent?.slice(0, 200));
+  [...failedItem.querySelectorAll("button")].find((b) => /retry/i.test(b.textContent)).click();
+  await wait(1000);
+  const jobsAfterRetry = await (await fetch(`${BASE}/api/notebooks/${nbId}/jobs`)).json();
+  const failedAttempts = (jobsAfterRetry.jobs || []).filter((j) => j.status === "failed");
+  check("retrying records a second attempt rather than a duplicate source", failedAttempts.length >= 2 && failedAttempts.every((j) => j.attempts >= 1),
+    JSON.stringify(failedAttempts.map((j) => j.attempts)));
+  const sourceCount = (await (await fetch(`${BASE}/api/notebooks/${nbId}/sources`)).json()).sources
+    .filter((x) => /broken/i.test(x.title)).length;
+  check("the retry did not add a second source", sourceCount === 1, `sources with that name=${sourceCount}`);
+
+  // --- discovery reads real links from a page the user chose (Journey I)
+  const http = require("http");
+  const fixture = http.createServer((req, res) => {
+    const pages = {
+      "/list": "<html><head><title>Reading list</title></head><body>" +
+        '<a href="/a">Alpha study</a><a href="/b">Beta note</a>' +
+        '<a href="/talk.mp4">Recorded talk</a></body></html>',
+      "/a": "<html><head><title>Alpha study</title></head><body><p>Retrieval quality depends on the ranking function used for the corpus.</p></body></html>",
+      "/b": "<html><head><title>Beta note</title></head><body><p>A citation check rejects any answer whose quoted span is missing from the source.</p></body></html>",
+    };
+    const page = pages[req.url.split("?")[0]];
+    if (!page) { res.writeHead(404); res.end("missing"); return; }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(page);
+  });
+  await new Promise((r) => fixture.listen(0, "127.0.0.1", r));
+  const fixturePort = fixture.address().port;
+  window.openDiscovery();
+  await wait(400);
+  check("the discovery panel says there is no search engine behind it",
+    /does not search the web|Forge reads the outbound links/i.test($(".overlay .viewer")?.textContent || ""),
+    $(".overlay .viewer")?.textContent?.slice(0, 200));
+  $(".overlay .viewer input[aria-label=\"Seed page URL\"]").value = `http://127.0.0.1:${fixturePort}/list`;
+  byText(".overlay .viewer button", "Read links").click();
+  await wait(1200);
+  const cands = $$(".overlay .viewer .candidate");
+  check("candidate links are listed with their provenance",
+    cands.length === 2 && cands.every((c) => /found on http:\/\/127\.0\.0\.1/.test(c.textContent)),
+    cands.map((c) => c.textContent.slice(0, 80)).join(" | "));
+  check("the media link is not offered as a page", !/talk\.mp4/.test($(".overlay .viewer")?.textContent || ""),
+    $(".overlay .viewer")?.textContent?.slice(0, 300));
+  check("the panel reports the seed page title and link counts",
+    /Reading list/.test($(".overlay .viewer")?.textContent || "") &&
+      /links seen/.test($(".overlay .viewer")?.textContent || ""));
+  const importBtn = $("#importCandidates");
+  check("candidates can be imported in one action", !!importBtn);
+  importBtn.click();
+  await wait(2000);
+  const discovered = $$(".source-item").map((el) => el.textContent).join(" | ");
+  check("both discovered pages became sources",
+    /Alpha study/.test(discovered) && /Beta note/.test(discovered), discovered.slice(0, 300));
+  check("the import warning about the media link was surfaced or explained",
+    !/talk\.mp4/.test(discovered));
+  fixture.close();
+
+  // --- a supplied caption file becomes a timecode-citing source (Journey E)
+  const vtt = fs.readFileSync(path.join(WEB, "../../tests/fixtures/lecture.vtt"));
+  const vttFile = new window.File([vtt], "lecture.vtt", { type: "text/vtt" });
+  const vttInput = $("#fileInput");
+  Object.defineProperty(vttInput, "files", { value: [vttFile], writable: true });
+  vttInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await wait(1500);
+  const vttSource = $$(".source-item").find((el) => /lecture\.vtt/i.test(el.textContent));
+  check("a caption file is accepted as a source", !!vttSource, $$(".source-item").map((e) => e.textContent).join(" | ").slice(0, 300));
+  check("the caption source reports its kind", /transcript/.test(vttSource?.textContent || ""), vttSource?.textContent);
+  const askStamp = $(".composer textarea");
+  askStamp.value = "what is the retention window for customer records";
+  byText(".composer button", "Ask").click();
+  await wait(1200);
+  const stampMsg = $$(".msg.assistant").pop();
+  check("a transcript answer cites the spoken timecode", /00:42/.test(stampMsg?.textContent || ""),
+    stampMsg?.textContent?.slice(0, 300));
+  const stampBad = await fetch(`${BASE}/api/notebooks/${nbId}/sources/upload?filename=clip.mp4`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: Buffer.from("fake mp4"),
+  });
+  check("a video upload is refused with a reason instead of being indexed as text",
+    stampBad.status === 422 && /transcript/i.test((await stampBad.json()).error || ""));
+  await window.openNotebook(window.document.getElementById("app"), nbId);
+  await wait(900);
+
+  // --- sharing is an owner action, and the panel says when it is not enforced
+  $(".pane #shareBtn").click();
+  await wait(700);
+  check("the share panel opens", !!$(".overlay .viewer") && /Share “/.test($(".overlay .viewer")?.textContent || ""),
+    $(".overlay .viewer")?.textContent?.slice(0, 120));
+  check("the panel states that sharing is not enforced in single-user mode",
+    /Sharing is not enforced yet/.test($(".overlay .viewer")?.textContent || ""),
+    $(".overlay .viewer")?.textContent?.slice(0, 240));
+  check("the panel explains what a token would change",
+    /owner token/i.test($(".overlay .viewer")?.textContent || ""));
+  byText(".overlay .viewer button", "Create link").click();
+  await wait(600);
+  const shareLink = $("#newShare input")?.value || "";
+  check("a share link is shown once after creation", /#\/share\/[0-9a-f]{32}$/.test(shareLink), shareLink);
+  check("the new link is listed with its role", /viewer/.test($(".overlay .viewer")?.textContent || ""));
+  const revokeBtn = $$(".overlay .viewer .note-item button").find((b) => /revoke/i.test(b.textContent));
+  check("a link can be revoked from the panel", !!revokeBtn);
+  revokeBtn.click();
+  await wait(600);
+  check("a revoked link is marked revoked", /revoked/.test($(".overlay .viewer")?.textContent || ""));
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+
+  // --- a request without a token produces a gate, not a blank page
+  window.showTokenPrompt("token required for this test");
+  await wait(50);
+  check("a missing token produces an explicit gate",
+    !!$("#tokenGate #tokenInput") && /requires a token/.test($("#tokenGate")?.textContent || ""),
+    $("#tokenGate")?.textContent?.slice(0, 160));
+  $("#tokenGate").remove();
+
+  // --- a share link routes to the share view and keeps its token out of the URL
+  const hashBeforeShare = window.location.hash;
+  window.location.hash = "#/share/abc123def456abc123def456abc12345";
+  const shareRoute = window.parseHash();
+  check("a share link parses as a share route", shareRoute.view === "share" && /^abc123/.test(shareRoute.token || ""),
+    JSON.stringify(shareRoute));
+  window.history.replaceState(null, "", hashBeforeShare);
+  window.localStorage.removeItem("forge.shareToken");
 
   // --- capabilities page tells the truth
   window.location.hash = "#/capabilities";

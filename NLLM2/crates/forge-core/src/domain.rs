@@ -78,6 +78,9 @@ pub enum SourceKind {
     Xlsx,
     Url,
     Note,
+    /// A timed caption file the user supplied (`.vtt` / `.srt`). Not video: Forge never
+    /// downloads media or captions on its own.
+    Transcript,
 }
 
 impl SourceKind {
@@ -93,6 +96,7 @@ impl SourceKind {
             SourceKind::Xlsx => "xlsx",
             SourceKind::Url => "url",
             SourceKind::Note => "note",
+            SourceKind::Transcript => "transcript",
         }
     }
 
@@ -108,6 +112,7 @@ impl SourceKind {
             "xlsx" | "xls" | "spreadsheet" => SourceKind::Xlsx,
             "url" => SourceKind::Url,
             "note" => SourceKind::Note,
+            "transcript" | "vtt" | "srt" | "captions" => SourceKind::Transcript,
             _ => return None,
         })
     }
@@ -128,6 +133,8 @@ impl SourceKind {
             SourceKind::Html
         } else if lower.ends_with(".csv") || lower.ends_with(".tsv") {
             SourceKind::Csv
+        } else if lower.ends_with(".vtt") || lower.ends_with(".srt") {
+            SourceKind::Transcript
         } else {
             SourceKind::Text
         }
@@ -377,6 +384,27 @@ impl Source {
     }
 }
 
+/// A durable record of an ingestion attempt.
+///
+/// Written *before* parsing starts and updated when it ends, so a process that dies mid-ingest
+/// leaves evidence behind instead of a half-indexed source (`docs/DECISIONS.md` D21,
+/// Journey K). `bytes_blob` is the file name of the retained upload, when one was kept.
+#[derive(Debug, Clone, Default)]
+pub struct Job {
+    pub id: String,
+    pub notebook_id: String,
+    pub source_id: String,
+    /// "ingest" today; the field exists so re-index/refresh can be recorded the same way.
+    pub kind: String,
+    /// "running" | "done" | "failed" | "interrupted"
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub error: String,
+    /// 1 for the first attempt; increments on retry, so a repeated failure is visible.
+    pub attempts: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Chunk {
     pub id: String,
@@ -442,6 +470,31 @@ pub struct Artifact {
     pub payload: Value,
     /// Set when a source it was built from changed after generation.
     pub stale: bool,
+    /// Per-card review marks from the learner: card id -> "known" | "unknown".
+    /// Real user data, so it is persisted with the artifact and survives a restart.
+    pub reviews: BTreeMap<String, String>,
+    /// Bumped on every accepted edit, so a client can tell two versions apart.
+    pub version: u32,
+    /// When it was last edited (empty when it never was).
+    pub updated_at: String,
+}
+
+impl Default for Artifact {
+    fn default() -> Artifact {
+        Artifact {
+            id: String::new(),
+            notebook_id: String::new(),
+            kind: String::new(),
+            title: String::new(),
+            created_at: String::new(),
+            source_ids: Vec::new(),
+            payload: Value::Null,
+            stale: false,
+            reviews: BTreeMap::new(),
+            version: 1,
+            updated_at: String::new(),
+        }
+    }
 }
 
 // ------------------------------------------------------------------ JSON

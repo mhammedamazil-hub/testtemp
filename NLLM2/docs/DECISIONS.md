@@ -347,3 +347,92 @@ format when NDJSON over chunked encoding is simpler and scriptable with `curl -N
 **Consequences.** A network drop after the answer is fully written but before the client reads
 the last chunk loses that turn. That is the same trade-off the reference product's stop button
 makes, and it is stated in `UNKNOWN_AND_LIMITATIONS.md` rather than hidden.
+
+## D20 — Access control is one owner token plus per-notebook share links
+
+**Date.** 2026-11-01. **Background.** §11 makes access control a release blocker and Journey J
+asks for a private notebook, a viewer, an editor and a revocation. Forge is self-hosted and
+single-operator by design; the reference product's accounts, Drive sharing and org groups cannot
+be reproduced here, and pretending to would be worse than not having them.
+
+**Chosen.** Two honest states, both reported by `GET /api/auth` and by the access badge in the
+header:
+
+1. **Single-user (default).** No `owner.token` file exists, so every request is the operator.
+   The capability page, the API and the UI all say so — including that a share link would
+   restrict nothing until a token is set.
+2. **Enforced.** `POST /api/auth/owner-token` (only callable while unenforced, or by the current
+   owner) writes a token; only its SHA-256 is stored. From then on every route needs
+   `Authorization: Bearer <token>` or `X-Forge-Token`, except `GET /api/capabilities` and
+   `GET /api/auth`, which clients need in order to discover what they may do and read no
+   notebook, source or count. A share link presents `X-Forge-Share`, is bound to **one**
+   notebook and one role, and sees nothing else: `GET /api/notebooks` is filtered to it, and any
+   other notebook id returns 403 `not_in_share`.
+
+Roles are verbs, not labels: `viewer` may read and ask, `editor` may additionally write, and
+`manage` (create/delete a notebook, create or revoke links, providers, imports, backups) is
+owner-only. The action a route needs is derived from method plus path pattern in one place
+(`Api::route_action`), so a new route cannot accidentally default to "manage" or to "public";
+anything unmatched falls through to `write`, which a viewer never has.
+
+**Tokens are shown once.** A created link's plaintext is returned exactly once, with a note, and
+never again: the store keeps `token_sha256` plus a six-character prefix for the UI. Revocation
+stamps `revoked_at`, and the next request with that token is refused — the grant is re-read on
+every request rather than cached in a session. The constant-time comparison in `auth::token_eq`
+is unit-tested because a timing-dependent compare is exactly the kind of bug that survives a
+functional test.
+
+**Rejected.** (a) Cookie sessions with a login form: a second state to protect, and CSRF with it,
+for a single-user tool. (b) Storing the plaintext token so the UI can re-display it — that turns
+a leaked database into a set of live links. (c) Hiding the unenforced state: an unenforced
+instance that *looks* like it has sharing is a false security claim, which §16.2 forbids.
+(d) Per-source or per-artifact ACLs: the share unit is a notebook; anything finer would be a
+model the UI cannot show truthfully yet.
+
+**Compared with the reference product's documented behaviour** (`docs/RESEARCH_LOG.md`,
+2026-11-01): the reference shares by email address with two roles. Its consumer help page says an
+editor "can … share it further with other users"; its Enterprise documentation says editors
+**cannot** share or revoke. Those two official pages disagree, so Forge takes the stricter
+reading — sharing and revocation are owner-only — and says which reading it took instead of
+claiming the more generous one. The other real difference is the link itself: the reference's
+"Copy link" only works for people already shared on the notebook, while Forge's link is a bearer
+token that works for whoever holds it. That is weaker in one way (the link is the identity) and
+stronger in another (no account is needed at all), and it is recorded as a limitation rather than
+presented as parity.
+
+**Consequences.** With no `owner.token` the port is open to anyone who can reach it — the same
+property as every unauthenticated local tool, now stated in three places instead of assumed.
+Revoking a link does not close a request already in flight. There is no audit log, so "who read
+what" is unanswerable; that is listed in `UNKNOWN_AND_LIMITATIONS.md`.
+
+## D21 — Ingestion is a durable job: written first, recovered on start, retried in place
+
+**Date.** 2026-11-01. **Background.** Journey K requires that stopping the server mid-ingest
+either recovers or fails clearly, that retry is safe, and that no duplicate records appear.
+The previous code created the source row only after parsing succeeded, so a crash left nothing
+to explain and nothing to retry.
+
+**Chosen.** `ingest_source` writes the `processing` source **and** a `running` job before it
+touches the bytes, and keeps the uploaded/pasted bytes at `<data>/blobs/<source_id>.bin`
+(`origin` = `upload|paste|note`; URL sources re-fetch instead). `Store::open` calls
+`recover_interrupted`: a `running` job becomes `interrupted` and a `processing` source becomes
+`failed` with the message `interrupted: …retry to re-ingest`. Both are visible in
+`GET /api/notebooks/:id/jobs` and in the sources pane, so the user sees what happened rather than
+a spinner that never resolves.
+
+**Retry is in place, not a new record.** `POST /api/sources/:id/retry` re-uses the same
+`source_id`, re-fetches a URL source when no blob exists, replaces that source's chunks and
+tables (never appending), and increments `attempts` on a fresh job row. Retrying an already-ready
+source is 409 `already_ready`; a source with neither blob nor URL is 409 `not_retryable` with the
+reason. The Journey K test asserts exactly one source and one set of chunks after a retry.
+
+**Rejected.** (a) A worker thread or queue: it would add concurrency and a second failure mode
+to a process whose writes are already serialised by one mutex, and the work is fast enough that
+"the request is the job" is truthful. (b) Deleting a failed source automatically: the user asked
+for it to be there, and a silent deletion is indistinguishable from a bug. (c) Retrying as
+"add it again": that produces the duplicates Journey K explicitly forbids.
+
+**Consequences.** Byte retention doubles storage for uploads; blobs are removed when the source
+or notebook is deleted. A crash between the blob write and the job write leaves an orphan blob,
+which is harmless (it is keyed by source id and never cited) but is not yet garbage-collected —
+recorded as a limitation.

@@ -53,7 +53,46 @@ fn definitional(sentence: &str) -> Option<(String, String)> {
     None
 }
 
+/// Card difficulty is a real generation parameter, not a label:
+/// * `easy` only keeps explicit "X is Y" definitions (a learner can answer from memory);
+/// * `normal` mixes definitions with a cloze fallback;
+/// * `hard` leads with cloze cards, where the term has to be recalled from context.
+/// Every variant still quotes the source verbatim and carries the same citation shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Difficulty {
+    Easy,
+    Normal,
+    Hard,
+}
+
+impl Difficulty {
+    pub fn parse(raw: &str) -> Option<Difficulty> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "normal" | "standard" => Some(Difficulty::Normal),
+            "easy" | "beginner" => Some(Difficulty::Easy),
+            "hard" | "advanced" => Some(Difficulty::Hard),
+            _ => None,
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Difficulty::Easy => "easy",
+            Difficulty::Normal => "normal",
+            Difficulty::Hard => "hard",
+        }
+    }
+}
+
 pub fn flashcards(chunks: &[Chunk], sources: &[Source], limit: usize) -> Value {
+    flashcards_with(chunks, sources, limit, Difficulty::Normal)
+}
+
+pub fn flashcards_with(
+    chunks: &[Chunk],
+    sources: &[Source],
+    limit: usize,
+    difficulty: Difficulty,
+) -> Value {
     let mut cards: Vec<Value> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for chunk in chunks {
@@ -104,7 +143,29 @@ pub fn flashcards(chunks: &[Chunk], sources: &[Source], limit: usize) -> Value {
             }
         }
     }
-    obj! { "kind" => "flashcards", "count" => cards.len(), "cards" => Value::Arr(cards) }
+    if difficulty == Difficulty::Easy {
+        // Drop cloze cards: on easy, every card is an explicit definition.
+        cards.retain(|c| !c.str_of("front").unwrap_or("").contains("_____"));
+    }
+    if difficulty == Difficulty::Hard {
+        // Cloze cards first: recall from context is the harder exercise.
+        let (cloze, rest): (Vec<Value>, Vec<Value>) =
+            cards.into_iter().partition(|c| c.str_of("front").unwrap_or("").contains("_____"));
+        cards = cloze;
+        cards.extend(rest);
+    }
+    for (i, c) in cards.iter_mut().enumerate() {
+        if let Value::Obj(m) = c {
+            m.insert("n".into(), Value::from((i + 1) as f64));
+            m.insert("difficulty".into(), Value::from(difficulty.as_str()));
+        }
+    }
+    obj! {
+        "kind" => "flashcards",
+        "difficulty" => difficulty.as_str(),
+        "count" => cards.len(),
+        "cards" => Value::Arr(cards),
+    }
 }
 
 pub fn quiz(chunks: &[Chunk], sources: &[Source], limit: usize) -> Value {
@@ -286,6 +347,90 @@ pub fn mindmap(chunks: &[Chunk], limit_terms: usize) -> Value {
     }
 }
 
+/// Slide deck as an **outline of quoted evidence**, not a rendered deck.
+///
+/// Each slide is a title plus bullets that are verbatim sentences from the sources, each with
+/// its own citation. `audience` changes how much is put on a slide (executive: two bullets,
+/// general: three, technical: four plus locators) — it never changes which sources are used.
+/// There is no PPTX/PDF renderer in this build; `export.rs` writes Markdown, and
+/// `/api/capabilities` says so instead of pretending otherwise.
+pub fn slides(chunks: &[Chunk], sources: &[Source], topic: &str, audience: &str) -> Value {
+    let per_slide = match audience {
+        "executive" => 2,
+        "technical" => 4,
+        _ => 3,
+    };
+    let mut out: Vec<Value> = Vec::new();
+    let deck_title = if topic.trim().is_empty() {
+        "Deck from notebook sources".to_string()
+    } else {
+        topic.trim().to_string()
+    };
+    out.push(obj! {
+        "id" => "slide-1",
+        "title" => deck_title,
+        "bullets" => Value::Arr(vec![]),
+        "notes" => format!("Built from {} source(s). Every bullet on the following slides is a quotation.", sources.len()),
+    });
+
+    for src in sources {
+        let mine: Vec<&Chunk> = chunks.iter().filter(|c| c.source_id == src.id).collect();
+        if mine.is_empty() {
+            continue;
+        }
+        let mut bullets: Vec<Value> = Vec::new();
+        'outer: for chunk in mine {
+            for sentence in sentences(&chunk.text) {
+                let text = sentence.trim();
+                if text.split_whitespace().count() < 5 {
+                    continue;
+                }
+                let cit = citation_for(chunk, sources, bullets.len() + 1);
+                let mut bullet = obj! {
+                    "text" => text,
+                    "citation" => cit.to_json(),
+                };
+                if audience == "technical" {
+                    if let Value::Obj(m) = &mut bullet {
+                        m.insert("locator".into(), Value::from(chunk.locator.human()));
+                    }
+                }
+                bullets.push(bullet);
+                if bullets.len() >= per_slide {
+                    break 'outer;
+                }
+            }
+        }
+        if bullets.is_empty() {
+            continue;
+        }
+        out.push(obj! {
+            "id" => format!("slide-{}", out.len() + 1),
+            "title" => src.title.as_str(),
+            "bullets" => Value::Arr(bullets),
+            "notes" => format!("Quoted from {}.", src.title),
+        });
+    }
+
+    out.push(obj! {
+        "id" => format!("slide-{}", out.len() + 1),
+        "title" => "Sources",
+        "bullets" => Value::Arr(sources.iter().map(|s| obj! {
+            "text" => format!("{} ({})", s.title, s.kind),
+            "citation" => Value::Null,
+        }).collect()),
+        "notes" => "Every claim above can be traced to one of these sources.".to_string(),
+    });
+
+    obj! {
+        "kind" => "slides",
+        "audience" => audience,
+        "slide_count" => out.len(),
+        "slides" => Value::Arr(out),
+        "renderer" => "none: this build exports Markdown, not PPTX or PDF",
+    }
+}
+
 pub fn study_guide(chunks: &[Chunk], sources: &[Source], topic: &str) -> Value {
     let rep = report(chunks, sources, topic);
     let cards = flashcards(chunks, sources, 8);
@@ -424,14 +569,42 @@ pub fn generate(
     sources: &[Source],
     topic: &str,
 ) -> Result<(String, Value), String> {
+    generate_with(kind, chunks, sources, topic, Difficulty::Normal)
+}
+
+pub fn generate_with(
+    kind: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    topic: &str,
+    difficulty: Difficulty,
+) -> Result<(String, Value), String> {
+    generate_full(kind, chunks, sources, topic, difficulty, "general")
+}
+
+pub fn generate_full(
+    kind: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    topic: &str,
+    difficulty: Difficulty,
+    audience: &str,
+) -> Result<(String, Value), String> {
     let title = match kind {
-        "flashcards" => ("Forge flashcards".to_string(), flashcards(chunks, sources, 12)),
+        "flashcards" => (
+            format!("Forge flashcards ({})", difficulty.as_str()),
+            flashcards_with(chunks, sources, 12, difficulty),
+        ),
         "quiz" => ("Forge quiz".to_string(), quiz(chunks, sources, 8)),
         "report" => {
             let t = if topic.trim().is_empty() { "Research report".to_string() } else { format!("Research report: {}", topic.trim()) };
             (t.clone(), report(chunks, sources, topic))
         }
         "mindmap" => ("Concept map".to_string(), mindmap(chunks, 16)),
+        "slides" => (
+            if topic.trim().is_empty() { "Slide outline".to_string() } else { format!("Slide outline: {}", topic.trim()) },
+            slides(chunks, sources, topic, audience),
+        ),
         "study_guide" => ("Study guide".to_string(), study_guide(chunks, sources, topic)),
         "faq" => ("Notebook FAQ".to_string(), faq(chunks, sources, 8)),
         "summary" => ("Source summary".to_string(), summary(chunks, sources)),

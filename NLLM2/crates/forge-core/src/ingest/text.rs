@@ -377,6 +377,40 @@ mod tests {
 }
 
 /// Extract `<title>` from an HTML document (entities decoded, whitespace collapsed).
+/// Outbound links from an HTML page, as `(href, anchor_text)` in document order.
+///
+/// This is deliberately a scanner, not a parser: it does not normalise URLs, resolve them or
+/// decide whether they are worth fetching. That policy lives in `discovery`.
+pub fn html_links(raw: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let bytes = raw.as_bytes();
+    let lower = raw.to_ascii_lowercase();
+    let mut at = 0usize;
+    while let Some(rel) = lower[at..].find("<a") {
+        let start = at + rel;
+        // must be a real anchor tag, not `<abbr>` or `<article>`
+        let after = lower[start + 2..].chars().next();
+        if !matches!(after, Some(c) if c.is_whitespace() || c == '>') {
+            at = start + 2;
+            continue;
+        }
+        let Some(gt_rel) = lower[start..].find('>') else { break };
+        let tag_end = start + gt_rel;
+        let tag = &raw[start + 3..tag_end];
+        let Some(href) = attr(tag, "href") else {
+            at = tag_end + 1;
+            continue;
+        };
+        // anchor text runs to the matching close tag; nested tags are stripped below
+        let close = lower[tag_end..].find("</a").map(|i| tag_end + i).unwrap_or_else(|| raw.len().min(tag_end + 400));
+        let inner = &raw[(tag_end + 1).min(bytes.len())..close.min(bytes.len())];
+        let text = html_blocks(inner).0.into_iter().map(|b| b.text).collect::<Vec<_>>().join(" ");
+        out.push((href.trim().to_string(), decode_entities(&text).trim().to_string()));
+        at = close.max(tag_end + 1);
+    }
+    out
+}
+
 pub fn html_title(raw: &str) -> Option<String> {
     let lower = raw.to_ascii_lowercase();
     let start = lower.find("<title")?;

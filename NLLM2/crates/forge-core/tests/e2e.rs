@@ -42,12 +42,25 @@ impl Server {
     }
 
     fn raw(&self, method: &str, path: &str, body: Option<&[u8]>, ctype: &str) -> (u16, String) {
+        self.raw_h(method, path, body, ctype, &[])
+    }
+
+    /// Same, with extra request headers — this is how a share token or owner token travels.
+    fn raw_h(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&[u8]>,
+        ctype: &str,
+        headers: &[(&str, &str)],
+    ) -> (u16, String) {
         let mut s = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
         let payload = body.unwrap_or(&[]);
+        let extra: String = headers.iter().map(|(k, v)| format!("{}: {}\r\n", k, v)).collect();
         let head = format!(
-            "{} {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n",
-            method, path, ctype, payload.len()
+            "{} {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}\r\n",
+            method, path, ctype, payload.len(), extra
         );
         s.write_all(head.as_bytes()).unwrap();
         s.write_all(payload).unwrap();
@@ -64,8 +77,12 @@ impl Server {
     }
 
     fn json(&self, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
+        self.json_h(method, path, body, &[])
+    }
+
+    fn json_h(&self, method: &str, path: &str, body: Option<Value>, headers: &[(&str, &str)]) -> (u16, Value) {
         let raw_body = body.map(|v| json::to_string(&v).into_bytes());
-        let (status, text) = self.raw(method, path, raw_body.as_deref(), "application/json");
+        let (status, text) = self.raw_h(method, path, raw_body.as_deref(), "application/json", headers);
         (status, json::parse(&text).unwrap_or(Value::Null))
     }
 }
@@ -1442,4 +1459,1092 @@ fn chat_streams_frames_and_only_persists_when_delivery_completes() {
     );
     assert_eq!(status, 422);
     assert_eq!(body.str_of("code"), Some("bad_style"));
+}
+
+// ============================================================================
+// §14 acceptance journeys. Each test is named after its letter so a reader can
+// check the specification against the suite one-to-one.
+// ============================================================================
+
+/// Journey A — first notebook: create, rename, restart, persist, no hidden demo data.
+#[test]
+fn journey_a_first_notebook_survives_a_restart_without_demo_data() {
+    let dir = tempdir("journey-a");
+    let nb_id;
+    {
+        let s = Server::start(dir.clone());
+        // a brand-new data directory must be empty, not seeded with demo content
+        let (st, list) = s.json("GET", "/api/notebooks", None);
+        assert_eq!(st, 200);
+        assert_eq!(list.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.len()), Some(0),
+            "a fresh install shows no notebooks, demo or otherwise");
+        let (_, health) = s.json("GET", "/api/health", None);
+        assert_eq!(
+            health.get("counts").and_then(|c| c.get("notebooks")).and_then(|v| v.as_f64()),
+            Some(0.0)
+        );
+
+        let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Untitled notebook"))])));
+        assert_eq!(st, 201);
+        nb_id = nb.str_of("id").unwrap().to_string();
+
+        let (st, renamed) = s.json(
+            "PATCH",
+            &format!("/api/notebooks/{}", nb_id),
+            Some(obj(&[("title", Value::from("Mitochondria reading"))])),
+        );
+        assert_eq!(st, 200, "{:?}", renamed);
+        assert_eq!(renamed.str_of("title"), Some("Mitochondria reading"));
+
+        // close: dropping the server ends its handler thread and its store handle
+    }
+
+    // reopen against the same data directory
+    let s2 = Server::start(dir.clone());
+    let (_, list2) = s2.json("GET", "/api/notebooks", None);
+    let nbs = list2.get("notebooks").and_then(|n| n.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(nbs.len(), 1, "one notebook, the one that was created");
+    assert_eq!(nbs[0].str_of("id"), Some(nb_id.as_str()));
+    assert_eq!(nbs[0].str_of("title"), Some("Mitochondria reading"), "the rename persisted");
+
+    let (_, srcs) = s2.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    assert_eq!(srcs.get("sources").and_then(|s| s.as_arr()).map(|a| a.len()), Some(0),
+        "the notebook has no sources; nothing was fabricated to fill it");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey B — PDF evidence: page 2 citation, a clickable locator, and abstention.
+#[test]
+fn journey_b_pdf_page_two_is_cited_and_unsupported_questions_abstain() {
+    let dir = tempdir("journey-b");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("PDF"))])));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let pdf = std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/simple.pdf")).unwrap();
+    let (st, body) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=simple.pdf", nb_id),
+        Some(&pdf),
+        "application/pdf",
+    );
+    assert_eq!(st, 201, "{}", body);
+    let uploaded = json::parse(&body).unwrap();
+    // the upload response names the source it created (`source_id`), alongside its preview
+    let sid = uploaded
+        .str_of("source_id")
+        .or_else(|| uploaded.str_of("id"))
+        .expect("upload must name the new source")
+        .to_string();
+    assert_eq!(uploaded.str_of("kind"), Some("pdf"));
+
+    // the parsed pages are inspectable, not just counted
+    let (st, chunks) = s.json("GET", &format!("/api/sources/{}/chunks", sid), None);
+    assert_eq!(st, 200);
+    let pages: Vec<f64> = chunks
+        .get("chunks")
+        .and_then(|c| c.as_arr())
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| c.get("locator").and_then(|l| l.get("page").or_else(|| l.get("value"))))
+                .filter_map(|p| p.as_f64())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(pages.contains(&1.0) && pages.contains(&2.0), "both pages parsed: {:?}", pages);
+
+    // the answer lives on page 2 and the citation says so
+    let (st, chat) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("What does page two say about citations?"))])),
+    );
+    assert_eq!(st, 200, "{:?}", chat);
+    let cites = chat.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty(), "an answer about page two must cite it: {:?}", chat);
+    let cite = &cites[0];
+    assert_eq!(cite.get("locator").and_then(|l| l.get("page")).and_then(|p| p.as_f64()), Some(2.0),
+        "citation page must be 2: {:?}", cite);
+    assert!(cite.str_of("quote").unwrap_or("").contains("citations") || cite.str_of("quote").unwrap_or("").contains("evidence span"),
+        "the quote must be the page-2 sentence: {:?}", cite);
+
+    // opening the citation returns the chunk containing that exact quote
+    let chunk_id = cite.str_of("chunk_id").unwrap().to_string();
+    let (_, one) = s.json("GET", &format!("/api/sources/{}/chunks", sid), None);
+    let found = one
+        .get("chunks")
+        .and_then(|c| c.as_arr())
+        .and_then(|a| a.iter().find(|c| c.str_of("id") == Some(chunk_id.as_str())).cloned());
+    assert!(found.is_some(), "the cited chunk must exist");
+    assert!(found.unwrap().str_of("text").unwrap().contains(cite.str_of("quote").unwrap()));
+
+    // an unsupported question abstains with zero citations rather than inventing one
+    let (st, again) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("What is the capital of Mongolia?"))])),
+    );
+    assert_eq!(st, 200);
+    assert_eq!(again.get("abstained"), Some(&Value::Bool(true)), "{:?}", again);
+    assert_eq!(again.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(0));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey D — note as a source: save an answer as a note, edit it, scope it in and out.
+#[test]
+fn journey_d_note_edits_are_what_get_cited_and_exclusion_removes_influence() {
+    let dir = tempdir("journey-d");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Notes"))])));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Handbook")),
+            ("text", Value::from("The default retention window is thirty days.")),
+        ])),
+    );
+
+    // 1-2. an answer exists, and saving it as a note keeps the text verbatim
+    let (_, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("what is the default retention window"))])),
+    );
+    let (st, note) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/notes", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Saved answer")),
+            ("body", Value::from(answer.str_of("answer").unwrap())),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let note_id = note.str_of("id").unwrap().to_string();
+
+    // 3. edit the note so it contains a fact the sources do not
+    let (st, edited) = s.json(
+        "PATCH",
+        &format!("/api/notes/{}", note_id),
+        Some(obj(&[("body", Value::from("Confirmed with the vendor: the audit threshold is 2.25 sigma this quarter."))])),
+    );
+    assert_eq!(st, 200, "{:?}", edited);
+
+    // 4-5. convert to a source and ask something only the note knows
+    let (_, srcs) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let handbook = srcs
+        .get("sources")
+        .and_then(|s| s.as_arr())
+        .and_then(|a| a.iter().find(|s| s.str_of("title") == Some("Handbook")).cloned())
+        .and_then(|s| s.str_of("id").map(|x| x.to_string()))
+        .expect("handbook source");
+    let (_, conv) = s.json("POST", &format!("/api/notes/{}/to-source", note_id), None);
+    let sid = conv.str_of("source_id").unwrap().to_string();
+    let (_, a1) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("what is the audit threshold"))])),
+    );
+    let c1 = a1.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(c1.len(), 1, "{:?}", a1);
+    assert_eq!(c1[0].str_of("source_id"), Some(sid.as_str()), "the citation points at the note-source");
+    assert!(c1[0].str_of("quote").unwrap().contains("2.25"), "the edited body is what is quoted: {:?}", c1[0]);
+
+    // 6. excluding it removes the influence entirely
+    let (_, a2) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[
+            ("question", Value::from("what is the audit threshold")),
+            ("source_ids", Value::Arr(vec![Value::from(handbook.as_str())])),
+        ])),
+    );
+    assert_eq!(a2.get("abstained"), Some(&Value::Bool(true)), "{:?}", a2);
+    assert_eq!(a2.get("citations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(0));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey C — multi-source reasoning, and a contradiction that is surfaced rather than
+/// silently reconciled.
+#[test]
+fn journey_c_conflicting_sources_are_shown_side_by_side() {
+    let dir = tempdir("journey-c");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Policy"))])));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Policy 2025")),
+            ("text", Value::from("The default retention window is thirty days for uploaded artefacts.")),
+        ])),
+    );
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Policy 2026")),
+            ("text", Value::from("The default retention window is sixty days for uploaded artefacts.")),
+        ])),
+    );
+
+    // 2-3. a question that needs both documents cites both
+    let (st, both) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("retention days limit"))])),
+    );
+    assert_eq!(st, 200, "{:?}", both);
+    let titles: Vec<String> = both
+        .get("citations")
+        .and_then(|c| c.as_arr())
+        .map(|a| a.iter().filter_map(|c| c.str_of("source_title").map(|t| t.to_string())).collect())
+        .unwrap_or_default();
+    assert!(titles.iter().any(|t| t == "Policy 2025") && titles.iter().any(|t| t == "Policy 2026"),
+        "both sources must be cited: {:?}", titles);
+
+    // 5-6. the contradiction is surfaced, not reconciled
+    let conflicts = both.get("conflicts").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(conflicts.len(), 1, "one disagreement expected: {:?}", both);
+    let c = &conflicts[0];
+    assert_eq!(c.str_of("kind"), Some("numeric"));
+    let claims = c.get("claims").and_then(|x| x.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(claims.len(), 2);
+    let quotes: Vec<String> = claims.iter().filter_map(|k| k.str_of("quote").map(|q| q.to_string())).collect();
+    assert!(quotes.iter().any(|q| q.contains("thirty")) && quotes.iter().any(|q| q.contains("sixty")));
+
+    // the answer text says so, in words, and cites both sides
+    let answer = both.str_of("answer").unwrap_or("");
+    assert!(answer.contains("Sources disagree"), "{}", answer);
+    assert!(answer.contains("does not choose between them"), "{}", answer);
+    assert!(answer.contains("thirty") && answer.contains("sixty"), "{}", answer);
+    let cited_titles: Vec<String> = both
+        .get("citations")
+        .and_then(|x| x.as_arr())
+        .map(|a| a.iter().filter_map(|x| x.str_of("source_title").map(|t| t.to_string())).collect())
+        .unwrap_or_default();
+    assert!(cited_titles.iter().any(|t| t == "Policy 2025") && cited_titles.iter().any(|t| t == "Policy 2026"),
+        "both sides of the disagreement are cited: {:?}", cited_titles);
+    assert_eq!(
+        both.get("citation_problems").and_then(|p| p.as_arr()).map(|a| a.len()),
+        Some(0),
+        "the added citations still validate: {:?}", both
+    );
+
+    // a question where the sources agree produces no conflict block
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Handbook")),
+            ("text", Value::from("Support answers within four hours on business days.")),
+        ])),
+    );
+    let (_, calm) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("how fast does support answer"))])),
+    );
+    assert_eq!(calm.get("conflicts").and_then(|c| c.as_arr()).map(|a| a.len()), Some(0), "{:?}", calm);
+    assert!(!calm.str_of("answer").unwrap_or("").contains("Sources disagree"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey F — flashcards with a chosen difficulty, review marks, quiz, and a restart.
+#[test]
+fn journey_f_cards_reviews_and_quiz_survive_a_restart() {
+    let dir = tempdir("journey-f");
+    let nb_id;
+    let card_id;
+    let quiz_id;
+    {
+        let s = Server::start(dir.clone());
+        let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Study"))])));
+        nb_id = nb.str_of("id").unwrap().to_string();
+        s.json(
+            "POST",
+            &format!("/api/notebooks/{}/sources/text", nb_id),
+            Some(obj(&[
+                ("title", Value::from("Biology")),
+                ("text", Value::from(
+                    "Photosynthesis is the process that converts light energy into chemical energy. \
+                     The Calvin cycle fixes carbon dioxide into glucose using ATP and NADPH. \
+                     Chlorophyll absorbs light most strongly in the blue and red bands of the spectrum.")),
+            ])),
+        );
+
+        // 1. difficulty is a real generator parameter, and an unknown one is refused
+        let (st, easy) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/artifacts", nb_id),
+            Some(obj(&[("kind", Value::from("flashcards")), ("difficulty", Value::from("easy"))])),
+        );
+        assert_eq!(st, 201, "{:?}", easy);
+        assert_eq!(easy.get("payload").and_then(|p| p.str_of("difficulty")), Some("easy"));
+        let easy_cards = easy.get("payload").and_then(|p| p.get("cards")).and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+        assert!(!easy_cards.is_empty());
+        assert!(
+            easy_cards.iter().all(|c| !c.str_of("front").unwrap_or("").contains("_____")),
+            "easy never uses a cloze card"
+        );
+
+        let (st, hard) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/artifacts", nb_id),
+            Some(obj(&[("kind", Value::from("flashcards")), ("difficulty", Value::from("hard"))])),
+        );
+        assert_eq!(st, 201, "{:?}", hard);
+        assert_eq!(hard.get("payload").and_then(|p| p.str_of("difficulty")), Some("hard"));
+
+        let (st, bad) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/artifacts", nb_id),
+            Some(obj(&[("kind", Value::from("flashcards")), ("difficulty", Value::from("impossible"))])),
+        );
+        assert_eq!(st, 422);
+        assert_eq!(bad.str_of("code"), Some("bad_difficulty"));
+
+        // every card is grounded: front/back are substrings of a real sentence, with a citation
+        for c in &easy_cards {
+            let cit = c.get("citation").expect("card citation");
+            assert!(cit.str_of("quote").is_some() && cit.str_of("locator_label").is_some());
+        }
+
+        // 3. record known/unknown against a specific card
+        card_id = easy_cards[0].str_of("id").unwrap().to_string();
+        let easy_id = easy.str_of("id").unwrap().to_string();
+        let (st, marked) = s.json(
+            "POST",
+            &format!("/api/artifacts/{}/review", easy_id),
+            Some(obj(&[("card_id", Value::from(card_id.as_str())), ("known", Value::Bool(true))])),
+        );
+        assert_eq!(st, 200, "{:?}", marked);
+        assert_eq!(marked.get("counts").and_then(|c| c.get("known")).and_then(|v| v.as_f64()), Some(1.0));
+
+        // an unknown card id is refused rather than silently stored
+        let (st, errc) = s.json(
+            "POST",
+            &format!("/api/artifacts/{}/review", easy_id),
+            Some(obj(&[("card_id", Value::from("card-nonexistent")), ("known", Value::Bool(true))])),
+        );
+        assert_eq!(st, 422);
+        assert_eq!(errc.str_of("code"), Some("unknown_card"));
+
+        // 4-6. quiz with answers and cited explanations
+        let (st, quiz) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/artifacts", nb_id),
+            Some(obj(&[("kind", Value::from("quiz"))])),
+        );
+        assert_eq!(st, 201);
+        quiz_id = quiz.str_of("id").unwrap().to_string();
+        let qs = quiz.get("payload").and_then(|p| p.get("questions")).and_then(|q| q.as_arr()).cloned().unwrap_or_default();
+        assert!(!qs.is_empty());
+        let q0 = &qs[0];
+        let opts = q0.get("options").and_then(|o| o.as_arr()).cloned().unwrap_or_default();
+        assert!(opts.len() >= 2, "a quiz question needs options");
+        let answer = q0.str_of("answer").unwrap();
+        assert!(opts.iter().any(|o| o.as_str() == Some(answer)), "the answer must be one of the options");
+        assert!(q0.get("citation").and_then(|c| c.str_of("quote")).is_some(), "an explanation must be cited");
+    }
+
+    // 7. reopen: the artifact, the difficulty and the review mark all persist
+    let s2 = Server::start(dir.clone());
+    let (_, arts) = s2.json("GET", &format!("/api/notebooks/{}/artifacts", nb_id), None);
+    let list = arts.get("artifacts").and_then(|a| a.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(list.len(), 3, "three artifacts survived the restart");
+    let cards_art = list
+        .iter()
+        .find(|a| a.str_of("kind") == Some("flashcards"))
+        .cloned()
+        .expect("flashcards artifact");
+    assert_eq!(
+        cards_art.get("reviews").and_then(|r| r.get(card_id.as_str())).and_then(|v| v.as_str()),
+        Some("known"),
+        "the learner's mark persisted: {:?}",
+        cards_art
+    );
+    let (st, one) = s2.json("GET", &format!("/api/artifacts/{}", quiz_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(one.str_of("kind"), Some("quiz"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey G — concept map: generate, export as SVG/Markdown, reopen after restart.
+#[test]
+fn journey_g_mindmap_exports_and_reopens() {
+    let dir = tempdir("journey-g");
+    let nb_id;
+    let map_id;
+    {
+        let s = Server::start(dir.clone());
+        let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Map"))])));
+        nb_id = nb.str_of("id").unwrap().to_string();
+        s.json(
+            "POST",
+            &format!("/api/notebooks/{}/sources/text", nb_id),
+            Some(obj(&[
+                ("title", Value::from("Ecology")),
+                ("text", Value::from(
+                    "Mycorrhizal fungi trade phosphorus with plant roots. \
+                     Phosphorus uptake improves drought tolerance in seedlings. \
+                     Fungal networks connect neighbouring trees underground.")),
+            ])),
+        );
+        let (st, map) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/artifacts", nb_id),
+            Some(obj(&[("kind", Value::from("mindmap"))])),
+        );
+        assert_eq!(st, 201, "{:?}", map);
+        map_id = map.str_of("id").unwrap().to_string();
+        let nodes = map.get("payload").and_then(|p| p.get("nodes")).and_then(|n| n.as_arr()).cloned().unwrap_or_default();
+        let edges = map.get("payload").and_then(|p| p.get("edges")).and_then(|n| n.as_arr()).cloned().unwrap_or_default();
+        assert!(nodes.len() >= 3, "concept map nodes");
+        assert!(!edges.is_empty(), "concept map edges");
+
+        // 6. export: SVG for the diagram, Markdown for the text
+        let (st, svg) = s.raw("GET", &format!("/api/artifacts/{}/export?format=svg", map_id), None, "text/plain");
+        assert_eq!(st, 200);
+        assert!(svg.starts_with("<svg") && svg.contains("</svg>"), "{}", &svg[..svg.len().min(200)]);
+        assert!(svg.contains("Mycorrhizal") || svg.contains("phosphorus") || svg.contains("Fungal"));
+
+        let (st, md) = s.raw("GET", &format!("/api/artifacts/{}/export?format=md", map_id), None, "text/plain");
+        assert_eq!(st, 200);
+        assert!(md.contains("# Concept map") || md.contains("#"), "{}", &md[..md.len().min(200)]);
+        assert!(md.contains("concepts"));
+
+        // a format that does not apply is refused with a reason, not an empty file
+        let (st, body) = s.raw("GET", &format!("/api/artifacts/{}/export?format=pptx", map_id), None, "text/plain");
+        assert_eq!(st, 501);
+        assert!(body.contains("no pptx renderer") || body.contains("format_unsupported"), "{}", body);
+    }
+
+    // 7. it is still there, with the same id, after a restart
+    let s2 = Server::start(dir.clone());
+    let (st, again) = s2.json("GET", &format!("/api/artifacts/{}", map_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(again.str_of("id"), Some(map_id.as_str()));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey H — slide deck: audience controls the outline, slides can be edited, reordered,
+/// deleted and restored, the version increments, and Markdown export carries the edits.
+#[test]
+fn journey_h_slides_are_editable_versioned_and_exportable() {
+    let dir = tempdir("journey-h");
+    let nb_id;
+    let deck_id;
+    {
+        let s = Server::start(dir.clone());
+        let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Deck"))])));
+        nb_id = nb.str_of("id").unwrap().to_string();
+        for (title, text) in [
+            ("Policy 2025", "Retention is thirty days. Backups run nightly at 02:00 UTC."),
+            ("Policy 2026", "Retention is sixty days. Backups run nightly at 03:00 UTC."),
+        ] {
+            s.json(
+                "POST",
+                &format!("/api/notebooks/{}/sources/text", nb_id),
+                Some(obj(&[("title", Value::from(title)), ("text", Value::from(text))])),
+            );
+        }
+
+        // 2-3. audience is a real parameter of the outline
+        let (st, deck) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/artifacts", nb_id),
+            Some(obj(&[
+                ("kind", Value::from("slides")),
+                ("audience", Value::from("executive")),
+                ("topic", Value::from("Retention")),
+            ])),
+        );
+        assert_eq!(st, 201, "{:?}", deck);
+        deck_id = deck.str_of("id").unwrap().to_string();
+        let payload = deck.get("payload").cloned().unwrap_or(Value::Null);
+        assert_eq!(payload.str_of("audience"), Some("executive"));
+        let slides = payload.get("slides").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+        assert!(slides.len() >= 3, "title + sources + at least one content slide: {:?}", slides);
+        let exec_bullets: usize = slides
+            .iter()
+            .filter_map(|s| s.get("bullets").and_then(|b| b.as_arr()))
+            .map(|b| b.len())
+            .sum();
+
+        let (_, technical) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/artifacts", nb_id),
+            Some(obj(&[
+                ("kind", Value::from("slides")),
+                ("audience", Value::from("technical")),
+                ("topic", Value::from("Retention")),
+            ])),
+        );
+        let tech_payload = technical.get("payload").cloned().unwrap_or(Value::Null);
+        let tech_slides = tech_payload.get("slides").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+        let tech_bullets: usize = tech_slides
+            .iter()
+            .filter_map(|s| s.get("bullets").and_then(|b| b.as_arr()))
+            .map(|b| b.len())
+            .sum();
+        assert!(tech_bullets >= exec_bullets, "technical puts at least as much on a slide");
+
+        // 5-6. edit one slide
+        let (st, edited) = s.json(
+            "PATCH",
+            &format!("/api/artifacts/{}", deck_id),
+            Some(obj(&[
+                ("op", Value::from("edit")),
+                ("index", Value::from(1.0)),
+                ("slide_title", Value::from("What changed in retention")),
+                ("notes", Value::from("Lead with the delta, not the history.")),
+            ])),
+        );
+        assert_eq!(st, 200, "{:?}", edited);
+        assert_eq!(edited.get("version").and_then(|v| v.as_f64()), Some(2.0));
+        let edited_slides = edited.get("payload").and_then(|p| p.get("slides")).and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+        assert_eq!(edited_slides[1].str_of("title"), Some("What changed in retention"));
+
+        // 7. reorder, delete and restore
+        let before_order: Vec<String> = edited_slides.iter().filter_map(|s| s.str_of("title").map(|t| t.to_string())).collect();
+        let (st, moved) = s.json(
+            "PATCH",
+            &format!("/api/artifacts/{}", deck_id),
+            Some(obj(&[("op", Value::from("reorder")), ("from", Value::from(1.0)), ("to", Value::from(0.0))])),
+        );
+        assert_eq!(st, 200, "{:?}", moved);
+        let moved_slides = moved.get("payload").and_then(|p| p.get("slides")).and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+        assert_eq!(moved_slides[0].str_of("title"), Some(before_order[1].as_str()), "reorder moved the slide");
+        assert_eq!(moved.get("version").and_then(|v| v.as_f64()), Some(3.0));
+
+        let count = moved_slides.len();
+        let (st, deleted) = s.json(
+            "PATCH",
+            &format!("/api/artifacts/{}", deck_id),
+            Some(obj(&[("op", Value::from("delete")), ("index", Value::from(0.0))])),
+        );
+        assert_eq!(st, 200, "{:?}", deleted);
+        let after_delete = deleted.get("payload").and_then(|p| p.get("slides")).and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+        assert_eq!(after_delete.len(), count - 1);
+
+        let (st, restored) = s.json(
+            "PATCH",
+            &format!("/api/artifacts/{}", deck_id),
+            Some(obj(&[("op", Value::from("restore")), ("index", Value::from(0.0))])),
+        );
+        assert_eq!(st, 200, "{:?}", restored);
+        let after_restore = restored.get("payload").and_then(|p| p.get("slides")).and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+        assert_eq!(after_restore.len(), count, "restore brings the slide back");
+
+        // 8. export: Markdown carries the edit; PPTX is refused with a reason
+        let (st, md) = s.raw("GET", &format!("/api/artifacts/{}/export?format=md", deck_id), None, "text/plain");
+        assert_eq!(st, 200);
+        assert!(md.contains("What changed in retention"), "{}", md);
+        assert!(md.contains("Lead with the delta"), "notes are exported too: {}", md);
+        let (st, err) = s.raw("GET", &format!("/api/artifacts/{}/export?format=pptx", deck_id), None, "text/plain");
+        assert_eq!(st, 501);
+        assert!(err.contains("format_unsupported"), "{}", err);
+
+        // 9. the version is persisted, not recomputed on read
+        let (_, again) = s.json("GET", &format!("/api/artifacts/{}", deck_id), None);
+        assert_eq!(again.get("version").and_then(|v| v.as_f64()), Some(5.0));
+    }
+
+    let s2 = Server::start(dir.clone());
+    let (_, persisted) = s2.json("GET", &format!("/api/artifacts/{}", deck_id), None);
+    assert_eq!(persisted.get("version").and_then(|v| v.as_f64()), Some(5.0), "version survives restart");
+    let titles: Vec<String> = persisted
+        .get("payload")
+        .and_then(|p| p.get("slides"))
+        .and_then(|s| s.as_arr())
+        .map(|a| a.iter().filter_map(|s| s.str_of("title").map(|t| t.to_string())).collect())
+        .unwrap_or_default();
+    assert!(titles.iter().any(|t| t == "What changed in retention"), "{:?}", titles);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey K — resilience: a process that dies mid-ingest leaves a clear, retryable state,
+/// and a retry never duplicates records.
+#[test]
+fn journey_k_interrupted_ingestion_is_recovered_and_retry_is_idempotent() {
+    let dir = tempdir("journey-k");
+    let nb_id;
+    let sid;
+    {
+        let s = Server::start(dir.clone());
+        let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Resilience"))])));
+        nb_id = nb.str_of("id").unwrap().to_string();
+        let pdf = std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/simple.pdf")).unwrap();
+        let (st, body) = s.raw(
+            "POST",
+            &format!("/api/notebooks/{}/sources/upload?filename=simple.pdf", nb_id),
+            Some(&pdf),
+            "application/pdf",
+        );
+        assert_eq!(st, 201, "{}", body);
+        let up = json::parse(&body).unwrap();
+        sid = up.str_of("source_id").unwrap().to_string();
+
+        // the job is recorded and finished, not just implied
+        let (st, jobs) = s.json("GET", &format!("/api/notebooks/{}/jobs", nb_id), None);
+        assert_eq!(st, 200);
+        let list = jobs.get("jobs").and_then(|j| j.as_arr()).cloned().unwrap_or_default();
+        assert_eq!(list.len(), 1, "{:?}", list);
+        assert_eq!(list[0].str_of("status"), Some("done"));
+        assert_eq!(list[0].str_of("source_id"), Some(sid.as_str()));
+        assert_eq!(list[0].get("attempts").and_then(|a| a.as_f64()), Some(1.0));
+        // the upload is retained, which is what makes a retry possible without re-uploading
+        assert!(dir.join("blobs").join(format!("{}.bin", sid)).exists());
+    }
+
+    // Simulate a crash in the middle of an ingest: a job left running and a source left
+    // processing, exactly what a stopped process would leave behind.
+    {
+        let store = Store::open(&dir).expect("store");
+        store
+            .write(|db| {
+                for j in db.jobs.iter_mut() {
+                    if j.source_id == sid {
+                        j.status = "running".into();
+                        j.finished_at = String::new();
+                        j.error = String::new();
+                    }
+                }
+                for s in db.sources.iter_mut() {
+                    if s.id == sid {
+                        s.status = "processing".into();
+                    }
+                }
+            })
+            .unwrap();
+    }
+
+    // Reopen: recovery turns the impossible "still running" into a clear, retryable failure.
+    let s2 = Server::start(dir.clone());
+    let (_, src) = s2.json("GET", &format!("/api/sources/{}", sid), None);
+    assert_eq!(src.str_of("status"), Some("failed"), "{:?}", src);
+    assert!(src.str_of("error").unwrap_or("").contains("interrupted"), "{:?}", src.str_of("error"));
+    let (_, jobs2) = s2.json("GET", &format!("/api/notebooks/{}/jobs", nb_id), None);
+    let interrupted = jobs2.get("jobs").and_then(|j| j.as_arr()).and_then(|a| a.first()).cloned().unwrap();
+    assert_eq!(interrupted.str_of("status"), Some("interrupted"));
+    assert!(interrupted.str_of("error").unwrap_or("").contains("stopped"));
+
+    // Retry re-ingests from the retained file, re-using the same source id.
+    let (st, retried) = s2.json("POST", &format!("/api/sources/{}/retry", sid), None);
+    assert_eq!(st, 200, "{:?}", retried);
+    assert_eq!(retried.str_of("status"), Some("ready"));
+    assert_eq!(retried.get("attempts").and_then(|a| a.as_f64()), Some(2.0));
+
+    // no duplicate records: one source, one job per attempt, chunk count restored once
+    let (_, srcs) = s2.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let all = srcs.get("sources").and_then(|x| x.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(all.len(), 1, "retry must not create a second source: {:?}", all);
+    assert_eq!(all[0].str_of("id"), Some(sid.as_str()));
+    let (_, chunks) = s2.json("GET", &format!("/api/sources/{}/chunks", sid), None);
+    assert_eq!(
+        chunks.get("total").and_then(|t| t.as_f64()),
+        Some(2.0),
+        "two PDF pages, indexed once"
+    );
+    let (_, jobs3) = s2.json("GET", &format!("/api/notebooks/{}/jobs", nb_id), None);
+    let attempts: Vec<f64> = jobs3
+        .get("jobs")
+        .and_then(|j| j.as_arr())
+        .map(|a| a.iter().filter_map(|j| j.get("attempts").and_then(|x| x.as_f64())).collect())
+        .unwrap_or_default();
+    assert_eq!(attempts.len(), 2, "one job per attempt: {:?}", attempts);
+    assert!(jobs3.get("jobs").and_then(|j| j.as_arr()).unwrap().iter().any(|j| j.str_of("status") == Some("done")));
+
+    // a second retry of a healthy source is refused rather than re-indexing it
+    let (st, again) = s2.json("POST", &format!("/api/sources/{}/retry", sid), None);
+    assert_eq!(st, 409);
+    assert_eq!(again.str_of("code"), Some("already_ready"));
+
+    // database consistency: the counts agree with the records
+    let (_, health) = s2.json("GET", "/api/health", None);
+    let counts = health.get("counts").cloned().unwrap_or(Value::Null);
+    assert_eq!(counts.get("sources").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(counts.get("chunks").and_then(|v| v.as_f64()), Some(2.0));
+    assert_eq!(counts.get("notebooks").and_then(|v| v.as_f64()), Some(1.0));
+
+    // and the answer still works after the recovery, citing page 2
+    let (_, chat) = s2.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("what does page two say about citations"))])),
+    );
+    assert_eq!(
+        chat.get("citations").and_then(|c| c.as_arr()).and_then(|a| a.first())
+            .and_then(|c| c.get("locator")).and_then(|l| l.get("page")).and_then(|p| p.as_f64()),
+        Some(2.0),
+        "recovered evidence is still citable: {:?}",
+        chat
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey J — access control: a viewer cannot edit, an editor cannot delete, revocation
+/// takes effect immediately, and a share link can never see another notebook.
+#[test]
+fn journey_j_share_links_are_scoped_by_role_and_revocable() {
+    let dir = tempdir("journey-j");
+    let s = Server::start(dir.clone());
+
+    // single-user mode first: no token, everything is the operator
+    let (st, mode) = s.json("GET", "/api/auth", None);
+    assert_eq!(st, 200);
+    assert_eq!(mode.str_of("mode"), Some("single-user"));
+    assert_eq!(mode.get("enforced"), Some(&Value::Bool(false)));
+
+    let (_, a) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Shared"))])));
+    let nb_a = a.str_of("id").unwrap().to_string();
+    let (_, b) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Private"))])));
+    let nb_b = b.str_of("id").unwrap().to_string();
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_a),
+        Some(obj(&[("title", Value::from("Policy")), ("text", Value::from("Retention is thirty days."))])),
+    );
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_b),
+        Some(obj(&[("title", Value::from("Secret")), ("text", Value::from("The acquisition closes in March."))])),
+    );
+
+    // enable enforcement; the returned token is the owner credential
+    let (st, owner) = s.json("POST", "/api/auth/owner-token", Some(obj(&[("token", Value::from("owner-token-for-tests-0123"))])));
+    assert_eq!(st, 200, "{:?}", owner);
+    assert_eq!(owner.get("enforced"), Some(&Value::Bool(true)));
+    let owner_hdr = [("authorization", "Bearer owner-token-for-tests-0123")];
+
+    // anonymous access is now refused everywhere that matters
+    let (st, anon) = s.json("GET", "/api/notebooks", None);
+    assert_eq!(st, 401, "{:?}", anon);
+    let (st, anon2) = s.json("POST", &format!("/api/notebooks/{}/chat", nb_a), Some(obj(&[("question", Value::from("retention"))])));
+    assert_eq!(st, 401);
+    let (_, caps) = s.json("GET", "/api/capabilities", None);
+    assert_eq!(caps.get("auth").and_then(|a| a.str_of("mode")), Some("token"));
+
+    // the owner sees everything
+    let (st, all) = s.json_h("GET", "/api/notebooks", None, &owner_hdr);
+    assert_eq!(st, 200);
+    assert_eq!(all.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.len()), Some(2));
+
+    // 2-3. a viewer link: read and ask, but no edits
+    let (st, viewer) = s.json_h(
+        "POST",
+        &format!("/api/notebooks/{}/shares", nb_a),
+        Some(obj(&[("role", Value::from("viewer"))])),
+        &owner_hdr,
+    );
+    assert_eq!(st, 201, "{:?}", viewer);
+    assert_eq!(viewer.str_of("role"), Some("viewer"));
+    let viewer_token = viewer.str_of("token").unwrap().to_string();
+    assert_eq!(viewer_token.len(), 32);
+    let viewer_hdr = [("x-forge-share", viewer_token.as_str())];
+
+    let (st, visible) = s.json_h("GET", "/api/notebooks", None, &viewer_hdr);
+    assert_eq!(st, 200);
+    let list = visible.get("notebooks").and_then(|n| n.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(list.len(), 1, "a share sees exactly one notebook: {:?}", list);
+    assert_eq!(list[0].str_of("id"), Some(nb_a.as_str()));
+
+    let (st, _) = s.json_h("GET", &format!("/api/notebooks/{}", nb_b), None, &viewer_hdr);
+    assert_eq!(st, 403, "another notebook is out of scope");
+    let (st, _) = s.json_h("POST", &format!("/api/notebooks/{}/chat", nb_b), Some(obj(&[("question", Value::from("when"))])), &viewer_hdr);
+    assert_eq!(st, 403);
+
+    let (st, answer) = s.json_h(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_a),
+        Some(obj(&[("question", Value::from("retention days limit"))])),
+        &viewer_hdr,
+    );
+    assert_eq!(st, 200, "viewers may ask questions: {:?}", answer);
+    assert!(answer.str_of("answer").unwrap_or("").contains("thirty"), "answer: {:?}", answer);
+
+    let (st, denied) = s.json_h(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_a),
+        Some(obj(&[("title", Value::from("nope")), ("text", Value::from("nope"))])),
+        &viewer_hdr,
+    );
+    assert_eq!(st, 403, "{:?}", denied);
+    assert_eq!(denied.str_of("code"), Some("forbidden_role"));
+    let (st, _) = s.json_h("PATCH", &format!("/api/notebooks/{}", nb_a), Some(obj(&[("title", Value::from("renamed"))])), &viewer_hdr);
+    assert_eq!(st, 403);
+    let (st, _) = s.json_h("GET", "/api/providers", None, &viewer_hdr);
+    assert_eq!(st, 403, "provider configuration is owner-only");
+
+    // 4-5. an editor link can write, but still cannot delete or re-share
+    let (st, editor) = s.json_h(
+        "POST",
+        &format!("/api/notebooks/{}/shares", nb_a),
+        Some(obj(&[("role", Value::from("editor"))])),
+        &owner_hdr,
+    );
+    assert_eq!(st, 201);
+    let editor_hdr = [("x-forge-share", editor.str_of("token").unwrap())];
+
+    let (st, added) = s.json_h(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_a),
+        Some(obj(&[("title", Value::from("Addendum")), ("text", Value::from("Retention is extended to sixty days for legal holds."))])),
+        &editor_hdr,
+    );
+    assert_eq!(st, 201, "editors may add sources: {:?}", added);
+    let (st, _) = s.json_h("DELETE", &format!("/api/notebooks/{}", nb_a), None, &editor_hdr);
+    assert_eq!(st, 403, "only the owner may delete the notebook");
+    let (st, _) = s.json_h("POST", &format!("/api/notebooks/{}/shares", nb_a), Some(obj(&[("role", Value::from("editor"))])), &editor_hdr);
+    assert_eq!(st, 403, "only the owner may create share links");
+
+    // the shares list never leaks a token
+    let (st, shares) = s.json_h("GET", &format!("/api/notebooks/{}/shares", nb_a), None, &owner_hdr);
+    assert_eq!(st, 200);
+    let list = shares.get("shares").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(list.len(), 2);
+    for g in &list {
+        assert!(g.str_of("token").is_none(), "tokens are never listed: {:?}", g);
+        assert!(g.str_of("token_sha256").is_none(), "hashes are not exposed either: {:?}", g);
+        assert_eq!(g.str_of("token_prefix").map(|p| p.len()), Some(6));
+    }
+
+    // 6-7. revoke the viewer: the very next request fails, and it cannot reach any endpoint
+    let viewer_id = list.iter().find(|g| g.str_of("role") == Some("viewer")).unwrap().str_of("id").unwrap().to_string();
+    let (st, revoked) = s.json_h("DELETE", &format!("/api/shares/{}", viewer_id), None, &owner_hdr);
+    assert_eq!(st, 200, "{:?}", revoked);
+    for path in [
+        "/api/notebooks".to_string(),
+        format!("/api/notebooks/{}", nb_a),
+        format!("/api/notebooks/{}/sources", nb_a),
+        format!("/api/notebooks/{}/chat", nb_a),
+        format!("/api/notebooks/{}/artifacts", nb_a),
+        format!("/api/notebooks/{}/notes", nb_a),
+    ] {
+        let (st, body) = s.json_h("GET", &path, None, &viewer_hdr);
+        assert_eq!(st, 401, "revoked viewer reached {}: {:?}", path, body);
+    }
+    // the streaming endpoint is a separate dispatch path and must be guarded too
+    let (st, _) = s.raw_h(
+        "POST",
+        &format!("/api/notebooks/{}/chat/stream", nb_a),
+        Some(br#"{"question":"retention"}"#),
+        "application/json",
+        &viewer_hdr,
+    );
+    assert_eq!(st, 401, "revoked viewer reached the stream endpoint");
+    // and the editor link still works, unaffected by the other revocation
+    let (st, _) = s.json_h("GET", &format!("/api/notebooks/{}", nb_a), None, &editor_hdr);
+    assert_eq!(st, 200);
+    // the owner can still read the notebook and its audit trail
+    let (st, nb) = s.json_h("GET", &format!("/api/notebooks/{}", nb_a), None, &owner_hdr);
+    assert_eq!(st, 200);
+    assert_eq!(nb.str_of("title"), Some("Shared"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey E — a video *transcript*. The caption file is supplied by the user; Forge never
+/// downloads media or captions. Citations must carry the spoken timecode, and the capability
+/// page must say plainly that there is no visual/frame analysis.
+#[test]
+fn journey_e_transcript_cites_timecodes_and_refuses_visual_claims() {
+    let dir = tempdir("journey-e");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Briefing"))])));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    let bytes = std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/lecture.vtt")).unwrap();
+    let (st, body) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=lecture.vtt", nb_id),
+        Some(&bytes),
+        "application/octet-stream",
+    );
+    assert_eq!(st, 201, "{}", body);
+    let up = json::parse(&body).unwrap();
+    assert_eq!(up.str_of("kind"), Some("transcript"));
+    assert_eq!(up.get("chunk_count").and_then(|c| c.as_f64()), Some(3.0));
+
+    // The cue offsets are structure, not decoration: every passage carries a timestamp locator.
+    let (st, chunks) = s.json("GET", &format!("/api/notebooks/{}/chunks", nb_id), None);
+    assert_eq!(st, 200);
+    let list = chunks.get("chunks").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(list.len(), 3);
+    let stamps: Vec<u64> = list
+        .iter()
+        .map(|c| c.get("locator").and_then(|l| l.get("at_ms")).and_then(|m| m.as_f64()).unwrap_or(-1.0) as u64)
+        .collect();
+    assert!(stamps.contains(&42_000), "expected a 00:42 cue: {:?}", stamps);
+
+    // A question about the statement at 00:42 must cite 00:42.
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("what is the retention window for customer records"))])),
+    );
+    assert_eq!(st, 200);
+    let citations = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!citations.is_empty(), "no citation: {:?}", answer);
+    let first = &citations[0];
+    assert_eq!(first.str_of("locator_label"), Some("00:42"), "{:?}", first);
+    assert_eq!(first.get("locator").and_then(|l| l.str_of("kind")), Some("timestamp"));
+    assert!(answer.str_of("answer").unwrap_or("").contains("thirty"), "{:?}", answer.str_of("answer"));
+
+    // The evidence is the cue text itself, so a viewer can show what was said.
+    let src_id = first.str_of("source_id").unwrap().to_string();
+    let (st, src) = s.json("GET", &format!("/api/sources/{}", src_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(src.str_of("kind"), Some("transcript"));
+
+    // Visual analysis is not available, and the capability page says so instead of implying it.
+    let (_, caps) = s.json("GET", "/api/capabilities", None);
+    let video = caps.get("sources").and_then(|s| s.get("video")).unwrap();
+    assert_eq!(video.str_of("status"), Some("unsupported"));
+    let video_text = json::to_string(video);
+    assert!(video_text.contains("no video ingestion"), "{:?}", video);
+    // and nothing anywhere claims frame analysis
+    assert!(video_text.contains("no frame decoding"), "{:?}", video);
+    assert!(!json::to_string(&caps).to_lowercase().contains("visual analysis: supported"));
+    let transcript = caps.get("sources").and_then(|s| s.get("transcript")).unwrap();
+    assert_eq!(transcript.str_of("status"), Some("supported"));
+    assert!(transcript.str_of("note").unwrap_or("").contains("does not analyse frames"), "{:?}", transcript);
+
+    // A video file is not a source: uploading one is refused with a reason, not indexed as text.
+    let (st, refused) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=clip.mp4", nb_id),
+        Some(&[0u8, 0, 0, 0x18, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm']),
+        "application/octet-stream",
+    );
+    assert_eq!(st, 422, "a video must be refused as a source: {}", refused);
+    let refusal = json::parse(&refused).unwrap();
+    assert_eq!(refusal.str_of("code"), Some("unsupported_source_kind"));
+    assert!(refusal.str_of("error").unwrap_or("").contains("transcript"), "{:?}", refusal);
+    let (st, sources) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(sources.get("sources").and_then(|s| s.as_arr()).map(|a| a.len()), Some(1));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Journey I — research discovery. Forge queries no search engine (there is none configured,
+/// and scraping results would be neither authorised nor honest). What it does: reads the links
+/// of seed pages the user chose, reports each candidate with its provenance, imports the ones
+/// the user selects, and builds a report whose references are the real pages.
+#[test]
+fn journey_i_discovery_offers_provenanced_candidates_and_exports_a_report() {
+    let _guard = URL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FORGE_FETCH_ALLOW_PRIVATE", "1");
+
+    let page_a: &'static str = "<html><head><title>Alpha study</title></head><body>\
+        <p>Retrieval quality depends on the ranking function, and the ranking function is trained on click logs.</p>\
+        </body></html>";
+    let page_b: &'static str = "<html><head><title>Beta note</title></head><body>\
+        <p>A citation check rejects any answer whose quoted span is not present in the source.</p>\
+        </body></html>";
+    let port_a = start_origin(page_a);
+    let port_b = start_origin(page_b);
+    let seed_html: &'static str = Box::leak(
+        format!(
+            "<html><head><title>Reading list</title></head><body>\
+             <a href=\"http://127.0.0.1:{}/alpha\">Alpha study</a>\
+             <a href=\"http://127.0.0.1:{}/beta\">Beta note</a>\
+             <a href=\"http://127.0.0.1:{}/talk.mp4\">Recorded talk</a>\
+             </body></html>",
+            port_a, port_b, port_a
+        )
+        .into_boxed_str(),
+    );
+    let port_seed = start_origin(seed_html);
+    let dir = tempdir("journey-i");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Discovery"))])));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    // 1-3. one seed page, twice, yields candidates from two independent origins — and says so.
+    let seed = format!("http://127.0.0.1:{}/list", port_seed);
+    let (st, crawl) = s.json(
+        "POST",
+        "/api/discovery/crawl",
+        Some(obj(&[("seed_urls", Value::Arr(vec![Value::from(seed.as_str())])), ("limit", Value::from(10.0))])),
+    );
+    assert_eq!(st, 200, "{:?}", crawl);
+    assert!(crawl.get("searched_engine").map(|v| v.is_null()).unwrap_or(false),
+        "no engine may be claimed: {:?}", crawl.get("searched_engine"));
+    assert!(crawl.str_of("note").unwrap_or("").contains("does not query a search engine"), "{:?}", crawl);
+    let candidates = crawl.get("candidates").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(candidates.len(), 2, "media links must not be offered as pages: {:?}", candidates);
+    assert_eq!(crawl.get("candidate_hosts").and_then(|h| h.as_f64()), Some(2.0));
+    for c in &candidates {
+        assert_eq!(c.str_of("from_url"), Some(seed.as_str()), "provenance is mandatory: {:?}", c);
+        assert!(!c.str_of("url").unwrap_or("").ends_with(".mp4"));
+    }
+    let seed_report = crawl.get("seeds").and_then(|x| x.as_arr()).and_then(|a| a.first()).cloned().unwrap();
+    assert_eq!(seed_report.get("status").and_then(|v| v.as_f64()), Some(200.0));
+    assert_eq!(seed_report.str_of("title"), Some("Reading list"));
+    assert!(crawl.get("warnings").and_then(|w| w.as_arr()).map(|w| w.iter().any(|x| x.as_str().unwrap_or("").contains("media"))).unwrap_or(false));
+
+    // 4-5. the user opens/imports the two candidates they want.
+    for c in &candidates {
+        let url = c.str_of("url").unwrap().to_string();
+        let (st, body) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/sources/url", nb_id),
+            Some(obj(&[("url", Value::from(url.as_str()))])),
+        );
+        assert_eq!(st, 201, "importing {} failed: {:?}", url, body);
+    }
+
+    // 6-7. a report whose claims carry citations that resolve to the imported pages.
+    let (st, art) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[
+            ("kind", Value::from("report")),
+            ("topic", Value::from("retrieval and citation")),
+        ])),
+    );
+    assert_eq!(st, 201, "{:?}", art);
+    let art_id = art.str_of("id").unwrap().to_string();
+    let payload = art.get("payload").cloned().unwrap();
+    let sections = payload.get("sections").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+    assert!(!sections.is_empty(), "{:?}", payload);
+    let mut cited_titles: Vec<String> = Vec::new();
+    for sec in &sections {
+        for pt in sec.get("points").and_then(|p| p.as_arr()).cloned().unwrap_or_default() {
+            let cit = pt.get("citation").cloned().unwrap_or(Value::Null);
+            assert!(cit.str_of("quote").is_some(), "a point without a citation: {:?}", pt);
+            cited_titles.push(cit.str_of("source_title").unwrap_or("").to_string());
+        }
+    }
+    assert!(cited_titles.iter().any(|t| t == "Alpha study"), "{:?}", cited_titles);
+    assert!(cited_titles.iter().any(|t| t == "Beta note"), "{:?}", cited_titles);
+
+    // 8. the report exports, and the export names the real sources rather than inventing any.
+    let (st, md) = s.raw("GET", &format!("/api/artifacts/{}/export?format=md", art_id), None, "text/markdown");
+    assert_eq!(st, 200);
+    assert!(md.contains("**Sources**"), "{}", md);
+    assert!(md.contains("Alpha study"), "{}", md);
+    assert!(md.contains("Beta note"), "{}", md);
+    assert!(md.contains("Retrieval quality depends on the ranking function"), "the quoted span must survive export: {}", md);
+    // every reference listed in the export is a source that exists in this notebook
+    let (_, sources) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let titles: Vec<String> = sources
+        .get("sources")
+        .and_then(|x| x.as_arr())
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|x| x.str_of("title").unwrap_or("").to_string())
+        .collect();
+    assert_eq!(titles.len(), 2, "{:?}", titles);
+    for line in md.lines().filter(|l| l.starts_with("- ") && l.contains(" (html,")) {
+        let title = line.trim_start_matches("- ").split(" (html,").next().unwrap_or("");
+        assert!(titles.iter().any(|t| t == title), "export cites an unknown source: {}", line);
+    }
+
+    std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+    std::fs::remove_dir_all(&dir).ok();
 }

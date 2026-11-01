@@ -1,9 +1,19 @@
 # Security model
 
-Forge is a **single-operator** application. It has no login, so the network
-boundary *is* the trust boundary: run it on `127.0.0.1`, or behind your own
-authenticated reverse proxy. This is stated rather than hidden — there is no
-"secure multi-user mode".
+Forge is a **single-operator** application with an optional access gate.
+
+* **Default (no `data/owner.token`):** there is no authentication, so the network boundary *is*
+  the trust boundary. Run it on `127.0.0.1`, or behind your own authenticated reverse proxy.
+  `GET /api/auth` and the header badge say `single-user` explicitly.
+* **Enforced:** `POST /api/auth/owner-token` stores a token (SHA-256 only, file mode `0600`).
+  Every route then requires `Authorization: Bearer`/`X-Forge-Token`, except `GET /api/capabilities`
+  and `GET /api/auth` — which a client needs in order to learn what it may do, and which read no
+  notebook, source, chunk or count. A share link (`X-Forge-Share`) is bound to one notebook and
+  one role (`viewer` = read/ask, `editor` = +write); `manage` actions are owner-only. Revocation
+  is checked per request.
+
+There are still no user accounts, no groups, no audit log and no rate limiting on token attempts;
+those are non-goals, listed at the bottom rather than implied.
 
 ## Threats and controls
 
@@ -25,16 +35,27 @@ authenticated reverse proxy. This is stated rather than hidden — there is no
 | Malformed JSON / unknown routes | strict parser → `400 bad_json`; unknown route → `404 not_found` with a code | e2e `rejects_bad_input_and_dangerous_urls` |
 | Zip bombs / hostile OOXML | entries are read through the central directory with declared sizes; the ZIP reader rejects ZIP64, unknown compression and out-of-bounds offsets; DOCX/PPTX/XLSX extraction reads only named parts (not every entry) | `ingest::zip::rejects_non_zip_and_garbage`, `ingest::ooxml::non_ooxml_is_rejected_clearly` |
 | Data corruption / partial writes | every mutation rewrites a temp file and `rename`s it; a corrupt `db.json` decodes to an empty database instead of crashing | `store` tests incl. corrupt-db safety |
+| Unauthenticated access to a protected instance | when an owner token exists, `Api::authenticate` runs before dispatch; missing/invalid credentials are `401 unauthorized`. The action a route needs is derived from method+path in one place, and anything unmatched defaults to `write` (never to public) | `auth` (8 tests), e2e `journey_j_share_links_are_scoped_by_role_and_revocable` |
+| A share link reading another notebook | the link's notebook id is compared against the notebook the route actually acts on (resolved through sources/notes/artifacts/jobs/shares, not just the URL), and `GET /api/notebooks` is filtered to that one notebook | same test: other notebook → `403 not_in_share`, list length 1 |
+| A viewer editing, or an editor deleting | `auth::allow` maps role+action: viewer read only, editor read+write, `manage` owner only | same test: 403 `forbidden_role` on ingest, PATCH, share creation, delete |
+| Leaked share token from a dump | only `token_sha256` and a 6-char prefix are stored; the plaintext is returned once at creation and never listed | same test: the shares list contains no `token`, no hash, 6-char prefixes only |
+| Timing attack on a credential compare | `auth::token_eq` compares all bytes of the hex digest | `auth::tests::tokens_are_compared_in_constant_time` |
+| Revoked link still working | grants are re-read on every request and `revoked_at` is honoured; the streaming endpoint is guarded before its own dispatch | same test: 6 endpoints + the stream return 401 after revocation |
+| Media files quoted as evidence | `ingest::unsupported_media` refuses video/audio/image uploads as sources with a reason instead of lossy-decoding them | `journey_e_…` (422 `unsupported_source_kind`) |
+| Redirect-based SSRF in discovery | discovery reuses `fetch::fetch`, which re-validates and pins DNS at every hop | `fetch` redirect test; `discovery::tests` for URL resolution |
 | Clickjacking / MIME sniffing / referrer leaks | `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, CSP with `object-src 'none'`, `base-uri 'none'`, `form-action 'self'` | `http::responses_carry_security_headers` |
 
 ## Deliberate non-goals
 
-* **No authentication.** Not a bug: adding a half-baked login would imply a
-  security property that is not tested. Bind to localhost or use your proxy.
-* **No rate limiting.** Single operator, local socket.
+* **No accounts, sessions or groups.** One owner token plus per-notebook links is the whole
+  model; a half-built login would imply properties this code does not test (`DECISIONS.md` D20).
+* **No audit log.** Revocation stops the next request and says nothing about the last one.
+* **No rate limiting.** Single operator, local socket — including on token attempts.
+* **No CSRF tokens.** State travels in headers, not cookies, so there is no ambient credential
+  for a cross-site request to ride on.
 * **No sandboxing of parsed files.** Parsers are pure Rust over byte slices; the
   process does not execute document content.
-* **No TLS.** Therefore no URL fetching and no remote providers.
+* **No TLS client.** `https://` fetching shells out to `curl`; there are no remote providers.
 
 ## Residual risks
 

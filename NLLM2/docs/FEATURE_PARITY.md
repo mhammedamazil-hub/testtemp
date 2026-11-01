@@ -33,23 +33,23 @@ that way are marked **RE-OBSERVED (second-hand)**.
 
 | Capability | NotebookLM (reference) | Forge | Parity |
 |---|---|---|---|
-| Upload sources (PDF, docs, text, URLs, YouTube, audio) | PDF, Docs, Slides, text, URLs, YouTube, audio | PDF, DOCX, PPTX, XLSX, MD, HTML, CSV/TSV, pasted text | **PARTIAL** — URL/YouTube/audio BLOCKED (no TLS, no ASR) |
+| Upload sources (PDF, docs, text, URLs, YouTube, audio) | PDF, Docs, Slides, text, URLs, YouTube, audio | PDF, DOCX, PPTX, XLSX, MD, HTML, CSV/TSV, pasted text, WebVTT/SRT transcripts; URLs via `curl` | **PARTIAL** — YouTube/audio need an authorised extractor and ASR (UNSUPPORTED, stated); video/audio/image files are refused as sources with a reason |
 | Source-grounded chat | Yes | Yes, extractive | **PARTIAL** — grounded and cited, but no generative synthesis |
 | Inline citations that open the source | Yes | Yes, opens viewer at page/paragraph/slide/row, highlights span | **EQUIVALENT in kind** (VERIFIED for Forge) |
 | "Not in your sources" answers | Yes | Yes — abstains below evidence floor | **EQUIVALENT in kind** (VERIFIED for Forge) |
 | Notes | Yes | Yes, with source links | **PARTIAL** — no inline citation picker |
-| Saved notes → source | Yes | No | **MISSING** |
+| Saved notes → source | Yes | Yes — `POST /api/notes/:id/to-source` gives the note a real source record and citable paragraphs | **EQUIVALENT in kind** (VERIFIED for Forge, journey D) |
 | FAQ / Study guide | Yes | Yes | **PARTIAL** — deterministic extraction, not generated prose |
 | Briefing doc | Yes | `report` artifact | **PARTIAL** |
 | Audio Overview (two-host podcast) | Yes | `audio_script` (text) only | **BLOCKED** — no TTS/ASR in image |
 | Video Overview | Yes | none | **BLOCKED** |
 | Mind map | Yes | Yes, SVG co-occurrence map | **PARTIAL** |
 | Flashcards / quiz | Yes | Yes, cited, distractors from corpus | **PARTIAL** |
-| Slides / infographic | Yes | none | **NOT STARTED** |
-| Source discovery / "discover sources" | Yes (web search) | none | **BLOCKED** — no network |
-| Sharing / collaboration / multi-user | Yes | none | **MISSING** by design (single operator) |
+| Slides / infographic | Yes | `slides` artifact: quotation deck with per-bullet citations, audience setting, edit/reorder/delete/restore with versioning | **PARTIAL** — no PPTX/PDF renderer (export is Markdown/JSON and says so; PPTX/PDF return 501) |
+| Source discovery / "discover sources" | Yes (web search) | `POST /api/discovery/crawl`: the outbound links of seed pages you choose, each with provenance | **PARTIAL** — no search engine is queried (none is configured, and scraping results would be neither authorised nor honest), so "search the web" itself is UNSUPPORTED |
+| Sharing / collaboration / multi-user | Yes — Viewer/Editor by email; consumer help says an editor may re-share, Enterprise docs say editors cannot (`RESEARCH_LOG.md` 2026-11-01) | owner token + per-notebook share links (`viewer` = read/ask, `editor` = +write; sharing/revocation owner-only, i.e. the stricter official reading), revocation checked per request, hashed tokens shown once | **PARTIAL** — no accounts, groups, presence or live co-editing; Forge's link is a bearer token, whereas the reference link only works for people already shared on the notebook. Those differences are stated, not papered over (journey J) |
 | Mobile app | Yes | responsive PWA | **PARTIAL** — installable, offline shell only |
-| Workspace-level instructions | Yes | stored; not yet injected into answering | **PARTIAL** |
+| Workspace-level instructions | Yes | stored per notebook and returned with every answer (`notebook_instructions`); the extractive engine echoes them but cannot obey a style request it has no model for | **PARTIAL** — recorded and surfaced, not enforced by a model |
 | Provider choice (model) | Google models | BYOK seam; unavailable here | **PARTIAL/BLOCKED** |
 
 ## Protocol-level parity (RE-OBSERVED, second-hand)

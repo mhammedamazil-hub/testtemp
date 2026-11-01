@@ -6,6 +6,7 @@
 pub mod ooxml;
 pub mod pdf;
 pub mod text;
+pub mod transcript;
 pub mod zip;
 
 use crate::domain::Locator;
@@ -133,6 +134,11 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
                 }
             }
         }
+        "transcript" | "vtt" | "srt" => {
+            let raw = decode_text(bytes);
+            let (blocks, warnings) = transcript::blocks(&raw)?;
+            Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
+        }
         "html" | "htm" => {
             let raw = decode_text(bytes);
             let (blocks, warnings) = text::html_blocks(&raw);
@@ -154,6 +160,36 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
             Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
     }
+}
+
+/// Media containers that must never be decoded as text. Returns the refusal reason.
+///
+/// A video or audio file has no text layer; lossy-decoding it produces mojibake that the UI
+/// would otherwise be able to cite as "evidence". Timed transcripts are the supported path.
+pub fn unsupported_media(filename: &str) -> Option<String> {
+    let lower = filename.to_ascii_lowercase();
+    let ext = lower.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    let video = ["mp4", "m4v", "mov", "mkv", "webm", "avi", "flv", "wmv", "mpg", "mpeg", "3gp"];
+    let audio = ["mp3", "m4a", "wav", "flac", "aac", "ogg", "opus", "wma"];
+    let image = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "heic"];
+    if video.contains(&ext) {
+        return Some(
+            "video files are not sources: Forge does not download or decode video and has no frame analysis. \
+             Upload a timed transcript (.vtt/.srt) to cite what was said, or POST the file to /api/media/inspect for container metadata only"
+                .to_string(),
+        );
+    }
+    if audio.contains(&ext) {
+        return Some(
+            "audio files are not sources: no speech-to-text engine is installed, so Forge cannot turn this into citable text. \
+             Supply a transcript instead"
+                .to_string(),
+        );
+    }
+    if image.contains(&ext) {
+        return Some("image sources need OCR, which is not installed; this file was not indexed".to_string());
+    }
+    None
 }
 
 /// UTF-8 with a lossy fallback; strips a UTF-8 BOM.
