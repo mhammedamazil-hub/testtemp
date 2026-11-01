@@ -61,6 +61,13 @@ async function main() {
   check("engine badge filled from capabilities", /engine: extractive/.test($("#engineBadge").textContent));
   check("notebook cards render", $$(".card").length >= 1, `cards=${$$(".card").length}`);
 
+  // --- the library can be searched and sorted (7.1), before anything else exists
+  check("library exposes a search box", !!$("#librarySearch") && !!$("#librarySearch").getAttribute("aria-label"));
+  check("library exposes a sort control", !!$("#librarySort"));
+  const sortValues = $$("#librarySort option").map((o) => o.value);
+  check("sort offers recent, title, created and sources", ["recent", "title", "created", "sources"].every((v) => sortValues.includes(v)),
+    sortValues.join(","));
+
   // --- create a notebook through the form
   const form = $(".new-card form");
   form.querySelector('[name="title"]').value = "UI smoke notebook";
@@ -70,6 +77,44 @@ async function main() {
   const nbId = window.location.hash.split("/")[2];
 
   check("three panes mounted", $$(".pane").length === 3);
+
+  // --- the notebook carries its icon and shows up in search
+  await fetch(`${BASE}/api/notebooks/${nbId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ icon: "📗" }),
+  });
+  window.location.hash = "#/";
+  await wait(600);
+  check("a notebook icon renders in the library", /📗/.test($(".library")?.textContent || ""),
+    $(".library")?.textContent?.slice(0, 120));
+  $("#librarySearch").value = "UI smoke";
+  $("#librarySearch").dispatchEvent(new window.Event("input", { bubbles: true }));
+  await wait(700);
+  check("searching filters the library", /1 matching/.test($("#libraryCount")?.textContent || ""),
+    $("#libraryCount")?.textContent);
+  $("#librarySearch").value = "no-such-notebook-anywhere";
+  $("#librarySearch").dispatchEvent(new window.Event("input", { bubbles: true }));
+  await wait(700);
+  check("an empty search result says what was searched",
+    /Nothing matches/.test($(".library")?.textContent || "") && /source titles/.test($(".library")?.textContent || ""),
+    $(".library")?.textContent?.slice(0, 160));
+  $("#librarySearch").value = "";
+  $("#librarySearch").dispatchEvent(new window.Event("input", { bubbles: true }));
+  await wait(700);
+  check("clearing the search restores the list", $$(".card").length >= 2, `cards=${$$(".card").length}`);
+
+  // --- duplicate copies evidence, not chat history
+  const dupBtn = [...window.document.querySelectorAll(".card button")].find((b) => /Duplicate/.test(b.textContent));
+  check("a notebook can be duplicated from the library", !!dupBtn);
+  dupBtn.click();
+  await wait(900);
+  check("the copy appears with a (copy) suffix", /\(copy\)/.test($(".library")?.textContent || ""),
+    $(".library")?.textContent?.slice(0, 200));
+  const copyCards = $$(".card").filter((c) => /\(copy\)/.test(c.textContent));
+  check("exactly one copy was made", copyCards.length === 1, `copies=${copyCards.length}`);
+  window.location.hash = `#/nb/${nbId}`;
+  await wait(600);
 
   // --- import pasted text
   const ta = $("#pasteText");
@@ -493,6 +538,26 @@ async function main() {
   check("the import warning about the media link was surfaced or explained",
     !/talk\.mp4/.test(discovered));
   fixture.close();
+
+  // --- an EPUB is read in spine order and cites its chapter (§7.2)
+  const epub = fs.readFileSync(path.join(WEB, "../../tests/fixtures/sample.epub"));
+  const epubFile = new window.File([epub], "handbook.epub", { type: "application/epub+zip" });
+  const epubInput = $("#fileInput");
+  Object.defineProperty(epubInput, "files", { value: [epubFile], writable: true });
+  epubInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await wait(1500);
+  const epubSource = $$(".source-item").find((el) => /handbook\.epub/i.test(el.textContent));
+  check("an EPUB is accepted as a source", !!epubSource, $$(".source-item").map((e) => e.textContent).join(" | ").slice(0, 240));
+  check("the EPUB source reports its kind", /epub/.test(epubSource?.textContent || ""), epubSource?.textContent);
+  const askEpub = $(".composer textarea");
+  askEpub.value = "how long are customer records retained";
+  byText(".composer button", "Ask").click();
+  await wait(1200);
+  const epubMsg = $$(".msg.assistant").pop();
+  check("an EPUB citation names the chapter, not just the file", /chapter 2/.test(epubMsg?.textContent || ""),
+    epubMsg?.textContent?.slice(0, 300));
+  await window.openNotebook(window.document.getElementById("app"), nbId);
+  await wait(900);
 
   // --- a supplied caption file becomes a timecode-citing source (Journey E)
   const vtt = fs.readFileSync(path.join(WEB, "../../tests/fixtures/lecture.vtt"));

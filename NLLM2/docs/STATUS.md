@@ -1,7 +1,8 @@
 # Status — Forge (NLLM2)
 
 Last updated: 2026-11-01 (access control + share links, crash-resilient ingestion with retry,
-timed transcripts, discovery from seed pages, slide editing and artifact export).
+timed transcripts, discovery from seed pages, slide editing and artifact export, library
+search/sort/icons/duplicate, EPUB ingestion).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -20,8 +21,8 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **241 passing, 0 failing** (26 `bininspect` + 184 lib + 26 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **127 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **247 passing, 0 failing** (26 `bininspect` + 188 lib + 28 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **138 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -37,10 +38,14 @@ untested it says so.
 | Study difficulty / audience | `difficulty` (easy keeps only definition cards, hard puts cloze recall first) and slide `audience` (executive/technical change the bullets per slide) reach the generator and are recorded on the artifact, not just echoed | `artifacts` tests + e2e journey F/H + 4 UI assertions |
 | Card review marks | `POST /api/artifacts/:id/review` stores known/unknown per card on the artifact (survives restart), returns counts, rejects an unknown card with 422 `unknown_card` | e2e journey F + 5 UI assertions |
 | Artifact editing and export | `PATCH /api/artifacts/:id` versions slide edits/reorder/delete/restore; `GET /api/artifacts/:id/export?format=md/json/svg` returns the exact bytes (SVG only for concept maps, PPTX/PDF refused with 501 `format_unsupported` rather than faking a file) | `export` (7 tests) + e2e journeys G/H + 7 UI assertions |
+| Library search, sort, icons, duplicate (§7.1) | `GET /api/notebooks?q=&sort=&archived=` searches title, description, tags **and source titles**, sorts by recent activity / title / newest / most sources, and reports `last_activity` (the newest timestamp of the notebook, its sources, notes and artifacts, so "recent" means something happened). A notebook carries a short `icon` (capped at 4 chars). `POST /api/notebooks/:id/duplicate` copies sources (ready only), chunks, grids, notes and artifacts with fresh ids — **not** chat history — and says so | e2e `library_search_sort_icons_and_duplicate_are_real` + 12 UI assertions |
+| EPUB (§7.2) | `.epub` read through the existing ZIP reader: `META-INF/container.xml` → OPF → **spine order** (not filename order), chapter title and position in the locator (`chapter 2 · The retention model`), images counted not read, a package without a spine falls back to filename order **and says so** | `ingest::epub` (4 tests) + e2e `epub_sources_are_read_in_spine_order_and_cite_their_chapter` + 3 UI assertions |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
 | CSV/TSV | RFC 4180 (quotes, embedded newlines, delimiter sniffing, decimal comma) → row + cell locators | `tables::csv_rows` + `parse_delimited` |
+| VTT/SRT transcripts | cue-level millisecond offsets → `timestamp` locators | `ingest::transcript` |
+| EPUB | spine-ordered chapters → `chapter` locators | `ingest::epub` |
 | Grounded answering | extractive, citation-verified, abstains | `grounded`, `api` e2e |
 | Artifacts | flashcards, quiz, report, mindmap, study guide, FAQ, summary, narration script | `artifacts` tests + UI smoke |
 | Persistence | JSON store, atomic replace, backups, corruption safety | `store` tests |
@@ -58,7 +63,7 @@ untested it says so.
 
 ```
 tables          22
-ingest          19
+ingest          23
 notebooklm      15
 grounded        12
 fetch           11
@@ -87,12 +92,12 @@ apk              3
 inflate          2
 elf              2
 --------------------
-lib total      184
+lib total      188
 bininspect      26   (separate crate)
-e2e (HTTP)      26   (journeys A-K + format/security tests)
+e2e (HTTP)      28   (journeys A-K + format/library/security tests)
 server           5
 ====================
-total          241
+total          247
 ```
 
 ## Not available, with reasons
@@ -135,8 +140,8 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 
 ## Immediate next steps
 
-1. EPUB ingestion — the ZIP reader already exists; needs XHTML container mapping.
-2. Conversation export as Markdown; artifact re-generation on source change.
+1. Conversation export as Markdown; artifact re-generation when a source changes.
+2. GitHub README/issues and RSS ingestion (both reachable through the existing fetch path).
 3. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
 4. Wire a TLS client (not just the `curl` subprocess) so URL ingestion and remote providers
    stop depending on an external binary.

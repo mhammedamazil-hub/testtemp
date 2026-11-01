@@ -286,3 +286,11 @@ table.grid tbody tr:hover { background: var(--bg-elev2); }
 .job[data-status="done"] { border-left-color: var(--ok); }
 
 .export-body { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+
+/* Library: search, sort, and a visual identifier per notebook. */
+.library input[type="search"] { flex: 1 1 260px; min-width: 200px; }
+.nb-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px; flex: 0 0 26px;
+  background: var(--bg-elev2); border: 1px solid var(--line); font-size: 14px;
+}

@@ -2548,3 +2548,185 @@ fn journey_i_discovery_offers_provenanced_candidates_and_exports_a_report() {
     std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// §7.1 — the library is a real list: it can be searched (including by source name), sorted, and
+/// a notebook can be duplicated. "Recent" means real activity, not a rewritten row.
+#[test]
+fn library_search_sort_icons_and_duplicate_are_real() {
+    let dir = tempdir("library");
+    let s = Server::start(dir.clone());
+
+    let (_, a) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[
+            ("title", Value::from("Policy handbook")),
+            ("description", Value::from("retention rules")),
+            ("icon", Value::from("📘")),
+        ])),
+    );
+    let a_id = a.str_of("id").unwrap().to_string();
+    let (_, b) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Biology"))])));
+    let b_id = b.str_of("id").unwrap().to_string();
+    let (_, c) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Zebra notes"))])));
+    let c_id = c.str_of("id").unwrap().to_string();
+
+    // the icon is stored, returned, and capped (it is a visual identifier, not a title)
+    let (st, nb) = s.json("GET", &format!("/api/notebooks/{}", a_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(nb.str_of("icon"), Some("📘"));
+    let (st, _) = s.json("PATCH", &format!("/api/notebooks/{}", c_id), Some(obj(&[("icon", Value::from("zzzzzzzzzz"))])));
+    assert_eq!(st, 200);
+    let (_, z) = s.json("GET", &format!("/api/notebooks/{}", c_id), None);
+    assert_eq!(z.str_of("icon"), Some("zzzz"), "icon must be capped: {:?}", z.str_of("icon"));
+
+    // a source title is searchable: the notebook that contains a document is the one you want
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", b_id),
+        Some(obj(&[("title", Value::from("Lecture on photosynthesis")), ("text", Value::from("Chlorophyll absorbs light."))])),
+    );
+
+    let (st, found) = s.json("GET", "/api/notebooks?q=photosynthesis", None);
+    assert_eq!(st, 200);
+    let hits: Vec<String> = found
+        .get("notebooks")
+        .and_then(|n| n.as_arr())
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|n| n.str_of("title").unwrap_or("").to_string())
+        .collect();
+    assert_eq!(hits, vec!["Biology".to_string()], "source-title search: {:?}", hits);
+    assert_eq!(found.str_of("query"), Some("photosynthesis"));
+
+    let (_, by_desc) = s.json("GET", "/api/notebooks?q=RETENTION", None);
+    assert_eq!(by_desc.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.len()), Some(1), "case-insensitive");
+
+    let (_, none) = s.json("GET", "/api/notebooks?q=nothing-matches-this", None);
+    assert_eq!(none.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.len()), Some(0));
+
+    // sorting: title ascending, and the reported sort is echoed so the UI can trust it
+    let (_, sorted) = s.json("GET", "/api/notebooks?sort=title", None);
+    let titles: Vec<String> = sorted
+        .get("notebooks")
+        .and_then(|n| n.as_arr())
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|n| n.str_of("title").unwrap_or("").to_string())
+        .collect();
+    assert_eq!(titles, vec!["Biology".to_string(), "Policy handbook".to_string(), "Zebra notes".to_string()]);
+    assert_eq!(sorted.str_of("sort"), Some("title"));
+
+    // last_activity reflects the ingest, so "recent" is not just creation order
+    let (_, recent) = s.json("GET", "/api/notebooks?sort=recent", None);
+    let first = recent.get("notebooks").and_then(|n| n.as_arr()).and_then(|a| a.first()).cloned().unwrap();
+    assert_eq!(first.str_of("title"), Some("Biology"), "the notebook that just gained a source is the most recent: {:?}", first);
+    assert!(first.str_of("last_activity").unwrap_or("") >= first.str_of("updated_at").unwrap_or(""));
+
+    // duplicate copies evidence but not chat history
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", b_id),
+        Some(obj(&[("question", Value::from("chlorophyll absorbs light"))])),
+    );
+    let (st, dup) = s.json("POST", &format!("/api/notebooks/{}/duplicate", b_id), None);
+    assert_eq!(st, 201, "{:?}", dup);
+    let dup_id = dup.str_of("id").unwrap().to_string();
+    assert_eq!(dup.str_of("title"), Some("Biology (copy)"));
+    assert_eq!(dup.get("source_count").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(dup.get("conversations_copied").and_then(|v| v.as_f64()), Some(0.0));
+
+    let (st, copy) = s.json("GET", &format!("/api/notebooks/{}", dup_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(copy.str_of("icon"), Some(""), "no icon on the original, none on the copy");
+    let copy_sources = copy.get("sources").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(copy_sources.len(), 1);
+    let copy_src = copy_sources[0].str_of("id").unwrap().to_string();
+    assert_ne!(copy_src, b_id, "ids are new, not shared with the original");
+
+    // the copy answers from its own chunks, and cites the same source title
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", dup_id),
+        Some(obj(&[("question", Value::from("chlorophyll absorbs light"))])),
+    );
+    assert_eq!(st, 200);
+    assert!(answer.str_of("answer").unwrap_or("").to_lowercase().contains("chlorophyll"), "{:?}", answer.str_of("answer"));
+    let (_, copy_convs) = s.json("GET", &format!("/api/notebooks/{}/conversations", dup_id), None);
+    assert_eq!(copy_convs.get("conversations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(1),
+        "only the question asked in the copy");
+
+    // and the original is untouched
+    let (_, orig) = s.json("GET", &format!("/api/notebooks/{}", b_id), None);
+    assert_eq!(orig.get("sources").and_then(|s| s.as_arr()).map(|a| a.len()), Some(1));
+    let (_, orig_convs) = s.json("GET", &format!("/api/notebooks/{}/conversations", b_id), None);
+    assert_eq!(orig_convs.get("conversations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(1));
+
+    // unknown notebook ids are 404, not an empty copy
+    let (st, _) = s.json("POST", "/api/notebooks/nb-nope/duplicate", None);
+    assert_eq!(st, 404);
+
+    // archived filtering is honoured
+    s.json("PATCH", &format!("/api/notebooks/{}", c_id), Some(obj(&[("archived", Value::Bool(true))])));
+    let (_, active) = s.json("GET", "/api/notebooks?archived=false", None);
+    assert!(active.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.iter().all(|n| n.str_of("title") != Some("Zebra notes"))).unwrap_or(false));
+    let (_, archived) = s.json("GET", "/api/notebooks?archived=true", None);
+    assert_eq!(archived.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.len()), Some(1));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// §7.2 — EPUB. Chapters must be read in spine order (which can differ from filename order), and
+/// a citation must point at the chapter and its position rather than at "the book".
+#[test]
+fn epub_sources_are_read_in_spine_order_and_cite_their_chapter() {
+    let dir = tempdir("epub");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Handbook"))])));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let bytes = std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sample.epub")).unwrap();
+    let (st, body) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=handbook.epub", nb_id),
+        Some(&bytes),
+        "application/epub+zip",
+    );
+    assert_eq!(st, 201, "{}", body);
+    let up = json::parse(&body).unwrap();
+    assert_eq!(up.str_of("kind"), Some("epub"));
+    let warnings = up.get("warnings").and_then(|w| w.as_arr()).cloned().unwrap_or_default();
+    assert!(warnings.iter().any(|w| w.as_str().unwrap_or("").contains("image")), "{:?}", warnings);
+
+    let (_, chunks) = s.json("GET", &format!("/api/notebooks/{}/chunks", nb_id), None);
+    let list = chunks.get("chunks").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!list.is_empty(), "{:?}", chunks);
+    for c in &list {
+        let loc = c.get("locator").cloned().unwrap_or(Value::Null);
+        assert_eq!(loc.str_of("kind"), Some("chapter"), "{:?}", loc);
+        assert!(loc.str_of("section").unwrap_or("").contains(" · "), "chapter title missing: {:?}", loc);
+    }
+    let first_page = list[0].get("locator").and_then(|l| l.get("page")).and_then(|p| p.as_f64());
+    assert_eq!(first_page, Some(1.0), "the spine's first document is chapter 1");
+
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("how long are customer records retained"))])),
+    );
+    assert_eq!(st, 200);
+    let cit = answer.get("citations").and_then(|c| c.as_arr()).and_then(|a| a.first()).cloned().unwrap_or(Value::Null);
+    assert!(cit.str_of("locator_label").unwrap_or("").contains("chapter 2"), "citation: {:?}", cit);
+    assert!(cit.str_of("locator_label").unwrap_or("").contains("retention model"), "citation: {:?}", cit);
+
+    // a corrupt .epub is refused with a reason, not indexed as text
+    let (st, bad) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=broken.epub", nb_id),
+        Some(b"definitely not a zip archive"),
+        "application/epub+zip",
+    );
+    assert_eq!(st, 422, "{}", bad);
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -34,8 +34,12 @@ bug, or a limitation for a feature.
   read.
 * **PPTX.** Slide text only; speaker notes are counted in warnings but not indexed;
   charts and SmartArt are skipped.
-* **XLSX.** First worksheet only; formulas are not evaluated (cached values are
-  used); dates appear as serial numbers, not formatted dates.
+* **XLSX.** See the grid path in `tables.rs`; the legacy row path reads the first sheet only.
+  Formulas are not evaluated (cached values are used); dates appear as serial numbers.
+* **EPUB.** Follows the OPF spine and reads XHTML content documents. Not handled: `linear="no"`
+  items are read anyway (they are part of the book but not the main flow), page-break markers,
+  footnotes referenced by `epub:type`, DRM (an encrypted EPUB will fail to unzip with a clear
+  error), and CSS-driven hidden text (the HTML scanner has no layout engine).
 * **HTML.** Regex-free tag scanner; script/style removed; no CSS-driven visibility
   logic, so hidden text may be indexed.
 * **CSV.** Quote handling covers doubled quotes and embedded commas/newlines; no

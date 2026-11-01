@@ -3,6 +3,7 @@
 //! Each adapter returns `Block`s that carry a structural `Locator`, so a
 //! citation can always point at a page/row/paragraph instead of a fuzzy match.
 
+pub mod epub;
 pub mod ooxml;
 pub mod pdf;
 pub mod text;
@@ -139,6 +140,7 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
             let (blocks, warnings) = transcript::blocks(&raw)?;
             Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
+        "epub" => epub::epub(bytes),
         "html" | "htm" => {
             let raw = decode_text(bytes);
             let (blocks, warnings) = text::html_blocks(&raw);

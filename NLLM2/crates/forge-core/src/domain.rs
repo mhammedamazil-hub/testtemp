@@ -81,6 +81,7 @@ pub enum SourceKind {
     /// A timed caption file the user supplied (`.vtt` / `.srt`). Not video: Forge never
     /// downloads media or captions on its own.
     Transcript,
+    Epub,
 }
 
 impl SourceKind {
@@ -97,6 +98,7 @@ impl SourceKind {
             SourceKind::Url => "url",
             SourceKind::Note => "note",
             SourceKind::Transcript => "transcript",
+            SourceKind::Epub => "epub",
         }
     }
 
@@ -113,6 +115,7 @@ impl SourceKind {
             "url" => SourceKind::Url,
             "note" => SourceKind::Note,
             "transcript" | "vtt" | "srt" | "captions" => SourceKind::Transcript,
+            "epub" => SourceKind::Epub,
             _ => return None,
         })
     }
@@ -135,6 +138,8 @@ impl SourceKind {
             SourceKind::Csv
         } else if lower.ends_with(".vtt") || lower.ends_with(".srt") {
             SourceKind::Transcript
+        } else if lower.ends_with(".epub") {
+            SourceKind::Epub
         } else {
             SourceKind::Text
         }
@@ -145,7 +150,7 @@ impl SourceKind {
 /// can navigate to the exact page/row/paragraph instead of a loose text match.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Locator {
-    /// "page" | "paragraph" | "row" | "section" | "line" | "cell" | "slide" | "timestamp"
+    /// "page" | "paragraph" | "row" | "section" | "chapter" | "line" | "cell" | "slide" | "timestamp"
     pub kind: String,
     pub page: Option<u32>,
     pub paragraph: Option<u32>,
@@ -249,6 +254,9 @@ impl Locator {
                 None => format!("row {}", self.row.unwrap_or(0)),
             },
             "section" => format!("section {}", self.section.clone().unwrap_or_default()),
+            // EPUB chapters carry "position · title" in `section`, so the label reads
+            // "chapter 2 · The retention model".
+            "chapter" => format!("chapter {}", self.section.clone().unwrap_or_default()),
             "cell" => {
                 let cell = self.cell.clone().unwrap_or_default();
                 if cell.contains('!') {
@@ -319,6 +327,8 @@ impl Locator {
 pub struct Notebook {
     pub id: String,
     pub title: String,
+    /// A short visual identifier (emoji or one or two characters). Free text, capped on write.
+    pub icon: String,
     pub description: String,
     pub instructions: String,
     pub tags: Vec<String>,

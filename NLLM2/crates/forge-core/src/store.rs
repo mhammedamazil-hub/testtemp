@@ -207,6 +207,7 @@ fn nb_json(n: &Notebook) -> Value {
     let mut m = BTreeMap::new();
     m.insert("id".into(), Value::from(n.id.as_str()));
     m.insert("title".into(), Value::from(n.title.as_str()));
+    m.insert("icon".into(), Value::from(n.icon.as_str()));
     m.insert("description".into(), Value::from(n.description.as_str()));
     m.insert("instructions".into(), Value::from(n.instructions.as_str()));
     m.insert("tags".into(), json_str_list(&n.tags));
@@ -220,6 +221,8 @@ fn nb_from(v: &Value) -> Notebook {
     Notebook {
         id: s(v, "id"),
         title: s(v, "title"),
+        // Older databases have no icon; an absent field is "", not a decode error.
+        icon: s(v, "icon"),
         description: s(v, "description"),
         instructions: s(v, "instructions"),
         tags: parse_str_list(v.get("tags")),
@@ -620,6 +623,7 @@ mod tests {
                 db.notebooks.push(Notebook {
                     id: "nb-1".into(),
                     title: "Research".into(),
+                    icon: String::new(),
                     description: String::new(),
                     instructions: String::new(),
                     tags: vec!["x".into()],

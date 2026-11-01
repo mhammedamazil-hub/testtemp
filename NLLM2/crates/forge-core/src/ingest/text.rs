@@ -132,6 +132,13 @@ pub fn html_blocks(raw: &str) -> (Vec<Block>, Vec<String>) {
                         let mut head = String::new();
                         for (_, c2) in chars.by_ref() {
                             if c2 == '<' {
+                                // the '<' we just consumed opens the closing tag; drop the rest
+                                // of it, otherwise "/h1>" would be emitted as text
+                                for (_, c3) in chars.by_ref() {
+                                    if c3 == '>' {
+                                        break;
+                                    }
+                                }
                                 break;
                             }
                             head.push(c2);
@@ -407,6 +414,21 @@ pub fn html_links(raw: &str) -> Vec<(String, String)> {
         let text = html_blocks(inner).0.into_iter().map(|b| b.text).collect::<Vec<_>>().join(" ");
         out.push((href.trim().to_string(), decode_entities(&text).trim().to_string()));
         at = close.max(tag_end + 1);
+    }
+    out
+}
+
+/// Drop tags, keep the text between them. Used for inline element bodies (titles, anchors).
+pub fn strip_tags(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut depth = 0usize;
+    for c in raw.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' if depth > 0 => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
     }
     out
 }

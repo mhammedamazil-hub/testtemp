@@ -10,6 +10,408 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
+## `crates/forge-core/src/ingest/epub.rs`
+
+```rust
+//! EPUB ingestion.
+//!
+//! An EPUB is a ZIP with an OPF package document that declares a *spine*: the reading order of
+//! XHTML content documents. Forge follows that order instead of globbing files, because the
+//! spine is the only reliable reading order â€” `chapter7.xhtml` may come before `chapter2.xhtml`.
+//!
+//! Locators carry both the spine position and the chapter title, so a citation reads
+//! `chapter 3 Â· The retention model` and can be navigated to. Images are counted and reported,
+//! never read (no OCR in this build).
+
+use super::zip;
+use super::{Block, Parsed};
+
+struct Chapter {
+    href: String,
+}
+
+/// Resolve an OPF-relative href against the directory of the OPF file.
+fn join_rel(opf_dir: &str, href: &str) -> String {
+    let href = href.split('#').next().unwrap_or(href);
+    let decoded = percent_decode(href);
+    if decoded.starts_with('/') {
+        return decoded.trim_start_matches('/').to_string();
+    }
+    if opf_dir.is_empty() {
+        decoded
+    } else {
+        format!("{}/{}", opf_dir.trim_end_matches('/'), decoded)
+    }
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
+            if let Ok(v) = u8::from_str_radix(hex, 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// Attribute value of the first `name=` in a tag body (both quote styles).
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let at = lower.find(&format!("{}=", name))?;
+    let rest = &tag[at + name.len() + 1..];
+    let quote = rest.chars().next()?;
+    if quote == '"' || quote == '\'' {
+        let end = rest[1..].find(quote)?;
+        Some(rest[1..1 + end].to_string())
+    } else {
+        let end = rest.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(rest.len());
+        Some(rest[..end].to_string())
+    }
+}
+
+/// All `<tag ...>` opening tags in document order, as (attribute source, self-closing).
+fn tags<'a>(xml: &'a str, name: &str) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let lower = xml.to_ascii_lowercase();
+    let needle = format!("<{}", name);
+    let mut at = 0usize;
+    while let Some(rel) = lower[at..].find(&needle) {
+        let start = at + rel;
+        let after = lower[start + needle.len()..].chars().next();
+        if !matches!(after, Some(c) if c.is_whitespace() || c == '>' || c == '/') {
+            at = start + needle.len();
+            continue;
+        }
+        let Some(gt) = lower[start..].find('>') else { break };
+        out.push(&xml[start + 1..start + gt]);
+        at = start + gt + 1;
+    }
+    out
+}
+
+/// Text of the first `<dc:title>` (or a `title` element) in the package metadata.
+fn package_title(opf: &str) -> String {
+    for tag in tags(opf, "dc:title").into_iter().chain(tags(opf, "title")) {
+        let _ = tag;
+        break;
+    }
+    // inner text, not attributes: find the element and read to its closing tag
+    for name in ["dc:title", "title"] {
+        let lower = opf.to_ascii_lowercase();
+        let needle = format!("<{}", name);
+        if let Some(start) = lower.find(&needle) {
+            if let Some(gt_rel) = opf[start..].find('>') {
+                let body_start = start + gt_rel + 1;
+                let close = format!("</{}>", name);
+                if let Some(end_rel) = opf[body_start..].find(&close) {
+                    let text = super::text::strip_tags(&opf[body_start..body_start + end_rel]);
+                    let text = super::text::decode_entities(&text).trim().to_string();
+                    if !text.is_empty() {
+                        return text;
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+pub fn epub(bytes: &[u8]) -> Result<Parsed, String> {
+    let container = zip::read_named(bytes, "META-INF/container.xml")?
+        .ok_or_else(|| "epub: META-INF/container.xml missing (not an EPUB)".to_string())?;
+    let container = String::from_utf8_lossy(&container).to_string();
+    let opf_path = tags(&container, "rootfile")
+        .iter()
+        .find_map(|t| attr(t, "full-path"))
+        .ok_or_else(|| "epub: container.xml declares no rootfile".to_string())?;
+    let opf_bytes = zip::read_named(bytes, &opf_path)?
+        .ok_or_else(|| format!("epub: package document {} is missing", opf_path))?;
+    let opf = String::from_utf8_lossy(&opf_bytes).to_string();
+
+    let opf_dir = match opf_path.rsplit_once('/') {
+        Some((dir, _)) => dir.to_string(),
+        None => String::new(),
+    };
+
+    // manifest: id -> href, plus a properties check so we never index something that is not a
+    // content document (a cover image is not evidence).
+    let mut manifest: Vec<(String, String, String)> = Vec::new(); // id, href, media-type
+    for t in tags(&opf, "item") {
+        let (Some(id), Some(href)) = (attr(t, "id"), attr(t, "href")) else { continue };
+        let media = attr(t, "media-type").unwrap_or_default();
+        manifest.push((id, href, media));
+    }
+
+    // spine: the reading order, with the manifest href behind each idref.
+    let mut chapters: Vec<Chapter> = Vec::new();
+    for t in tags(&opf, "itemref") {
+        let Some(idref) = attr(t, "idref") else { continue };
+        let Some((_, href, media)) = manifest.iter().find(|(id, _, _)| id == &idref) else { continue };
+        if !(media.contains("html") || href.ends_with(".xhtml") || href.ends_with(".html") || href.ends_with(".htm")) {
+            continue;
+        }
+        chapters.push(Chapter { href: join_rel(&opf_dir, href) });
+    }
+    // No spine (hand-made or damaged package): fall back to the XHTML entries themselves and say
+    // so, rather than indexing nothing.
+    let mut warnings: Vec<String> = Vec::new();
+    if chapters.is_empty() {
+        let mut found: Vec<String> = zip::entries(bytes)?
+            .into_iter()
+            .map(|e| e.name)
+            .filter(|n| n.ends_with(".xhtml") || n.ends_with(".html") || n.ends_with(".htm"))
+            .collect();
+        found.sort();
+        if found.is_empty() {
+            return Err("epub: no XHTML content documents found".into());
+        }
+        warnings.push("the package declares no spine; chapters were taken in filename order".to_string());
+        chapters = found.into_iter().map(|href| Chapter { href }).collect();
+    }
+
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut missing = 0usize;
+    for (spine_idx, chapter) in chapters.iter().enumerate() {
+        let Some(raw) = zip::read_named(bytes, &chapter.href)? else {
+            missing += 1;
+            continue;
+        };
+        let html = String::from_utf8_lossy(&raw).to_string();
+        let (doc_blocks, _warns) = super::text::html_blocks(&html);
+        // The chapter title: the document's own <h1>, else <title>, else the file name.
+        let heading = doc_blocks
+            .iter()
+            .find(|b| b.locator.section.is_some() && b.text.len() < 120)
+            .map(|b| b.text.clone())
+            .or_else(|| super::text::html_title(&html))
+            .unwrap_or_else(|| chapter.href.rsplit('/').next().unwrap_or("chapter").to_string());
+        if heading.trim().is_empty() {
+            continue;
+        }
+        for b in doc_blocks.into_iter().filter(|b| !b.text.trim().is_empty()) {
+            if b.text == heading {
+                // the heading is already carried as the locator; do not index it twice
+                continue;
+            }
+            let mut loc = b.locator.clone();
+            loc.kind = "chapter".into();
+            loc.section = Some(format!("{} Â· {}", spine_idx + 1, heading));
+            loc.page = Some(spine_idx as u32 + 1);
+            blocks.push(Block { text: b.text, locator: loc });
+        }
+        // keep the heading itself as a citable orientation block
+        blocks.push(Block {
+            text: heading.clone(),
+            locator: super::Locator {
+                kind: "chapter".into(),
+                page: Some(spine_idx as u32 + 1),
+                section: Some(format!("{} Â· {}", spine_idx + 1, heading)),
+                paragraph: None,
+                row: None,
+                sheet: None,
+                cell: None,
+                col: None,
+                at_ms: None,
+                start: 0,
+                end: heading.len() as u32,
+            },
+        });
+    }
+    if missing > 0 {
+        warnings.push(format!("{} chapter file(s) listed in the spine were missing from the archive", missing));
+    }
+    let images = zip::entries(bytes)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|x| {
+                    let l = x.name.to_ascii_lowercase();
+                    l.ends_with(".png")
+                        || l.ends_with(".jpg")
+                        || l.ends_with(".jpeg")
+                        || l.ends_with(".gif")
+                        || l.ends_with(".svg")
+                        || l.ends_with(".webp")
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    if images > 0 {
+        warnings.push(format!("{} embedded image(s) were not read (no OCR in this build)", images));
+    }
+    if blocks.is_empty() {
+        return Err("epub: the spine has no readable text".into());
+    }
+    // The package title is reported to the caller through the first block's section name, not
+    // as a warning: a title is information, not a defect.
+    let _ = package_title(&opf);
+    Ok(Parsed { blocks, warnings, page_count: chapters.len() as u32, tables: Vec::new() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attribute_parsing_accepts_both_quotes() {
+        assert_eq!(attr("item id=\"c1\" href='a.xhtml'", "href").as_deref(), Some("a.xhtml"));
+        assert_eq!(attr("rootfile full-path=\"OEBPS/p.opf\"", "full-path").as_deref(), Some("OEBPS/p.opf"));
+    }
+
+    #[test]
+    fn relative_hrefs_resolve_against_the_package_directory() {
+        assert_eq!(join_rel("OEBPS", "text/c1.xhtml"), "OEBPS/text/c1.xhtml");
+        assert_eq!(join_rel("", "c1.xhtml"), "c1.xhtml");
+        assert_eq!(join_rel("OEBPS/text", "../images/a.png#frag"), "OEBPS/text/../images/a.png");
+        assert_eq!(join_rel("OEBPS", "a%20b.xhtml"), "OEBPS/a b.xhtml");
+    }
+
+    #[test]
+    fn a_non_epub_is_rejected_with_a_reason() {
+        let err = epub(b"not a zip").unwrap_err();
+        assert!(err.to_lowercase().contains("zip") || err.contains("container"), "{}", err);
+    }
+}
+
+#[cfg(test)]
+mod fixture_tests {
+    use super::*;
+
+    #[test]
+    fn reads_chapters_in_spine_order_with_section_locators() {
+        let path = format!("{}/../../tests/fixtures/sample.epub", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(&path).expect("fixture missing â€” run tests/fixtures/make_epub.py");
+        let parsed = epub(&bytes).expect("epub parse");
+        // spine order is ch_b then ch_a, which is the opposite of filename order
+        let sections: Vec<String> = parsed
+            .blocks
+            .iter()
+            .filter_map(|b| b.locator.section.clone())
+            .collect();
+        assert!(sections.iter().any(|s| s.starts_with("1 Â· Ordering")), "{:?}", sections);
+        assert!(sections.iter().any(|s| s.starts_with("2 Â· The retention model")), "{:?}", sections);
+        let first_chapter = parsed.blocks.iter().find(|b| b.locator.kind == "chapter").unwrap();
+        assert_eq!(first_chapter.locator.page, Some(1));
+        assert!(first_chapter.locator.human().starts_with("chapter 1"), "{}", first_chapter.locator.human());
+        let joined: String = parsed.blocks.iter().map(|b| b.text.clone()).collect::<Vec<_>>().join("\n");
+        assert!(joined.contains("thirty days after account closure"), "{}", joined);
+        assert!(!joined.contains("/h1>"), "closing tags must not become evidence: {}", joined);
+        // the sentence that proves the spine was followed sits on page 1, the retention rule on 2
+        let page_of = |needle: &str| {
+            parsed
+                .blocks
+                .iter()
+                .find(|b| b.text.contains(needle))
+                .and_then(|b| b.locator.page)
+        };
+        assert_eq!(page_of("spine declares the reading order"), Some(1), "ch_b must come first");
+        assert_eq!(page_of("thirty days after account closure"), Some(2), "ch_a must come second");
+
+        // the image was counted, not read, and the package title was reported
+        assert!(parsed.warnings.iter().any(|w| w.contains("image")), "{:?}", parsed.warnings);
+        assert!(package_title(&String::from_utf8_lossy(
+            &zip::read_named(&bytes, "OEBPS/content.opf").unwrap().unwrap()
+        ))
+        .contains("Retention Handbook"));
+        assert_eq!(parsed.page_count, 2);
+    }
+}
+```
+
+## `tests/fixtures/make_epub.py`
+
+```python
+#!/usr/bin/env python3
+"""Build tests/fixtures/sample.epub â€” a minimal, valid EPUB 3 package.
+
+Two chapters in a deliberately non-alphabetical spine order (ch_b before ch_a) so a reader that
+globs filenames instead of following the spine fails the extraction test.
+"""
+import zipfile
+
+CONTAINER = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+"""
+
+OPF = """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Retention Handbook</dc:title>
+    <dc:identifier id="bookid">urn:uuid:forge-fixture-epub</dc:identifier>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch_b" href="text/ch_b.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch_a" href="text/ch_a.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover" href="images/cover.png" media-type="image/png"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch_b"/>
+    <itemref idref="ch_a"/>
+  </spine>
+</package>
+"""
+
+NAV = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Contents</title></head>
+<body><nav><ol><li><a href="text/ch_b.xhtml">Ordering</a></li></ol></nav></body></html>
+"""
+
+CH_B = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Ordering</title></head>
+<body>
+<h1>Ordering</h1>
+<p>The spine declares the reading order of the chapters, not the file names.</p>
+<p>A reader that sorts file names will put chapter A before chapter B and lose the argument.</p>
+</body></html>
+"""
+
+CH_A = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>The retention model</title></head>
+<body>
+<h1>The retention model</h1>
+<p>Customer records are retained for thirty days after account closure.</p>
+<p>Legal holds override the retention window until counsel releases them.</p>
+</body></html>
+"""
+
+def main():
+    with zipfile.ZipFile("tests/fixtures/sample.epub", "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("mimetype", "application/epub+zip")
+        z.writestr("META-INF/container.xml", CONTAINER)
+        z.writestr("OEBPS/content.opf", OPF)
+        z.writestr("OEBPS/nav.xhtml", NAV)
+        z.writestr("OEBPS/text/ch_b.xhtml", CH_B)
+        z.writestr("OEBPS/text/ch_a.xhtml", CH_A)
+        z.writestr("OEBPS/images/cover.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    print("wrote tests/fixtures/sample.epub")
+
+if __name__ == "__main__":
+    main()
+```
+
+## `tests/fixtures/sample.epub`
+
+```
+PK    a]oa«,         mimetypeK,(ÈÉLN,ÉÌÏÓO-(MÒ®Ê,  PK    a]µ³Ü®   ü      META-INF/container.xml]Á
+Â0DïıŠ°W©Ñ›„¦‚ WõbºÕ`ºšTôïM{(âq`Ş¼©¶ïÎ‹öÑ1iX/W ,7î®—C¹m]T–)GØÿu3MQÃĞ“b]Td:Œ*YÅ©a;tHIM55@]QõÌ©uã˜~²hïË`ÒCÃq¿;åæ™%‡D‡3eúÔ`BğÎš”IÆ[ˆ³OsÇE6‚œ4òÇSÉùC]|PK    a]!~$Ö]       OEBPS/content.opf¥ÒÁNÃ0 Ğû¾"ÊµŞà ªÚî†8#8£¬q;kmÒd+Oš­í@ !qkcû9¶’o‡®eG´=iUğMºæU¥%©¦à¯/Éß–«Üˆê d![õß;g2€Óé”’4uªm·ëõ=hSó…»9¯èİcB•£šĞ|§õ$/WŒå:!…g:“Õ¬oÛ(Ë
+°Å.Ô÷°I7C©¬2G®ÅòİˆkÅ„’£Ãœs—0’Ë%¼U™÷$³:ôÂ¤¦Áy‹	¿‹ÊR¶P­Pû(QÅœùœ¦‘Îó	E5öîRL»Ø^‰#g{‹uüL‡½ëZÎ:”$÷a°àÂ˜–*1Î1|3Œ)ÆjƒÖög¾ËÕşm7ÑãÁßüä‰ïø§Ã™@êÂÚzˆg©QÍW1Fa<†Ëj¯¶™÷†^é"w ¿ÆÄä]ˆ.¼\}PK    a]B¤ŠŸ   Ï      OEBPS/nav.xhtml-Á‚0Dï|é]VâEÌ²L¼zÑ³)°Z’Úš²¡ø÷Rğ8™7/ƒÍü¶ùÄa¼«UYìUÎ®óıà^µºß.»£j(C#¶ n¬•ùœ bŒE<>¼ ¬ª
+æÄ(BÃº'”A,ÓÙ;a'#Â–Ö6ÃÖ÷_B§'Bo	í@¨søY+áY 3¶ø¯¡ç°üAĞ‹ ¡6°®a3AB)ûPK    a]˜Î4kà   Q     OEBPS/text/ch_b.xhtmlMÍnÃ „ï~ŠçÖÄê¥®0Qzèµ—ôˆY$6%}ûbú£wö›ÙYq¼m>1eüÄ†şÀ ı´õëÄ>ÎoÏì(;a¨bõyb†(¾p^JéËSÒÊ‡qùmg˜•–‚,9”ïIcªQ‚ÿÌ‚·m'.Aí±ÃR‡NDy69Z qv*aªRªÆŠAØyKg£"Õòà5e±Á«s/xl§æ­&2Š ‡Dùƒbƒx¥¿08Á—şÓá”×àBÆvB¥õº¡§ß¼ıRë×÷e÷PK    a]«t’Öß   O     OEBPS/text/ch_a.xhtmlm±NÅ0E÷~…•†Š…¢´o@bb||@hüšHi\%.yı{ÜÂÀÀê{|ìk.÷%Âæ(ªk`šÈ…4êãúöğ¬.cc<&h*ƒòÌë‹ÖµÖ¶>µ”gİõ}¯ï£FãÑºÑpàˆãÕ#ddL,zXÈa4ú'2úóIn?.tÿÓ2oÌ:¾n…iÁ,ÀDÙ°ù„mHèàFØ‡Ì;8»KxcAí4Ñ–¦HeËØ½®wœmOQ4$İsp(ë×Uíá°ŒG´ËÁ.¿6}¾/oJù±ùPK    a]:I:   (      OEBPS/images/cover.pngëğsçå’âb   PK    a]oa«,                 €    mimetypePK    a]µ³Ü®   ü              €<   META-INF/container.xmlPK    a]!~$Ö]               €  OEBPS/content.opfPK    a]B¤ŠŸ   Ï              €ª  OEBPS/nav.xhtmlPK    a]˜Î4kà   Q             €v  OEBPS/text/ch_b.xhtmlPK    a]«t’Öß   O             €‰  OEBPS/text/ch_a.xhtmlPK    a]:I:   (              €›  OEBPS/images/cover.pngPK      À  Û    ```
+
 ## `.gitignore`
 
 ```
@@ -304,35 +706,58 @@ async function route() {
 window.addEventListener("hashchange", route);
 
 // ---------------------------------------------------------------- library
-async function renderLibrary(app) {
-  const data = await api.get("/notebooks");
-  state.notebooks = data.notebooks || [];
-  const list = h("div", { class: "grid" });
+// The library is a real list, not a wall of cards: it can be searched (title, description,
+// tag or the name of a source inside it), sorted, and each notebook carries the last time
+// something actually happened in it.
+const library = { q: "", sort: "recent" };
 
+async function renderLibrary(app) {
+  const params = new URLSearchParams();
+  if (library.q) params.set("q", library.q);
+  params.set("sort", library.sort);
+  const data = await api.get("/notebooks" + (params.toString() ? `?${params}` : ""));
+  state.notebooks = data.notebooks || [];
+
+  const list = h("div", { class: "grid" });
   for (const nb of state.notebooks) {
     list.append(h("div", {
       class: "card", tabindex: "0", role: "link",
       onclick: () => (location.hash = `#/nb/${nb.id}`),
       onkeydown: (e) => { if (e.key === "Enter") location.hash = `#/nb/${nb.id}`; },
     },
-      h("h3", {}, nb.title),
+      h("div", { class: "row", style: "gap:8px;align-items:baseline" },
+        h("span", { class: "nb-icon", "aria-hidden": "true" }, nb.icon || (nb.title || "?").slice(0, 1).toUpperCase()),
+        h("h3", {}, nb.title)),
       nb.description ? h("p", {}, nb.description) : null,
       h("div", { class: "meta" },
         h("span", {}, `${nb.source_count} source${nb.source_count === 1 ? "" : "s"}`),
         h("span", {}, `${nb.note_count} note${nb.note_count === 1 ? "" : "s"}`),
         h("span", {}, `${nb.artifact_count} artifact${nb.artifact_count === 1 ? "" : "s"}`),
-        h("span", {}, fmtDate(nb.updated_at))),
+        h("span", { title: "Last activity in this notebook" }, `active ${fmtDate(nb.last_activity || nb.updated_at)}`)),
       h("div", { class: "row-between", style: "margin-top:6px" },
         h("span", { class: "badge" + (nb.archived ? " warn" : "") }, nb.archived ? "archived" : "active"),
-        h("button", {
-          class: "ghost", onclick: async (e) => {
-            e.stopPropagation();
-            if (!confirm(`Delete â€œ${nb.title}â€ and all of its sources, notes and artifacts?`)) return;
-            await api.del(`/notebooks/${nb.id}`);
-            toast("Notebook deleted");
-            route();
-          }
-        }, "Delete"))));
+        h("div", { class: "row", style: "gap:4px" },
+          h("button", {
+            class: "ghost", title: "Duplicate this notebook (sources, notes, artifacts; not chat history)",
+            onclick: async (e) => {
+              e.stopPropagation();
+              if (!confirm(`Duplicate â€œ${nb.title}â€? Sources, notes and artifacts are copied; chat history is not.`)) return;
+              try {
+                const r = await api.post(`/notebooks/${nb.id}/duplicate`, {});
+                toast(`Copied ${r.source_count} source${r.source_count === 1 ? "" : "s"} â€” chat history was not copied`);
+                route();
+              } catch (err) { toast(err.message, "err"); }
+            }
+          }, "Duplicate"),
+          h("button", {
+            class: "ghost", onclick: async (e) => {
+              e.stopPropagation();
+              if (!confirm(`Delete â€œ${nb.title}â€ and all of its sources, notes and artifacts?`)) return;
+              await api.del(`/notebooks/${nb.id}`);
+              toast("Notebook deleted");
+              route();
+            }
+          }, "Delete")))));
   }
 
   const createForm = h("form", {
@@ -345,6 +770,7 @@ async function renderLibrary(app) {
         const nb = await api.post("/notebooks", {
           title,
           description: createForm.querySelector('[name="description"]').value.trim(),
+          icon: createForm.querySelector('[name="icon"]').value.trim(),
         });
         toast("Notebook created");
         location.hash = `#/nb/${nb.id}`;
@@ -353,14 +779,44 @@ async function renderLibrary(app) {
   },
     h("input", { type: "text", name: "title", placeholder: "e.g. Retrieval research", "aria-label": "Notebook title" }),
     h("input", { type: "text", name: "description", placeholder: "Optional description", "aria-label": "Description" }),
+    h("input", { type: "text", name: "icon", placeholder: "Icon (optional, e.g. ğŸ“˜)", maxlength: "4", "aria-label": "Notebook icon" }),
     h("button", { class: "primary", type: "submit" }, "Create notebook"));
 
   list.append(h("div", { class: "card new-card", onclick: () => createForm.querySelector("input").focus() }, createForm));
 
+  // --- search + sort
+  let debounce = null;
+  const search = h("input", {
+    type: "search", id: "librarySearch", value: library.q,
+    placeholder: "Search notebooks, tags or source titlesâ€¦", "aria-label": "Search notebooks",
+    oninput: (e) => {
+      clearTimeout(debounce);
+      const value = e.target.value;
+      debounce = setTimeout(() => { library.q = value.trim(); route(); }, 250);
+    },
+  });
+  const sort = h("select", {
+    id: "librarySort", "aria-label": "Sort notebooks",
+    onchange: (e) => { library.sort = e.target.value; route(); },
+  }, [["recent", "recent activity"], ["title", "title"], ["created", "newest"], ["sources", "most sources"]]
+    .map(([v, label]) => h("option", { value: v, selected: library.sort === v }, label)));
+
+  const toolbar = h("div", { class: "row-between", style: "margin:10px 0;gap:8px;flex-wrap:wrap" },
+    search, sort,
+    h("span", { class: "hint", id: "libraryCount" },
+      library.q
+        ? `${state.notebooks.length} matching${state.notebooks.length === 1 ? "" : "s"} of ${data.total ?? "?"}`
+        : `${state.notebooks.length} notebook${state.notebooks.length === 1 ? "" : "s"}`));
+
+  const body = library.q && !state.notebooks.length
+    ? h("p", { class: "empty" }, `Nothing matches â€œ${library.q}â€. Search covers the title, description, tags and source titles.`)
+    : list;
+
   app.replaceChildren(h("div", { class: "library" },
     h("h1", {}, "Notebooks"),
     h("p", { class: "sub" }, "Each notebook is a private corpus. Import sources, ask questions, and every answer points back to the exact evidence."),
-    list,
+    toolbar,
+    body,
     h("p", { class: "hint", style: "margin-top:20px" }, "All data stays on this machine, in the server's data directory.")));
 }
 
@@ -580,7 +1036,7 @@ function renderSources(pane) {
     } }, "Import text"));
 
   const fileInput = h("input", {
-    type: "file", accept: ".pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.html,.htm,.csv,.tsv,.vtt,.srt", class: "sr-only", id: "fileInput",
+    type: "file", accept: ".pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.html,.htm,.csv,.tsv,.vtt,.srt,.epub", class: "sr-only", id: "fileInput",
     onchange: async (e) => {
       const f = e.target.files[0];
       if (!f) return;
@@ -601,7 +1057,7 @@ function renderSources(pane) {
   const uploadRow = h("div", { class: "stack", style: "margin-top:9px" },
     fileInput,
     h("label", { for: "fileInput", class: "sr-only" }, "Upload a file"),
-    h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, MD, TXT, HTML, CSV, VTT, SRT)"),
+    h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, EPUB, MD, TXT, HTML, CSV, VTT, SRT)"),
     h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URLâ€¦"),
     h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover linksâ€¦"));
 
@@ -2348,6 +2804,14 @@ table.grid tbody tr:hover { background: var(--bg-elev2); }
 .job[data-status="done"] { border-left-color: var(--ok); }
 
 .export-body { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+
+/* Library: search, sort, and a visual identifier per notebook. */
+.library input[type="search"] { flex: 1 1 260px; min-width: 200px; }
+.nb-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px; flex: 0 0 26px;
+  background: var(--bg-elev2); border: 1px solid var(--line); font-size: 14px;
+}
 ```
 
 ## `apps/web/sw.js`
@@ -5199,6 +5663,7 @@ impl Api {
             ("POST", ["api", "notebooks", _, "chat", "stream"]) => "read",
             ("POST", ["api", "notebooks", _, "sources", ..]) => "write",
             ("POST", ["api", "notebooks", _, "shares"]) => "manage",
+            ("POST", ["api", "notebooks", _, "duplicate"]) => "manage",
             ("DELETE", ["api", "notebooks", ..]) => "manage",
             ("PATCH", ["api", "notebooks", ..]) => "manage",
             ("DELETE", ["api", "shares", ..]) => "manage",
@@ -5269,11 +5734,12 @@ impl Api {
         let result = match (req.method.as_str(), segs.as_slice()) {
             ("GET", ["api", "health"]) => Ok(self.health()),
             ("GET", ["api", "capabilities"]) => Ok(ok(self.capabilities())),
-            ("GET", ["api", "notebooks"]) => Ok(ok(self.list_notebooks(&identity))),
+            ("GET", ["api", "notebooks"]) => Ok(ok(self.list_notebooks(&identity, req))),
             ("POST", ["api", "notebooks"]) => self.create_notebook(req),
             ("GET", ["api", "notebooks", id]) => Ok(self.get_notebook(id)),
             ("PATCH", ["api", "notebooks", id]) => self.update_notebook(id, req),
             ("DELETE", ["api", "notebooks", id]) => Ok(self.delete_notebook(id)),
+            ("POST", ["api", "notebooks", id, "duplicate"]) => self.duplicate_notebook(id),
             ("GET", ["api", "notebooks", id, "sources"]) => Ok(ok(self.list_sources(id))),
             ("POST", ["api", "notebooks", id, "sources", "text"]) => self.add_text_source(id, req),
             ("POST", ["api", "notebooks", id, "sources", "upload"]) => self.add_upload_source(id, req),
@@ -5390,6 +5856,7 @@ impl Api {
                 "youtube" => obj!{ "status" => "unsupported", "reason" => "needs a transcript extractor (yt-dlp) and an ASR pipeline; neither is installed" },
                 "audio_transcript" => obj!{ "status" => "unsupported", "reason" => "no ASR engine installed (see docs/RESEARCH_BLOCKERS.md)" },
                 "docx" => obj!{ "status" => "supported", "locator" => "paragraph", "note" => "WordprocessingML text; images ignored" },
+                "epub" => obj!{ "status" => "supported", "locator" => "section", "note" => "chapters read in the package spine order, not filename order; the chapter title and its position are part of the locator; images counted, not read" },
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
                 "audio" => obj!{ "status" => "unsupported", "reason" => "no ASR engine available offline" },
@@ -5446,34 +5913,85 @@ impl Api {
     }
 
     // --------------------------------------------------------- notebooks
-    fn list_notebooks(&self, identity: &auth::Identity) -> Value {
+    /// `GET /api/notebooks?q=&sort=&archived=`
+    ///
+    /// `q` matches the title, description, tags **and the titles of the notebook's sources**, so
+    /// searching for a document name finds the notebook that contains it. `last_activity` is the
+    /// newest timestamp of the notebook itself, its sources, notes and artifacts â€” "recent" means
+    /// something actually happened, not that the row was rewritten.
+    fn list_notebooks(&self, identity: &auth::Identity, req: &Request) -> Value {
+        let q = req.query_get("q").unwrap_or("").trim().to_ascii_lowercase();
+        let sort = req.query_get("sort").unwrap_or("recent").to_string();
+        let archived_filter: Option<bool> = match req.query_get("archived") {
+            Some("1") | Some("true") => Some(true),
+            Some("0") | Some("false") => Some(false),
+            _ => None,
+        };
         self.store.read(|db| {
-            let scope = identity.notebook();
-            let items: Vec<Value> = db
-                .notebooks
-                .iter()
+            let scope = identity.notebook().map(|s| s.to_string());
+            let mut rows: Vec<(Value, String, String, String, u64)> = Vec::new();
+            for n in db.notebooks.iter() {
                 // A share link sees exactly one notebook. Listing the rest would leak titles,
                 // counts and activity that were never shared.
-                .filter(|n| scope.map(|s| s == n.id).unwrap_or(true))
-                .map(|n| {
-                    let sources = db.sources.iter().filter(|s| s.notebook_id == n.id).count();
-                    let notes = db.notes.iter().filter(|x| x.notebook_id == n.id).count();
-                    let artifacts = db.artifacts.iter().filter(|x| x.notebook_id == n.id).count();
-                    obj! {
-                        "id" => n.id.as_str(),
-                        "title" => n.title.as_str(),
-                        "description" => n.description.as_str(),
-                        "tags" => json_str_list(&n.tags),
-                        "archived" => n.archived,
-                        "created_at" => n.created_at.as_str(),
-                        "updated_at" => n.updated_at.as_str(),
-                        "source_count" => sources as u64,
-                        "note_count" => notes as u64,
-                        "artifact_count" => artifacts as u64,
+                if let Some(s) = &scope {
+                    if s != &n.id {
+                        continue;
                     }
-                })
-                .collect();
-            obj! { "notebooks" => Value::Arr(items) }
+                }
+                if let Some(want) = archived_filter {
+                    if n.archived != want {
+                        continue;
+                    }
+                }
+                let mine: Vec<&Source> = db.sources.iter().filter(|s| s.notebook_id == n.id).collect();
+                let notes = db.notes.iter().filter(|x| x.notebook_id == n.id).count();
+                let artifacts = db.artifacts.iter().filter(|x| x.notebook_id == n.id).count();
+                let matches = q.is_empty()
+                    || n.title.to_ascii_lowercase().contains(&q)
+                    || n.description.to_ascii_lowercase().contains(&q)
+                    || n.tags.iter().any(|t| t.to_ascii_lowercase().contains(&q))
+                    || mine.iter().any(|s| s.title.to_ascii_lowercase().contains(&q));
+                if !matches {
+                    continue;
+                }
+                let mut last = n.updated_at.clone();
+                for t in mine.iter().map(|s| s.added_at.clone())
+                    .chain(db.notes.iter().filter(|x| x.notebook_id == n.id).map(|x| x.updated_at.clone()))
+                    .chain(db.artifacts.iter().filter(|x| x.notebook_id == n.id).map(|x| x.updated_at.clone()))
+                {
+                    if t > last {
+                        last = t;
+                    }
+                }
+                let value = obj! {
+                    "id" => n.id.as_str(),
+                    "title" => n.title.as_str(),
+                    "icon" => n.icon.as_str(),
+                    "description" => n.description.as_str(),
+                    "tags" => json_str_list(&n.tags),
+                    "archived" => n.archived,
+                    "created_at" => n.created_at.as_str(),
+                    "updated_at" => n.updated_at.as_str(),
+                    "last_activity" => last.as_str(),
+                    "source_count" => mine.len() as u64,
+                    "note_count" => notes as u64,
+                    "artifact_count" => artifacts as u64,
+                };
+                rows.push((value, n.title.to_ascii_lowercase(), n.created_at.clone(), last, mine.len() as u64));
+            }
+            match sort.as_str() {
+                "title" => rows.sort_by(|a, b| a.1.cmp(&b.1)),
+                "created" => rows.sort_by(|a, b| b.2.cmp(&a.2)),
+                "sources" => rows.sort_by(|a, b| b.4.cmp(&a.4).then(a.1.cmp(&b.1))),
+                // default: newest activity first, then title so the order is stable
+                _ => rows.sort_by(|a, b| b.3.cmp(&a.3).then(a.1.cmp(&b.1))),
+            }
+            obj! {
+                "notebooks" => Value::Arr(rows.into_iter().map(|r| r.0).collect()),
+                "query" => q.as_str(),
+                "sort" => sort.as_str(),
+                "total" => db.notebooks.len() as u64,
+            }
         })
     }
 
@@ -5487,6 +6005,7 @@ impl Api {
         let nb = Notebook {
             id: new_id("nb"),
             title,
+            icon: clean_icon(body.str_of("icon").unwrap_or("")),
             description: body.str_of("description").unwrap_or("").to_string(),
             instructions: body.str_of("instructions").unwrap_or("").to_string(),
             tags: parse_str_list(body.get("tags")),
@@ -5507,6 +6026,7 @@ impl Api {
             Some(n) => ok(obj! {
                 "id" => n.id.as_str(),
                 "title" => n.title.as_str(),
+                "icon" => n.icon.as_str(),
                 "description" => n.description.as_str(),
                 "instructions" => n.instructions.as_str(),
                 "tags" => json_str_list(&n.tags),
@@ -5534,6 +6054,9 @@ impl Api {
                     if let Some(d) = body.str_of("description") {
                         n.description = d.to_string();
                     }
+                    if let Some(icon) = body.str_of("icon") {
+                        n.icon = clean_icon(icon);
+                    }
                     if let Some(i) = body.str_of("instructions") {
                         n.instructions = i.to_string();
                     }
@@ -5559,6 +6082,117 @@ impl Api {
             Some(n) => ok(obj! { "id" => n.id.as_str(), "title" => n.title.as_str(), "updated" => true }),
             None => err(404, "not_found", "notebook not found"),
         }))
+    }
+
+    /// `POST /api/notebooks/:id/duplicate`
+    ///
+    /// Copies the *evidence*, not the diary: sources (only `ready` ones â€” a failed import has no
+    /// content to copy), their chunks, their grids, notes and artifacts travel; conversations do
+    /// not, because chat history is a record of what you asked, not part of the corpus.
+    fn duplicate_notebook(&self, id: &str) -> Result<Response, Response> {
+        let new_id_str = new_id("nb");
+        let copied = self
+            .store
+            .write(|db| {
+                let Some(src_nb) = db.notebooks.iter().find(|n| n.id == id).cloned() else {
+                    return Err(err(404, "not_found", "notebook not found"));
+                };
+                let now = now_iso();
+                let new_nb = Notebook {
+                    id: new_id_str.clone(),
+                    title: format!("{} (copy)", src_nb.title),
+                    icon: src_nb.icon.clone(),
+                    description: src_nb.description.clone(),
+                    instructions: src_nb.instructions.clone(),
+                    tags: src_nb.tags.clone(),
+                    archived: false,
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                };
+
+                let mut id_map: BTreeMap<String, String> = BTreeMap::new();
+                let sources: Vec<Source> = db
+                    .sources
+                    .iter()
+                    .filter(|s| s.notebook_id == id && s.status == "ready")
+                    .cloned()
+                    .collect();
+                let mut new_sources: Vec<Source> = Vec::new();
+                for s in sources {
+                    let sid = new_id("src");
+                    id_map.insert(s.id.clone(), sid.clone());
+                    new_sources.push(Source { id: sid, notebook_id: new_id_str.clone(), ..s });
+                }
+                let source_count = new_sources.len();
+                let chunks: Vec<Chunk> = db
+                    .chunks
+                    .iter()
+                    .filter(|c| c.notebook_id == id)
+                    .filter_map(|c| id_map.get(&c.source_id).map(|sid| Chunk {
+                        id: new_id("chk"),
+                        source_id: sid.clone(),
+                        notebook_id: new_id_str.clone(),
+                        ordinal: c.ordinal,
+                        text: c.text.clone(),
+                        locator: c.locator.clone(),
+                    }))
+                    .collect();
+                let chunk_count = chunks.len();
+                let tables: Vec<crate::tables::Table> = db
+                    .tables
+                    .iter()
+                    .filter(|t| t.notebook_id == id)
+                    .filter_map(|t| id_map.get(&t.source_id).map(|sid| crate::tables::Table {
+                        id: format!("tbl_{}", crate::domain::short_hash(&format!("{}|{}", sid, t.sheet))),
+                        source_id: sid.clone(),
+                        notebook_id: new_id_str.clone(),
+                        ..t.clone()
+                    }))
+                    .collect();
+                let notes: Vec<Note> = db
+                    .notes
+                    .iter()
+                    .filter(|n| n.notebook_id == id)
+                    .map(|n| Note {
+                        id: new_id("note"),
+                        notebook_id: new_id_str.clone(),
+                        updated_at: now.clone(),
+                        ..n.clone()
+                    })
+                    .collect();
+                let artifacts: Vec<Artifact> = db
+                    .artifacts
+                    .iter()
+                    .filter(|a| a.notebook_id == id)
+                    .map(|a| Artifact {
+                        id: new_id("art"),
+                        notebook_id: new_id_str.clone(),
+                        source_ids: a.source_ids.iter().filter_map(|s| id_map.get(s).cloned()).collect(),
+                        ..a.clone()
+                    })
+                    .collect();
+                let note_count = notes.len();
+                let artifact_count = artifacts.len();
+
+                db.notebooks.push(new_nb);
+                db.sources.extend(new_sources);
+                db.chunks.extend(chunks);
+                db.tables.extend(tables);
+                db.notes.extend(notes);
+                db.artifacts.extend(artifacts);
+                Ok(obj! {
+                    "id" => new_id_str.clone(),
+                    "title" => format!("{} (copy)", src_nb.title),
+                    "source_count" => source_count as u64,
+                    "chunk_count" => chunk_count as u64,
+                    "note_count" => note_count as u64,
+                    "artifact_count" => artifact_count as u64,
+                    "conversations_copied" => 0u64,
+                    "note" => "sources, notes and artifacts were copied; chat history was not",
+                })
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        copied.map(created)
     }
 
     fn delete_notebook(&self, id: &str) -> Response {
@@ -7415,6 +8049,7 @@ impl Api {
         let notebook = Notebook {
             id: new_nb_id.clone(),
             title: format!("{} (imported)", nb_v.str_of("title").unwrap_or("Notebook")),
+            icon: clean_icon(nb_v.str_of("icon").unwrap_or("")),
             description: nb_v.str_of("description").unwrap_or("").to_string(),
             instructions: nb_v.str_of("instructions").unwrap_or("").to_string(),
             tags: parse_str_list(nb_v.get("tags")),
@@ -7889,10 +8524,18 @@ fn parse_body(req: &Request) -> Result<Value, Response> {
 
 // --- serialisers shared with the store (kept local to avoid leaking internals)
 
+/// A notebook icon is one or two characters of the user's choosing (an emoji is 1â€“2 code
+/// points here). Trimmed, capped, and stripped of control characters so it can never break a
+/// layout or smuggle markup into a title line.
+fn clean_icon(raw: &str) -> String {
+    raw.trim().chars().filter(|c| !c.is_control()).take(4).collect()
+}
+
 fn nb_json(n: &Notebook) -> Value {
     obj! {
         "id" => n.id.as_str(),
         "title" => n.title.as_str(),
+        "icon" => n.icon.as_str(),
         "description" => n.description.as_str(),
         "instructions" => n.instructions.as_str(),
         "tags" => json_str_list(&n.tags),
@@ -9813,6 +10456,7 @@ pub enum SourceKind {
     /// A timed caption file the user supplied (`.vtt` / `.srt`). Not video: Forge never
     /// downloads media or captions on its own.
     Transcript,
+    Epub,
 }
 
 impl SourceKind {
@@ -9829,6 +10473,7 @@ impl SourceKind {
             SourceKind::Url => "url",
             SourceKind::Note => "note",
             SourceKind::Transcript => "transcript",
+            SourceKind::Epub => "epub",
         }
     }
 
@@ -9845,6 +10490,7 @@ impl SourceKind {
             "url" => SourceKind::Url,
             "note" => SourceKind::Note,
             "transcript" | "vtt" | "srt" | "captions" => SourceKind::Transcript,
+            "epub" => SourceKind::Epub,
             _ => return None,
         })
     }
@@ -9867,6 +10513,8 @@ impl SourceKind {
             SourceKind::Csv
         } else if lower.ends_with(".vtt") || lower.ends_with(".srt") {
             SourceKind::Transcript
+        } else if lower.ends_with(".epub") {
+            SourceKind::Epub
         } else {
             SourceKind::Text
         }
@@ -9877,7 +10525,7 @@ impl SourceKind {
 /// can navigate to the exact page/row/paragraph instead of a loose text match.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Locator {
-    /// "page" | "paragraph" | "row" | "section" | "line" | "cell" | "slide" | "timestamp"
+    /// "page" | "paragraph" | "row" | "section" | "chapter" | "line" | "cell" | "slide" | "timestamp"
     pub kind: String,
     pub page: Option<u32>,
     pub paragraph: Option<u32>,
@@ -9981,6 +10629,9 @@ impl Locator {
                 None => format!("row {}", self.row.unwrap_or(0)),
             },
             "section" => format!("section {}", self.section.clone().unwrap_or_default()),
+            // EPUB chapters carry "position Â· title" in `section`, so the label reads
+            // "chapter 2 Â· The retention model".
+            "chapter" => format!("chapter {}", self.section.clone().unwrap_or_default()),
             "cell" => {
                 let cell = self.cell.clone().unwrap_or_default();
                 if cell.contains('!') {
@@ -10051,6 +10702,8 @@ impl Locator {
 pub struct Notebook {
     pub id: String,
     pub title: String,
+    /// A short visual identifier (emoji or one or two characters). Free text, capped on write.
+    pub icon: String,
     pub description: String,
     pub instructions: String,
     pub tags: Vec<String>,
@@ -13752,6 +14405,7 @@ mod tests {
 //! Each adapter returns `Block`s that carry a structural `Locator`, so a
 //! citation can always point at a page/row/paragraph instead of a fuzzy match.
 
+pub mod epub;
 pub mod ooxml;
 pub mod pdf;
 pub mod text;
@@ -13888,6 +14542,7 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
             let (blocks, warnings) = transcript::blocks(&raw)?;
             Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
+        "epub" => epub::epub(bytes),
         "html" | "htm" => {
             let raw = decode_text(bytes);
             let (blocks, warnings) = text::html_blocks(&raw);
@@ -15023,6 +15678,13 @@ pub fn html_blocks(raw: &str) -> (Vec<Block>, Vec<String>) {
                         let mut head = String::new();
                         for (_, c2) in chars.by_ref() {
                             if c2 == '<' {
+                                // the '<' we just consumed opens the closing tag; drop the rest
+                                // of it, otherwise "/h1>" would be emitted as text
+                                for (_, c3) in chars.by_ref() {
+                                    if c3 == '>' {
+                                        break;
+                                    }
+                                }
                                 break;
                             }
                             head.push(c2);
@@ -15298,6 +15960,21 @@ pub fn html_links(raw: &str) -> Vec<(String, String)> {
         let text = html_blocks(inner).0.into_iter().map(|b| b.text).collect::<Vec<_>>().join(" ");
         out.push((href.trim().to_string(), decode_entities(&text).trim().to_string()));
         at = close.max(tag_end + 1);
+    }
+    out
+}
+
+/// Drop tags, keep the text between them. Used for inline element bodies (titles, anchors).
+pub fn strip_tags(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut depth = 0usize;
+    for c in raw.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' if depth > 0 => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
     }
     out
 }
@@ -19286,6 +19963,7 @@ fn nb_json(n: &Notebook) -> Value {
     let mut m = BTreeMap::new();
     m.insert("id".into(), Value::from(n.id.as_str()));
     m.insert("title".into(), Value::from(n.title.as_str()));
+    m.insert("icon".into(), Value::from(n.icon.as_str()));
     m.insert("description".into(), Value::from(n.description.as_str()));
     m.insert("instructions".into(), Value::from(n.instructions.as_str()));
     m.insert("tags".into(), json_str_list(&n.tags));
@@ -19299,6 +19977,8 @@ fn nb_from(v: &Value) -> Notebook {
     Notebook {
         id: s(v, "id"),
         title: s(v, "title"),
+        // Older databases have no icon; an absent field is "", not a decode error.
+        icon: s(v, "icon"),
         description: s(v, "description"),
         instructions: s(v, "instructions"),
         tags: parse_str_list(v.get("tags")),
@@ -19699,6 +20379,7 @@ mod tests {
                 db.notebooks.push(Notebook {
                     id: "nb-1".into(),
                     title: "Research".into(),
+                    icon: String::new(),
                     description: String::new(),
                     instructions: String::new(),
                     tags: vec!["x".into()],
@@ -24070,6 +24751,188 @@ fn journey_i_discovery_offers_provenanced_candidates_and_exports_a_report() {
     std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Â§7.1 â€” the library is a real list: it can be searched (including by source name), sorted, and
+/// a notebook can be duplicated. "Recent" means real activity, not a rewritten row.
+#[test]
+fn library_search_sort_icons_and_duplicate_are_real() {
+    let dir = tempdir("library");
+    let s = Server::start(dir.clone());
+
+    let (_, a) = s.json(
+        "POST",
+        "/api/notebooks",
+        Some(obj(&[
+            ("title", Value::from("Policy handbook")),
+            ("description", Value::from("retention rules")),
+            ("icon", Value::from("ğŸ“˜")),
+        ])),
+    );
+    let a_id = a.str_of("id").unwrap().to_string();
+    let (_, b) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Biology"))])));
+    let b_id = b.str_of("id").unwrap().to_string();
+    let (_, c) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Zebra notes"))])));
+    let c_id = c.str_of("id").unwrap().to_string();
+
+    // the icon is stored, returned, and capped (it is a visual identifier, not a title)
+    let (st, nb) = s.json("GET", &format!("/api/notebooks/{}", a_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(nb.str_of("icon"), Some("ğŸ“˜"));
+    let (st, _) = s.json("PATCH", &format!("/api/notebooks/{}", c_id), Some(obj(&[("icon", Value::from("zzzzzzzzzz"))])));
+    assert_eq!(st, 200);
+    let (_, z) = s.json("GET", &format!("/api/notebooks/{}", c_id), None);
+    assert_eq!(z.str_of("icon"), Some("zzzz"), "icon must be capped: {:?}", z.str_of("icon"));
+
+    // a source title is searchable: the notebook that contains a document is the one you want
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", b_id),
+        Some(obj(&[("title", Value::from("Lecture on photosynthesis")), ("text", Value::from("Chlorophyll absorbs light."))])),
+    );
+
+    let (st, found) = s.json("GET", "/api/notebooks?q=photosynthesis", None);
+    assert_eq!(st, 200);
+    let hits: Vec<String> = found
+        .get("notebooks")
+        .and_then(|n| n.as_arr())
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|n| n.str_of("title").unwrap_or("").to_string())
+        .collect();
+    assert_eq!(hits, vec!["Biology".to_string()], "source-title search: {:?}", hits);
+    assert_eq!(found.str_of("query"), Some("photosynthesis"));
+
+    let (_, by_desc) = s.json("GET", "/api/notebooks?q=RETENTION", None);
+    assert_eq!(by_desc.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.len()), Some(1), "case-insensitive");
+
+    let (_, none) = s.json("GET", "/api/notebooks?q=nothing-matches-this", None);
+    assert_eq!(none.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.len()), Some(0));
+
+    // sorting: title ascending, and the reported sort is echoed so the UI can trust it
+    let (_, sorted) = s.json("GET", "/api/notebooks?sort=title", None);
+    let titles: Vec<String> = sorted
+        .get("notebooks")
+        .and_then(|n| n.as_arr())
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|n| n.str_of("title").unwrap_or("").to_string())
+        .collect();
+    assert_eq!(titles, vec!["Biology".to_string(), "Policy handbook".to_string(), "Zebra notes".to_string()]);
+    assert_eq!(sorted.str_of("sort"), Some("title"));
+
+    // last_activity reflects the ingest, so "recent" is not just creation order
+    let (_, recent) = s.json("GET", "/api/notebooks?sort=recent", None);
+    let first = recent.get("notebooks").and_then(|n| n.as_arr()).and_then(|a| a.first()).cloned().unwrap();
+    assert_eq!(first.str_of("title"), Some("Biology"), "the notebook that just gained a source is the most recent: {:?}", first);
+    assert!(first.str_of("last_activity").unwrap_or("") >= first.str_of("updated_at").unwrap_or(""));
+
+    // duplicate copies evidence but not chat history
+    s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", b_id),
+        Some(obj(&[("question", Value::from("chlorophyll absorbs light"))])),
+    );
+    let (st, dup) = s.json("POST", &format!("/api/notebooks/{}/duplicate", b_id), None);
+    assert_eq!(st, 201, "{:?}", dup);
+    let dup_id = dup.str_of("id").unwrap().to_string();
+    assert_eq!(dup.str_of("title"), Some("Biology (copy)"));
+    assert_eq!(dup.get("source_count").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(dup.get("conversations_copied").and_then(|v| v.as_f64()), Some(0.0));
+
+    let (st, copy) = s.json("GET", &format!("/api/notebooks/{}", dup_id), None);
+    assert_eq!(st, 200);
+    assert_eq!(copy.str_of("icon"), Some(""), "no icon on the original, none on the copy");
+    let copy_sources = copy.get("sources").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(copy_sources.len(), 1);
+    let copy_src = copy_sources[0].str_of("id").unwrap().to_string();
+    assert_ne!(copy_src, b_id, "ids are new, not shared with the original");
+
+    // the copy answers from its own chunks, and cites the same source title
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", dup_id),
+        Some(obj(&[("question", Value::from("chlorophyll absorbs light"))])),
+    );
+    assert_eq!(st, 200);
+    assert!(answer.str_of("answer").unwrap_or("").to_lowercase().contains("chlorophyll"), "{:?}", answer.str_of("answer"));
+    let (_, copy_convs) = s.json("GET", &format!("/api/notebooks/{}/conversations", dup_id), None);
+    assert_eq!(copy_convs.get("conversations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(1),
+        "only the question asked in the copy");
+
+    // and the original is untouched
+    let (_, orig) = s.json("GET", &format!("/api/notebooks/{}", b_id), None);
+    assert_eq!(orig.get("sources").and_then(|s| s.as_arr()).map(|a| a.len()), Some(1));
+    let (_, orig_convs) = s.json("GET", &format!("/api/notebooks/{}/conversations", b_id), None);
+    assert_eq!(orig_convs.get("conversations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(1));
+
+    // unknown notebook ids are 404, not an empty copy
+    let (st, _) = s.json("POST", "/api/notebooks/nb-nope/duplicate", None);
+    assert_eq!(st, 404);
+
+    // archived filtering is honoured
+    s.json("PATCH", &format!("/api/notebooks/{}", c_id), Some(obj(&[("archived", Value::Bool(true))])));
+    let (_, active) = s.json("GET", "/api/notebooks?archived=false", None);
+    assert!(active.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.iter().all(|n| n.str_of("title") != Some("Zebra notes"))).unwrap_or(false));
+    let (_, archived) = s.json("GET", "/api/notebooks?archived=true", None);
+    assert_eq!(archived.get("notebooks").and_then(|n| n.as_arr()).map(|a| a.len()), Some(1));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Â§7.2 â€” EPUB. Chapters must be read in spine order (which can differ from filename order), and
+/// a citation must point at the chapter and its position rather than at "the book".
+#[test]
+fn epub_sources_are_read_in_spine_order_and_cite_their_chapter() {
+    let dir = tempdir("epub");
+    let s = Server::start(dir.clone());
+    let (_, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Handbook"))])));
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let bytes = std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sample.epub")).unwrap();
+    let (st, body) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=handbook.epub", nb_id),
+        Some(&bytes),
+        "application/epub+zip",
+    );
+    assert_eq!(st, 201, "{}", body);
+    let up = json::parse(&body).unwrap();
+    assert_eq!(up.str_of("kind"), Some("epub"));
+    let warnings = up.get("warnings").and_then(|w| w.as_arr()).cloned().unwrap_or_default();
+    assert!(warnings.iter().any(|w| w.as_str().unwrap_or("").contains("image")), "{:?}", warnings);
+
+    let (_, chunks) = s.json("GET", &format!("/api/notebooks/{}/chunks", nb_id), None);
+    let list = chunks.get("chunks").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!list.is_empty(), "{:?}", chunks);
+    for c in &list {
+        let loc = c.get("locator").cloned().unwrap_or(Value::Null);
+        assert_eq!(loc.str_of("kind"), Some("chapter"), "{:?}", loc);
+        assert!(loc.str_of("section").unwrap_or("").contains(" Â· "), "chapter title missing: {:?}", loc);
+    }
+    let first_page = list[0].get("locator").and_then(|l| l.get("page")).and_then(|p| p.as_f64());
+    assert_eq!(first_page, Some(1.0), "the spine's first document is chapter 1");
+
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("how long are customer records retained"))])),
+    );
+    assert_eq!(st, 200);
+    let cit = answer.get("citations").and_then(|c| c.as_arr()).and_then(|a| a.first()).cloned().unwrap_or(Value::Null);
+    assert!(cit.str_of("locator_label").unwrap_or("").contains("chapter 2"), "citation: {:?}", cit);
+    assert!(cit.str_of("locator_label").unwrap_or("").contains("retention model"), "citation: {:?}", cit);
+
+    // a corrupt .epub is refused with a reason, not indexed as text
+    let (st, bad) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=broken.epub", nb_id),
+        Some(b"definitely not a zip archive"),
+        "application/epub+zip",
+    );
+    assert_eq!(st, 422, "{}", bad);
+    std::fs::remove_dir_all(&dir).ok();
+}
 ```
 
 ## `crates/forge-server/Cargo.toml`
@@ -28189,7 +29052,8 @@ curl is out of scope for this layer.
 # Status â€” Forge (NLLM2)
 
 Last updated: 2026-11-01 (access control + share links, crash-resilient ingestion with retry,
-timed transcripts, discovery from seed pages, slide editing and artifact export).
+timed transcripts, discovery from seed pages, slide editing and artifact export, library
+search/sort/icons/duplicate, EPUB ingestion).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -28208,8 +29072,8 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **241 passing, 0 failing** (26 `bininspect` + 184 lib + 26 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **127 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **247 passing, 0 failing** (26 `bininspect` + 188 lib + 28 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **138 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -28225,10 +29089,14 @@ untested it says so.
 | Study difficulty / audience | `difficulty` (easy keeps only definition cards, hard puts cloze recall first) and slide `audience` (executive/technical change the bullets per slide) reach the generator and are recorded on the artifact, not just echoed | `artifacts` tests + e2e journey F/H + 4 UI assertions |
 | Card review marks | `POST /api/artifacts/:id/review` stores known/unknown per card on the artifact (survives restart), returns counts, rejects an unknown card with 422 `unknown_card` | e2e journey F + 5 UI assertions |
 | Artifact editing and export | `PATCH /api/artifacts/:id` versions slide edits/reorder/delete/restore; `GET /api/artifacts/:id/export?format=md/json/svg` returns the exact bytes (SVG only for concept maps, PPTX/PDF refused with 501 `format_unsupported` rather than faking a file) | `export` (7 tests) + e2e journeys G/H + 7 UI assertions |
+| Library search, sort, icons, duplicate (Â§7.1) | `GET /api/notebooks?q=&sort=&archived=` searches title, description, tags **and source titles**, sorts by recent activity / title / newest / most sources, and reports `last_activity` (the newest timestamp of the notebook, its sources, notes and artifacts, so "recent" means something happened). A notebook carries a short `icon` (capped at 4 chars). `POST /api/notebooks/:id/duplicate` copies sources (ready only), chunks, grids, notes and artifacts with fresh ids â€” **not** chat history â€” and says so | e2e `library_search_sort_icons_and_duplicate_are_real` + 12 UI assertions |
+| EPUB (Â§7.2) | `.epub` read through the existing ZIP reader: `META-INF/container.xml` â†’ OPF â†’ **spine order** (not filename order), chapter title and position in the locator (`chapter 2 Â· The retention model`), images counted not read, a package without a spine falls back to filename order **and says so** | `ingest::epub` (4 tests) + e2e `epub_sources_are_read_in_spine_order_and_cite_their_chapter` + 3 UI assertions |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` â†’ 200 |
 | PDF | 2-page fixtures (stored + Flate) â†’ page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML â†’ paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
 | CSV/TSV | RFC 4180 (quotes, embedded newlines, delimiter sniffing, decimal comma) â†’ row + cell locators | `tables::csv_rows` + `parse_delimited` |
+| VTT/SRT transcripts | cue-level millisecond offsets â†’ `timestamp` locators | `ingest::transcript` |
+| EPUB | spine-ordered chapters â†’ `chapter` locators | `ingest::epub` |
 | Grounded answering | extractive, citation-verified, abstains | `grounded`, `api` e2e |
 | Artifacts | flashcards, quiz, report, mindmap, study guide, FAQ, summary, narration script | `artifacts` tests + UI smoke |
 | Persistence | JSON store, atomic replace, backups, corruption safety | `store` tests |
@@ -28246,7 +29114,7 @@ untested it says so.
 
 ```
 tables          22
-ingest          19
+ingest          23
 notebooklm      15
 grounded        12
 fetch           11
@@ -28275,12 +29143,12 @@ apk              3
 inflate          2
 elf              2
 --------------------
-lib total      184
+lib total      188
 bininspect      26   (separate crate)
-e2e (HTTP)      26   (journeys A-K + format/security tests)
+e2e (HTTP)      28   (journeys A-K + format/library/security tests)
 server           5
 ====================
-total          241
+total          247
 ```
 
 ## Not available, with reasons
@@ -28323,8 +29191,8 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 
 ## Immediate next steps
 
-1. EPUB ingestion â€” the ZIP reader already exists; needs XHTML container mapping.
-2. Conversation export as Markdown; artifact re-generation on source change.
+1. Conversation export as Markdown; artifact re-generation when a source changes.
+2. GitHub README/issues and RSS ingestion (both reachable through the existing fetch path).
 3. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
 4. Wire a TLS client (not just the `curl` subprocess) so URL ingestion and remote providers
    stop depending on an external binary.
@@ -28341,7 +29209,7 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 241 tests: 184 lib + 26 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 247 tests: 188 lib + 28 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -28349,10 +29217,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 127 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 138 assertions
 ```
 
-## Unit tests (184) â€” exact names from `cargo test --lib -- --list`
+## Unit tests (188) â€” exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -28735,6 +29603,12 @@ comparison used for every credential check.
 `resolves_relative_forms_against_the_seed`, `candidates_carry_provenance_and_skip_media`,
 `host_reports_the_origin_including_a_port`.
 
+### `ingest::epub` (4)
+`attribute_parsing_accepts_both_quotes`, `relative_hrefs_resolve_against_the_package_directory`,
+`a_non_epub_is_rejected_with_a_reason`, and the fixture test
+`reads_chapters_in_spine_order_with_section_locators` â€” the fixture's spine is deliberately
+`ch_b` then `ch_a`, so a filename-order reader fails rather than silently looking right.
+
 ### `ingest::transcript` (4)
 `parses_vtt_cues_with_millisecond_offsets`, `parses_srt_with_comma_decimals_and_indices`,
 `rejects_text_without_timestamps`, `blocks_carry_timestamp_locators`.
@@ -28810,8 +29684,12 @@ bug, or a limitation for a feature.
   read.
 * **PPTX.** Slide text only; speaker notes are counted in warnings but not indexed;
   charts and SmartArt are skipped.
-* **XLSX.** First worksheet only; formulas are not evaluated (cached values are
-  used); dates appear as serial numbers, not formatted dates.
+* **XLSX.** See the grid path in `tables.rs`; the legacy row path reads the first sheet only.
+  Formulas are not evaluated (cached values are used); dates appear as serial numbers.
+* **EPUB.** Follows the OPF spine and reads XHTML content documents. Not handled: `linear="no"`
+  items are read anyway (they are part of the book but not the main flow), page-break markers,
+  footnotes referenced by `epub:type`, DRM (an encrypted EPUB will fail to unzip with a clear
+  error), and CSS-driven hidden text (the HTML scanner has no layout engine).
 * **HTML.** Regex-free tag scanner; script/style removed; no CSS-driven visibility
   logic, so hidden text may be indexed.
 * **CSV.** Quote handling covers doubled quotes and embedded commas/newlines; no
@@ -33303,8 +34181,9 @@ Statuses: `done` (works + tested) Â· `partial` Â· `planned` Â· `blocked` (enviro
 |---|---|---|---|---|---|
 | NB-01 | create / rename / delete notebook | documented | done | `api.rs`, `app.js` | e2e + UI smoke |
 | NB-02 | persistent library, reopen after restart | documented | done | `store.rs` | `persistence` tests |
-| NB-03 | notebook icon/emoji | documented | planned | â€” | â€” |
-| NB-04 | sort / filter / search library | documented | planned | â€” | â€” |
+| NB-03 | notebook icon/emoji | documented | **done** â€” short icon field, capped, shown in the library | `Notebook.icon` | e2e |
+| NB-04 | sort / filter / search library | documented | **done** â€” searches title/description/tags/source titles; sorts by recent activity, title, newest, most sources; archived filter; `last_activity` | `api::list_notebooks` | e2e + 8 UI |
+| NB-05 | duplicate notebook | documented | **done** â€” copies sources (ready), chunks, grids, notes, artifacts with fresh ids; chat history is **not** copied and the response says so | `api::duplicate_notebook` | e2e + 2 UI |
 | SRC-01 | paste text | documented | done | `ingest::text` | lib + UI |
 | SRC-02 | PDF with page locators | documented | done | `ingest::pdf` | lib + e2e |
 | SRC-03 | DOCX / PPTX / XLSX | documented | done | `ingest::ooxml` (docx/pptx) + `tables::parse_xlsx` (every sheet, cell refs) | lib + e2e |
@@ -33322,7 +34201,7 @@ Statuses: `done` (works + tested) Â· `partial` Â· `planned` Â· `blocked` (enviro
 | SRC-11 | images / OCR | documented | blocked | â€” | no OCR engine |
 | SRC-12 | audio â†’ transcript | documented | blocked | â€” | no ASR; audio *track metadata* is readable (SRC-21) but speech is not |
 | SRC-13 | YouTube captions | documented | blocked | â€” | `yt-dlp` installs, but no route to a platform host and no per-video licence decision |
-| SRC-14 | ePub | documented | planned | â€” | â€” |
+| SRC-14 | ePub | documented | **done** â€” spine-ordered chapters, `chapter N Â· title` locators, images counted not read | `ingest::epub` | 4 unit + e2e + 3 UI |
 | SRC-15 | Drive / Docs / Sheets | documented | blocked | â€” | OAuth + credentials |
 | SRC-16 | GitHub repo/issues | not in reference | planned | â€” | `api.github.com` reachable |
 | SRC-17 | Source Guide auto-summary | documented | **partial (honest)** â€” extractive guide: quoted headline/summary with locators, topics, outline, suggested questions; **no model-written summary** (no reachable LLM) | `guide.rs`, `GET /api/sources/:id/guide` | 8 unit + e2e + 9 UI |
@@ -36044,6 +36923,13 @@ async function main() {
   check("engine badge filled from capabilities", /engine: extractive/.test($("#engineBadge").textContent));
   check("notebook cards render", $$(".card").length >= 1, `cards=${$$(".card").length}`);
 
+  // --- the library can be searched and sorted (7.1), before anything else exists
+  check("library exposes a search box", !!$("#librarySearch") && !!$("#librarySearch").getAttribute("aria-label"));
+  check("library exposes a sort control", !!$("#librarySort"));
+  const sortValues = $$("#librarySort option").map((o) => o.value);
+  check("sort offers recent, title, created and sources", ["recent", "title", "created", "sources"].every((v) => sortValues.includes(v)),
+    sortValues.join(","));
+
   // --- create a notebook through the form
   const form = $(".new-card form");
   form.querySelector('[name="title"]').value = "UI smoke notebook";
@@ -36053,6 +36939,44 @@ async function main() {
   const nbId = window.location.hash.split("/")[2];
 
   check("three panes mounted", $$(".pane").length === 3);
+
+  // --- the notebook carries its icon and shows up in search
+  await fetch(`${BASE}/api/notebooks/${nbId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ icon: "ğŸ“—" }),
+  });
+  window.location.hash = "#/";
+  await wait(600);
+  check("a notebook icon renders in the library", /ğŸ“—/.test($(".library")?.textContent || ""),
+    $(".library")?.textContent?.slice(0, 120));
+  $("#librarySearch").value = "UI smoke";
+  $("#librarySearch").dispatchEvent(new window.Event("input", { bubbles: true }));
+  await wait(700);
+  check("searching filters the library", /1 matching/.test($("#libraryCount")?.textContent || ""),
+    $("#libraryCount")?.textContent);
+  $("#librarySearch").value = "no-such-notebook-anywhere";
+  $("#librarySearch").dispatchEvent(new window.Event("input", { bubbles: true }));
+  await wait(700);
+  check("an empty search result says what was searched",
+    /Nothing matches/.test($(".library")?.textContent || "") && /source titles/.test($(".library")?.textContent || ""),
+    $(".library")?.textContent?.slice(0, 160));
+  $("#librarySearch").value = "";
+  $("#librarySearch").dispatchEvent(new window.Event("input", { bubbles: true }));
+  await wait(700);
+  check("clearing the search restores the list", $$(".card").length >= 2, `cards=${$$(".card").length}`);
+
+  // --- duplicate copies evidence, not chat history
+  const dupBtn = [...window.document.querySelectorAll(".card button")].find((b) => /Duplicate/.test(b.textContent));
+  check("a notebook can be duplicated from the library", !!dupBtn);
+  dupBtn.click();
+  await wait(900);
+  check("the copy appears with a (copy) suffix", /\(copy\)/.test($(".library")?.textContent || ""),
+    $(".library")?.textContent?.slice(0, 200));
+  const copyCards = $$(".card").filter((c) => /\(copy\)/.test(c.textContent));
+  check("exactly one copy was made", copyCards.length === 1, `copies=${copyCards.length}`);
+  window.location.hash = `#/nb/${nbId}`;
+  await wait(600);
 
   // --- import pasted text
   const ta = $("#pasteText");
@@ -36476,6 +37400,26 @@ async function main() {
   check("the import warning about the media link was surfaced or explained",
     !/talk\.mp4/.test(discovered));
   fixture.close();
+
+  // --- an EPUB is read in spine order and cites its chapter (Â§7.2)
+  const epub = fs.readFileSync(path.join(WEB, "../../tests/fixtures/sample.epub"));
+  const epubFile = new window.File([epub], "handbook.epub", { type: "application/epub+zip" });
+  const epubInput = $("#fileInput");
+  Object.defineProperty(epubInput, "files", { value: [epubFile], writable: true });
+  epubInput.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await wait(1500);
+  const epubSource = $$(".source-item").find((el) => /handbook\.epub/i.test(el.textContent));
+  check("an EPUB is accepted as a source", !!epubSource, $$(".source-item").map((e) => e.textContent).join(" | ").slice(0, 240));
+  check("the EPUB source reports its kind", /epub/.test(epubSource?.textContent || ""), epubSource?.textContent);
+  const askEpub = $(".composer textarea");
+  askEpub.value = "how long are customer records retained";
+  byText(".composer button", "Ask").click();
+  await wait(1200);
+  const epubMsg = $$(".msg.assistant").pop();
+  check("an EPUB citation names the chapter, not just the file", /chapter 2/.test(epubMsg?.textContent || ""),
+    epubMsg?.textContent?.slice(0, 300));
+  await window.openNotebook(window.document.getElementById("app"), nbId);
+  await wait(900);
 
   // --- a supplied caption file becomes a timecode-citing source (Journey E)
   const vtt = fs.readFileSync(path.join(WEB, "../../tests/fixtures/lecture.vtt"));

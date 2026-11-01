@@ -11,8 +11,9 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 |---|---|---|---|---|---|
 | NB-01 | create / rename / delete notebook | documented | done | `api.rs`, `app.js` | e2e + UI smoke |
 | NB-02 | persistent library, reopen after restart | documented | done | `store.rs` | `persistence` tests |
-| NB-03 | notebook icon/emoji | documented | planned | — | — |
-| NB-04 | sort / filter / search library | documented | planned | — | — |
+| NB-03 | notebook icon/emoji | documented | **done** — short icon field, capped, shown in the library | `Notebook.icon` | e2e |
+| NB-04 | sort / filter / search library | documented | **done** — searches title/description/tags/source titles; sorts by recent activity, title, newest, most sources; archived filter; `last_activity` | `api::list_notebooks` | e2e + 8 UI |
+| NB-05 | duplicate notebook | documented | **done** — copies sources (ready), chunks, grids, notes, artifacts with fresh ids; chat history is **not** copied and the response says so | `api::duplicate_notebook` | e2e + 2 UI |
 | SRC-01 | paste text | documented | done | `ingest::text` | lib + UI |
 | SRC-02 | PDF with page locators | documented | done | `ingest::pdf` | lib + e2e |
 | SRC-03 | DOCX / PPTX / XLSX | documented | done | `ingest::ooxml` (docx/pptx) + `tables::parse_xlsx` (every sheet, cell refs) | lib + e2e |
@@ -30,7 +31,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-11 | images / OCR | documented | blocked | — | no OCR engine |
 | SRC-12 | audio → transcript | documented | blocked | — | no ASR; audio *track metadata* is readable (SRC-21) but speech is not |
 | SRC-13 | YouTube captions | documented | blocked | — | `yt-dlp` installs, but no route to a platform host and no per-video licence decision |
-| SRC-14 | ePub | documented | planned | — | — |
+| SRC-14 | ePub | documented | **done** — spine-ordered chapters, `chapter N · title` locators, images counted not read | `ingest::epub` | 4 unit + e2e + 3 UI |
 | SRC-15 | Drive / Docs / Sheets | documented | blocked | — | OAuth + credentials |
 | SRC-16 | GitHub repo/issues | not in reference | planned | — | `api.github.com` reachable |
 | SRC-17 | Source Guide auto-summary | documented | **partial (honest)** — extractive guide: quoted headline/summary with locators, topics, outline, suggested questions; **no model-written summary** (no reachable LLM) | `guide.rs`, `GET /api/sources/:id/guide` | 8 unit + e2e + 9 UI |

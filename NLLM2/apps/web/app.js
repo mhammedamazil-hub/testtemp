@@ -164,35 +164,58 @@ async function route() {
 window.addEventListener("hashchange", route);
 
 // ---------------------------------------------------------------- library
-async function renderLibrary(app) {
-  const data = await api.get("/notebooks");
-  state.notebooks = data.notebooks || [];
-  const list = h("div", { class: "grid" });
+// The library is a real list, not a wall of cards: it can be searched (title, description,
+// tag or the name of a source inside it), sorted, and each notebook carries the last time
+// something actually happened in it.
+const library = { q: "", sort: "recent" };
 
+async function renderLibrary(app) {
+  const params = new URLSearchParams();
+  if (library.q) params.set("q", library.q);
+  params.set("sort", library.sort);
+  const data = await api.get("/notebooks" + (params.toString() ? `?${params}` : ""));
+  state.notebooks = data.notebooks || [];
+
+  const list = h("div", { class: "grid" });
   for (const nb of state.notebooks) {
     list.append(h("div", {
       class: "card", tabindex: "0", role: "link",
       onclick: () => (location.hash = `#/nb/${nb.id}`),
       onkeydown: (e) => { if (e.key === "Enter") location.hash = `#/nb/${nb.id}`; },
     },
-      h("h3", {}, nb.title),
+      h("div", { class: "row", style: "gap:8px;align-items:baseline" },
+        h("span", { class: "nb-icon", "aria-hidden": "true" }, nb.icon || (nb.title || "?").slice(0, 1).toUpperCase()),
+        h("h3", {}, nb.title)),
       nb.description ? h("p", {}, nb.description) : null,
       h("div", { class: "meta" },
         h("span", {}, `${nb.source_count} source${nb.source_count === 1 ? "" : "s"}`),
         h("span", {}, `${nb.note_count} note${nb.note_count === 1 ? "" : "s"}`),
         h("span", {}, `${nb.artifact_count} artifact${nb.artifact_count === 1 ? "" : "s"}`),
-        h("span", {}, fmtDate(nb.updated_at))),
+        h("span", { title: "Last activity in this notebook" }, `active ${fmtDate(nb.last_activity || nb.updated_at)}`)),
       h("div", { class: "row-between", style: "margin-top:6px" },
         h("span", { class: "badge" + (nb.archived ? " warn" : "") }, nb.archived ? "archived" : "active"),
-        h("button", {
-          class: "ghost", onclick: async (e) => {
-            e.stopPropagation();
-            if (!confirm(`Delete “${nb.title}” and all of its sources, notes and artifacts?`)) return;
-            await api.del(`/notebooks/${nb.id}`);
-            toast("Notebook deleted");
-            route();
-          }
-        }, "Delete"))));
+        h("div", { class: "row", style: "gap:4px" },
+          h("button", {
+            class: "ghost", title: "Duplicate this notebook (sources, notes, artifacts; not chat history)",
+            onclick: async (e) => {
+              e.stopPropagation();
+              if (!confirm(`Duplicate “${nb.title}”? Sources, notes and artifacts are copied; chat history is not.`)) return;
+              try {
+                const r = await api.post(`/notebooks/${nb.id}/duplicate`, {});
+                toast(`Copied ${r.source_count} source${r.source_count === 1 ? "" : "s"} — chat history was not copied`);
+                route();
+              } catch (err) { toast(err.message, "err"); }
+            }
+          }, "Duplicate"),
+          h("button", {
+            class: "ghost", onclick: async (e) => {
+              e.stopPropagation();
+              if (!confirm(`Delete “${nb.title}” and all of its sources, notes and artifacts?`)) return;
+              await api.del(`/notebooks/${nb.id}`);
+              toast("Notebook deleted");
+              route();
+            }
+          }, "Delete")))));
   }
 
   const createForm = h("form", {
@@ -205,6 +228,7 @@ async function renderLibrary(app) {
         const nb = await api.post("/notebooks", {
           title,
           description: createForm.querySelector('[name="description"]').value.trim(),
+          icon: createForm.querySelector('[name="icon"]').value.trim(),
         });
         toast("Notebook created");
         location.hash = `#/nb/${nb.id}`;
@@ -213,14 +237,44 @@ async function renderLibrary(app) {
   },
     h("input", { type: "text", name: "title", placeholder: "e.g. Retrieval research", "aria-label": "Notebook title" }),
     h("input", { type: "text", name: "description", placeholder: "Optional description", "aria-label": "Description" }),
+    h("input", { type: "text", name: "icon", placeholder: "Icon (optional, e.g. 📘)", maxlength: "4", "aria-label": "Notebook icon" }),
     h("button", { class: "primary", type: "submit" }, "Create notebook"));
 
   list.append(h("div", { class: "card new-card", onclick: () => createForm.querySelector("input").focus() }, createForm));
 
+  // --- search + sort
+  let debounce = null;
+  const search = h("input", {
+    type: "search", id: "librarySearch", value: library.q,
+    placeholder: "Search notebooks, tags or source titles…", "aria-label": "Search notebooks",
+    oninput: (e) => {
+      clearTimeout(debounce);
+      const value = e.target.value;
+      debounce = setTimeout(() => { library.q = value.trim(); route(); }, 250);
+    },
+  });
+  const sort = h("select", {
+    id: "librarySort", "aria-label": "Sort notebooks",
+    onchange: (e) => { library.sort = e.target.value; route(); },
+  }, [["recent", "recent activity"], ["title", "title"], ["created", "newest"], ["sources", "most sources"]]
+    .map(([v, label]) => h("option", { value: v, selected: library.sort === v }, label)));
+
+  const toolbar = h("div", { class: "row-between", style: "margin:10px 0;gap:8px;flex-wrap:wrap" },
+    search, sort,
+    h("span", { class: "hint", id: "libraryCount" },
+      library.q
+        ? `${state.notebooks.length} matching${state.notebooks.length === 1 ? "" : "s"} of ${data.total ?? "?"}`
+        : `${state.notebooks.length} notebook${state.notebooks.length === 1 ? "" : "s"}`));
+
+  const body = library.q && !state.notebooks.length
+    ? h("p", { class: "empty" }, `Nothing matches “${library.q}”. Search covers the title, description, tags and source titles.`)
+    : list;
+
   app.replaceChildren(h("div", { class: "library" },
     h("h1", {}, "Notebooks"),
     h("p", { class: "sub" }, "Each notebook is a private corpus. Import sources, ask questions, and every answer points back to the exact evidence."),
-    list,
+    toolbar,
+    body,
     h("p", { class: "hint", style: "margin-top:20px" }, "All data stays on this machine, in the server's data directory.")));
 }
 
@@ -440,7 +494,7 @@ function renderSources(pane) {
     } }, "Import text"));
 
   const fileInput = h("input", {
-    type: "file", accept: ".pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.html,.htm,.csv,.tsv,.vtt,.srt", class: "sr-only", id: "fileInput",
+    type: "file", accept: ".pdf,.docx,.pptx,.xlsx,.md,.markdown,.txt,.html,.htm,.csv,.tsv,.vtt,.srt,.epub", class: "sr-only", id: "fileInput",
     onchange: async (e) => {
       const f = e.target.files[0];
       if (!f) return;
@@ -461,7 +515,7 @@ function renderSources(pane) {
   const uploadRow = h("div", { class: "stack", style: "margin-top:9px" },
     fileInput,
     h("label", { for: "fileInput", class: "sr-only" }, "Upload a file"),
-    h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, MD, TXT, HTML, CSV, VTT, SRT)"),
+    h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, EPUB, MD, TXT, HTML, CSV, VTT, SRT)"),
     h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"),
     h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover links…"));
 

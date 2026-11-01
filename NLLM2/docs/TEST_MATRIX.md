@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 241 tests: 184 lib + 26 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 247 tests: 188 lib + 28 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 127 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 138 assertions
 ```
 
-## Unit tests (184) — exact names from `cargo test --lib -- --list`
+## Unit tests (188) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -398,6 +398,12 @@ comparison used for every credential check.
 ### `discovery` (3)
 `resolves_relative_forms_against_the_seed`, `candidates_carry_provenance_and_skip_media`,
 `host_reports_the_origin_including_a_port`.
+
+### `ingest::epub` (4)
+`attribute_parsing_accepts_both_quotes`, `relative_hrefs_resolve_against_the_package_directory`,
+`a_non_epub_is_rejected_with_a_reason`, and the fixture test
+`reads_chapters_in_spine_order_with_section_locators` — the fixture's spine is deliberately
+`ch_b` then `ch_a`, so a filename-order reader fails rather than silently looking right.
 
 ### `ingest::transcript` (4)
 `parses_vtt_cues_with_millisecond_offsets`, `parses_srt_with_comma_decimals_and_indices`,

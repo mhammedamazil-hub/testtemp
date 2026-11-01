@@ -255,6 +255,7 @@ impl Api {
             ("POST", ["api", "notebooks", _, "chat", "stream"]) => "read",
             ("POST", ["api", "notebooks", _, "sources", ..]) => "write",
             ("POST", ["api", "notebooks", _, "shares"]) => "manage",
+            ("POST", ["api", "notebooks", _, "duplicate"]) => "manage",
             ("DELETE", ["api", "notebooks", ..]) => "manage",
             ("PATCH", ["api", "notebooks", ..]) => "manage",
             ("DELETE", ["api", "shares", ..]) => "manage",
@@ -325,11 +326,12 @@ impl Api {
         let result = match (req.method.as_str(), segs.as_slice()) {
             ("GET", ["api", "health"]) => Ok(self.health()),
             ("GET", ["api", "capabilities"]) => Ok(ok(self.capabilities())),
-            ("GET", ["api", "notebooks"]) => Ok(ok(self.list_notebooks(&identity))),
+            ("GET", ["api", "notebooks"]) => Ok(ok(self.list_notebooks(&identity, req))),
             ("POST", ["api", "notebooks"]) => self.create_notebook(req),
             ("GET", ["api", "notebooks", id]) => Ok(self.get_notebook(id)),
             ("PATCH", ["api", "notebooks", id]) => self.update_notebook(id, req),
             ("DELETE", ["api", "notebooks", id]) => Ok(self.delete_notebook(id)),
+            ("POST", ["api", "notebooks", id, "duplicate"]) => self.duplicate_notebook(id),
             ("GET", ["api", "notebooks", id, "sources"]) => Ok(ok(self.list_sources(id))),
             ("POST", ["api", "notebooks", id, "sources", "text"]) => self.add_text_source(id, req),
             ("POST", ["api", "notebooks", id, "sources", "upload"]) => self.add_upload_source(id, req),
@@ -446,6 +448,7 @@ impl Api {
                 "youtube" => obj!{ "status" => "unsupported", "reason" => "needs a transcript extractor (yt-dlp) and an ASR pipeline; neither is installed" },
                 "audio_transcript" => obj!{ "status" => "unsupported", "reason" => "no ASR engine installed (see docs/RESEARCH_BLOCKERS.md)" },
                 "docx" => obj!{ "status" => "supported", "locator" => "paragraph", "note" => "WordprocessingML text; images ignored" },
+                "epub" => obj!{ "status" => "supported", "locator" => "section", "note" => "chapters read in the package spine order, not filename order; the chapter title and its position are part of the locator; images counted, not read" },
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
                 "audio" => obj!{ "status" => "unsupported", "reason" => "no ASR engine available offline" },
@@ -502,34 +505,85 @@ impl Api {
     }
 
     // --------------------------------------------------------- notebooks
-    fn list_notebooks(&self, identity: &auth::Identity) -> Value {
+    /// `GET /api/notebooks?q=&sort=&archived=`
+    ///
+    /// `q` matches the title, description, tags **and the titles of the notebook's sources**, so
+    /// searching for a document name finds the notebook that contains it. `last_activity` is the
+    /// newest timestamp of the notebook itself, its sources, notes and artifacts — "recent" means
+    /// something actually happened, not that the row was rewritten.
+    fn list_notebooks(&self, identity: &auth::Identity, req: &Request) -> Value {
+        let q = req.query_get("q").unwrap_or("").trim().to_ascii_lowercase();
+        let sort = req.query_get("sort").unwrap_or("recent").to_string();
+        let archived_filter: Option<bool> = match req.query_get("archived") {
+            Some("1") | Some("true") => Some(true),
+            Some("0") | Some("false") => Some(false),
+            _ => None,
+        };
         self.store.read(|db| {
-            let scope = identity.notebook();
-            let items: Vec<Value> = db
-                .notebooks
-                .iter()
+            let scope = identity.notebook().map(|s| s.to_string());
+            let mut rows: Vec<(Value, String, String, String, u64)> = Vec::new();
+            for n in db.notebooks.iter() {
                 // A share link sees exactly one notebook. Listing the rest would leak titles,
                 // counts and activity that were never shared.
-                .filter(|n| scope.map(|s| s == n.id).unwrap_or(true))
-                .map(|n| {
-                    let sources = db.sources.iter().filter(|s| s.notebook_id == n.id).count();
-                    let notes = db.notes.iter().filter(|x| x.notebook_id == n.id).count();
-                    let artifacts = db.artifacts.iter().filter(|x| x.notebook_id == n.id).count();
-                    obj! {
-                        "id" => n.id.as_str(),
-                        "title" => n.title.as_str(),
-                        "description" => n.description.as_str(),
-                        "tags" => json_str_list(&n.tags),
-                        "archived" => n.archived,
-                        "created_at" => n.created_at.as_str(),
-                        "updated_at" => n.updated_at.as_str(),
-                        "source_count" => sources as u64,
-                        "note_count" => notes as u64,
-                        "artifact_count" => artifacts as u64,
+                if let Some(s) = &scope {
+                    if s != &n.id {
+                        continue;
                     }
-                })
-                .collect();
-            obj! { "notebooks" => Value::Arr(items) }
+                }
+                if let Some(want) = archived_filter {
+                    if n.archived != want {
+                        continue;
+                    }
+                }
+                let mine: Vec<&Source> = db.sources.iter().filter(|s| s.notebook_id == n.id).collect();
+                let notes = db.notes.iter().filter(|x| x.notebook_id == n.id).count();
+                let artifacts = db.artifacts.iter().filter(|x| x.notebook_id == n.id).count();
+                let matches = q.is_empty()
+                    || n.title.to_ascii_lowercase().contains(&q)
+                    || n.description.to_ascii_lowercase().contains(&q)
+                    || n.tags.iter().any(|t| t.to_ascii_lowercase().contains(&q))
+                    || mine.iter().any(|s| s.title.to_ascii_lowercase().contains(&q));
+                if !matches {
+                    continue;
+                }
+                let mut last = n.updated_at.clone();
+                for t in mine.iter().map(|s| s.added_at.clone())
+                    .chain(db.notes.iter().filter(|x| x.notebook_id == n.id).map(|x| x.updated_at.clone()))
+                    .chain(db.artifacts.iter().filter(|x| x.notebook_id == n.id).map(|x| x.updated_at.clone()))
+                {
+                    if t > last {
+                        last = t;
+                    }
+                }
+                let value = obj! {
+                    "id" => n.id.as_str(),
+                    "title" => n.title.as_str(),
+                    "icon" => n.icon.as_str(),
+                    "description" => n.description.as_str(),
+                    "tags" => json_str_list(&n.tags),
+                    "archived" => n.archived,
+                    "created_at" => n.created_at.as_str(),
+                    "updated_at" => n.updated_at.as_str(),
+                    "last_activity" => last.as_str(),
+                    "source_count" => mine.len() as u64,
+                    "note_count" => notes as u64,
+                    "artifact_count" => artifacts as u64,
+                };
+                rows.push((value, n.title.to_ascii_lowercase(), n.created_at.clone(), last, mine.len() as u64));
+            }
+            match sort.as_str() {
+                "title" => rows.sort_by(|a, b| a.1.cmp(&b.1)),
+                "created" => rows.sort_by(|a, b| b.2.cmp(&a.2)),
+                "sources" => rows.sort_by(|a, b| b.4.cmp(&a.4).then(a.1.cmp(&b.1))),
+                // default: newest activity first, then title so the order is stable
+                _ => rows.sort_by(|a, b| b.3.cmp(&a.3).then(a.1.cmp(&b.1))),
+            }
+            obj! {
+                "notebooks" => Value::Arr(rows.into_iter().map(|r| r.0).collect()),
+                "query" => q.as_str(),
+                "sort" => sort.as_str(),
+                "total" => db.notebooks.len() as u64,
+            }
         })
     }
 
@@ -543,6 +597,7 @@ impl Api {
         let nb = Notebook {
             id: new_id("nb"),
             title,
+            icon: clean_icon(body.str_of("icon").unwrap_or("")),
             description: body.str_of("description").unwrap_or("").to_string(),
             instructions: body.str_of("instructions").unwrap_or("").to_string(),
             tags: parse_str_list(body.get("tags")),
@@ -563,6 +618,7 @@ impl Api {
             Some(n) => ok(obj! {
                 "id" => n.id.as_str(),
                 "title" => n.title.as_str(),
+                "icon" => n.icon.as_str(),
                 "description" => n.description.as_str(),
                 "instructions" => n.instructions.as_str(),
                 "tags" => json_str_list(&n.tags),
@@ -590,6 +646,9 @@ impl Api {
                     if let Some(d) = body.str_of("description") {
                         n.description = d.to_string();
                     }
+                    if let Some(icon) = body.str_of("icon") {
+                        n.icon = clean_icon(icon);
+                    }
                     if let Some(i) = body.str_of("instructions") {
                         n.instructions = i.to_string();
                     }
@@ -615,6 +674,117 @@ impl Api {
             Some(n) => ok(obj! { "id" => n.id.as_str(), "title" => n.title.as_str(), "updated" => true }),
             None => err(404, "not_found", "notebook not found"),
         }))
+    }
+
+    /// `POST /api/notebooks/:id/duplicate`
+    ///
+    /// Copies the *evidence*, not the diary: sources (only `ready` ones — a failed import has no
+    /// content to copy), their chunks, their grids, notes and artifacts travel; conversations do
+    /// not, because chat history is a record of what you asked, not part of the corpus.
+    fn duplicate_notebook(&self, id: &str) -> Result<Response, Response> {
+        let new_id_str = new_id("nb");
+        let copied = self
+            .store
+            .write(|db| {
+                let Some(src_nb) = db.notebooks.iter().find(|n| n.id == id).cloned() else {
+                    return Err(err(404, "not_found", "notebook not found"));
+                };
+                let now = now_iso();
+                let new_nb = Notebook {
+                    id: new_id_str.clone(),
+                    title: format!("{} (copy)", src_nb.title),
+                    icon: src_nb.icon.clone(),
+                    description: src_nb.description.clone(),
+                    instructions: src_nb.instructions.clone(),
+                    tags: src_nb.tags.clone(),
+                    archived: false,
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                };
+
+                let mut id_map: BTreeMap<String, String> = BTreeMap::new();
+                let sources: Vec<Source> = db
+                    .sources
+                    .iter()
+                    .filter(|s| s.notebook_id == id && s.status == "ready")
+                    .cloned()
+                    .collect();
+                let mut new_sources: Vec<Source> = Vec::new();
+                for s in sources {
+                    let sid = new_id("src");
+                    id_map.insert(s.id.clone(), sid.clone());
+                    new_sources.push(Source { id: sid, notebook_id: new_id_str.clone(), ..s });
+                }
+                let source_count = new_sources.len();
+                let chunks: Vec<Chunk> = db
+                    .chunks
+                    .iter()
+                    .filter(|c| c.notebook_id == id)
+                    .filter_map(|c| id_map.get(&c.source_id).map(|sid| Chunk {
+                        id: new_id("chk"),
+                        source_id: sid.clone(),
+                        notebook_id: new_id_str.clone(),
+                        ordinal: c.ordinal,
+                        text: c.text.clone(),
+                        locator: c.locator.clone(),
+                    }))
+                    .collect();
+                let chunk_count = chunks.len();
+                let tables: Vec<crate::tables::Table> = db
+                    .tables
+                    .iter()
+                    .filter(|t| t.notebook_id == id)
+                    .filter_map(|t| id_map.get(&t.source_id).map(|sid| crate::tables::Table {
+                        id: format!("tbl_{}", crate::domain::short_hash(&format!("{}|{}", sid, t.sheet))),
+                        source_id: sid.clone(),
+                        notebook_id: new_id_str.clone(),
+                        ..t.clone()
+                    }))
+                    .collect();
+                let notes: Vec<Note> = db
+                    .notes
+                    .iter()
+                    .filter(|n| n.notebook_id == id)
+                    .map(|n| Note {
+                        id: new_id("note"),
+                        notebook_id: new_id_str.clone(),
+                        updated_at: now.clone(),
+                        ..n.clone()
+                    })
+                    .collect();
+                let artifacts: Vec<Artifact> = db
+                    .artifacts
+                    .iter()
+                    .filter(|a| a.notebook_id == id)
+                    .map(|a| Artifact {
+                        id: new_id("art"),
+                        notebook_id: new_id_str.clone(),
+                        source_ids: a.source_ids.iter().filter_map(|s| id_map.get(s).cloned()).collect(),
+                        ..a.clone()
+                    })
+                    .collect();
+                let note_count = notes.len();
+                let artifact_count = artifacts.len();
+
+                db.notebooks.push(new_nb);
+                db.sources.extend(new_sources);
+                db.chunks.extend(chunks);
+                db.tables.extend(tables);
+                db.notes.extend(notes);
+                db.artifacts.extend(artifacts);
+                Ok(obj! {
+                    "id" => new_id_str.clone(),
+                    "title" => format!("{} (copy)", src_nb.title),
+                    "source_count" => source_count as u64,
+                    "chunk_count" => chunk_count as u64,
+                    "note_count" => note_count as u64,
+                    "artifact_count" => artifact_count as u64,
+                    "conversations_copied" => 0u64,
+                    "note" => "sources, notes and artifacts were copied; chat history was not",
+                })
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        copied.map(created)
     }
 
     fn delete_notebook(&self, id: &str) -> Response {
@@ -2471,6 +2641,7 @@ impl Api {
         let notebook = Notebook {
             id: new_nb_id.clone(),
             title: format!("{} (imported)", nb_v.str_of("title").unwrap_or("Notebook")),
+            icon: clean_icon(nb_v.str_of("icon").unwrap_or("")),
             description: nb_v.str_of("description").unwrap_or("").to_string(),
             instructions: nb_v.str_of("instructions").unwrap_or("").to_string(),
             tags: parse_str_list(nb_v.get("tags")),
@@ -2945,10 +3116,18 @@ fn parse_body(req: &Request) -> Result<Value, Response> {
 
 // --- serialisers shared with the store (kept local to avoid leaking internals)
 
+/// A notebook icon is one or two characters of the user's choosing (an emoji is 1–2 code
+/// points here). Trimmed, capped, and stripped of control characters so it can never break a
+/// layout or smuggle markup into a title line.
+fn clean_icon(raw: &str) -> String {
+    raw.trim().chars().filter(|c| !c.is_control()).take(4).collect()
+}
+
 fn nb_json(n: &Notebook) -> Value {
     obj! {
         "id" => n.id.as_str(),
         "title" => n.title.as_str(),
+        "icon" => n.icon.as_str(),
         "description" => n.description.as_str(),
         "instructions" => n.instructions.as_str(),
         "tags" => json_str_list(&n.tags),
