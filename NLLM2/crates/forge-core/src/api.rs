@@ -466,7 +466,8 @@ impl Api {
             "artifact_lifecycle" => obj! {
                 "status" => "supported",
                 "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
-                "export" => "Markdown and JSON always; SVG for concept maps only; PPTX/PDF return 501 format_unsupported",
+                "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
+                "export_note" => "the PPTX is a written-by-hand OPC package and the PDF a written-by-hand page tree, verified by reading both back with Forge's own readers and (one-off, outside the build) python-pptx and pypdf",
             },
             "conversations" => obj! {
                 "status" => "supported",
@@ -2913,13 +2914,28 @@ impl Api {
                         "SVG export exists for concept maps only; this artifact has no diagram",
                     ),
                 },
-                "pptx" | "pdf" | "png" => err(
+                "pptx" => match crate::render::pptx(art) {
+                    Some(bytes) => Response::new(
+                        200,
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        bytes,
+                    )
+                    .with_header("Content-Disposition", &format!("attachment; filename=\"{}.pptx\"", base)),
+                    None => err(
+                        409,
+                        "format_unavailable",
+                        "PPTX export exists for slide decks only; this artifact is not a deck",
+                    ),
+                },
+                "pdf" => {
+                    let bytes = crate::render::pdf(art, &sources);
+                    Response::new(200, "application/pdf", bytes)
+                        .with_header("Content-Disposition", &format!("attachment; filename=\"{}.pdf\"", base))
+                }
+                "png" => err(
                     501,
                     "format_unsupported",
-                    &format!(
-                        "this build has no {} renderer; export Markdown (format=md) and convert outside Forge",
-                        format
-                    ),
+                    "this build has no rasteriser; export PDF (format=pdf) or SVG (format=svg) and rasterise outside Forge",
                 ),
                 other => err(422, "bad_format", &format!("unknown format {}", other)),
             }

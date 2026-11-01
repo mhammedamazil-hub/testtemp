@@ -12,1017 +12,6 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
-## `crates/forge-core/src/github.rs`
-
-```rust
-//! GitHub repositories as sources: the README and the issue list.
-//!
-//! Forge has no GitHub account, no token, and no OAuth app — this module talks to the public
-//! REST API (`api.github.com`) with the same SSRF-guarded fetch path as any other URL, and
-//! nothing else. That has three consequences the code states out loud:
-//!
-//! * **Rate limits are the anonymous ones.** A 403/429 from GitHub is reported as such, with
-//!   GitHub's own message, instead of being retried into a wall.
-//! * **Only public repositories.** No credentials exist, so a private repo is simply a 404 as
-//!   far as Forge is concerned, and the error says which repository was asked for.
-//! * **Issues, not code.** Forge indexes issue titles and bodies as dated, numbered items. It
-//!   does not clone, browse files, or claim to have read the source tree.
-//!
-//! The bytes that reach the ingestion pipeline are a small JSON envelope of what was actually
-//! collected (`{"repo":…,"readme":…,"issues":[…]}`), which is also what is retained on disk so
-//! a retry re-indexes the same collection rather than silently fetching a newer one.
-
-use crate::domain::Locator;
-use crate::ingest::{self, Block, Parsed};
-use crate::json::{self, Value};
-use crate::obj;
-
-/// The issue number as a locator position. u32 because a locator position is an index, and
-/// GitHub issue numbers above 4 billion do not exist.
-fn issue_pos(number: u64) -> u32 {
-    number.min(u32::MAX as u64) as u32
-}
-
-/// Hard cap on issues per source: a repository with 40k issues is not a document, and
-/// indexing all of them would drown every other source in the notebook.
-pub const ISSUE_MAX: usize = 100;
-pub const ISSUE_DEFAULT: usize = 30;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Repo {
-    pub owner: String,
-    pub name: String,
-}
-
-impl Repo {
-    pub fn full(&self) -> String {
-        format!("{}/{}", self.owner, self.name)
-    }
-
-    /// Accept the shapes a person actually pastes: `owner/name`, a github.com URL (with or
-    /// without `.git`), or an SSH clone URL.
-    pub fn parse(input: &str) -> Result<Repo, String> {
-        let raw = input.trim();
-        if raw.is_empty() {
-            return Err("repo is required, e.g. \"rust-lang/rust\"".to_string());
-        }
-        let mut rest = raw.to_string();
-        if let Some((scheme, tail)) = raw.split_once("://") {
-            let host = tail.split('/').next().unwrap_or("").to_ascii_lowercase();
-            let host = host.split('@').next_back().unwrap_or("").to_string();
-            if !matches!(host.as_str(), "github.com" | "www.github.com") {
-                return Err(format!(
-                    "{} is not GitHub: this source reads github.com repositories only",
-                    scheme
-                ));
-            }
-        }
-        for prefix in ["https://", "http://", "git@", "ssh://git@"] {
-            if let Some(stripped) = rest.strip_prefix(prefix) {
-                rest = stripped.to_string();
-                break;
-            }
-        }
-        // git@host:owner/name
-        let rest = match rest.split_once(':') {
-            Some((host, tail)) if host.contains("github.com") && !tail.starts_with("//") => tail.to_string(),
-            _ => rest,
-        };
-        let rest = rest.strip_prefix("github.com/").unwrap_or(&rest).to_string();
-        let rest = rest.strip_suffix(".git").unwrap_or(&rest).to_string();
-        let rest = rest.split(['?', '#']).next().unwrap_or("").trim_end_matches('/').to_string();
-        let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
-        if parts.len() < 2 {
-            return Err(format!("\"{}\" is not a repository: expected owner/name", raw));
-        }
-        let (owner, name) = (parts[0], parts[1]);
-        for (label, value) in [("owner", owner), ("repository", name)] {
-            if !value
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-            {
-                return Err(format!("the {} \"{}\" has characters GitHub does not allow", label, value));
-            }
-        }
-        Ok(Repo { owner: owner.to_string(), name: name.to_string() })
-    }
-}
-
-/// The API root. Overridable so tests can point at a local origin without touching the code
-/// path that production uses; the default is the real public API.
-pub fn api_base() -> String {
-    std::env::var("FORGE_GITHUB_API")
-        .ok()
-        .map(|v| v.trim().trim_end_matches('/').to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "https://api.github.com".to_string())
-}
-
-pub fn readme_url(repo: &Repo) -> String {
-    format!("{}/repos/{}/{}/readme", api_base(), repo.owner, repo.name)
-}
-
-pub fn issues_url(repo: &Repo, limit: usize) -> String {
-    format!(
-        "{}/repos/{}/{}/issues?state=all&per_page={}",
-        api_base(),
-        repo.owner,
-        repo.name,
-        limit.min(ISSUE_MAX)
-    )
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Issue {
-    pub number: u64,
-    pub title: String,
-    pub state: String,
-    pub author: String,
-    pub created: String,
-    pub body: String,
-    pub pull_request: bool,
-}
-
-/// Parse the JSON array returned by `/issues`. A non-array is an error, not an empty list:
-/// "GitHub answered with something else" must never look like "this repo has no issues".
-pub fn parse_issues(text: &str) -> Result<Vec<Issue>, String> {
-    let value = json::parse(text).map_err(|e| format!("GitHub's issue list is not JSON: {}", e))?;
-    let arr = value
-        .as_arr()
-        .ok_or_else(|| "GitHub's issue list is not a JSON array".to_string())?;
-    let mut out = Vec::new();
-    for item in arr {
-        let number = item
-            .get("number")
-            .and_then(|n| n.as_f64())
-            .ok_or_else(|| "an issue has no number".to_string())? as u64;
-        out.push(Issue {
-            number,
-            title: item.str_of("title").unwrap_or("").trim().to_string(),
-            state: item.str_of("state").unwrap_or("").trim().to_string(),
-            author: item
-                .get("user")
-                .and_then(|u| u.str_of("login"))
-                .unwrap_or("")
-                .to_string(),
-            created: item.str_of("created_at").unwrap_or("").trim().to_string(),
-            body: item.str_of("body").unwrap_or("").to_string(),
-            pull_request: item.get("pull_request").map(|p| !p.is_null()).unwrap_or(false),
-        });
-    }
-    Ok(out)
-}
-
-/// What is retained on disk and re-parsed by the ingestion pipeline.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Collection {
-    pub repo: String,
-    pub readme: String,
-    pub issues: Vec<Issue>,
-    pub skipped_pull_requests: usize,
-    pub api_base: String,
-}
-
-impl Collection {
-    /// The retained envelope. Bodies are kept verbatim so a citation can quote them.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let issues: Vec<Value> = self
-            .issues
-            .iter()
-            .map(|i| {
-                obj! {
-                    "number" => i.number as u64,
-                    "title" => i.title.as_str(),
-                    "state" => i.state.as_str(),
-                    "author" => i.author.as_str(),
-                    "created" => i.created.as_str(),
-                    "body" => i.body.as_str(),
-                }
-            })
-            .collect();
-        let doc = obj! {
-            "repo" => self.repo.as_str(),
-            "readme" => self.readme.as_str(),
-            "issues" => Value::Arr(issues),
-            "skipped_pull_requests" => self.skipped_pull_requests as u64,
-            "api_base" => self.api_base.as_str(),
-        };
-        json::to_string(&doc).into_bytes()
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Result<Collection, String> {
-        let text = ingest::decode_text(bytes);
-        let value = json::parse(&text).map_err(|e| format!("the stored GitHub collection is not JSON: {}", e))?;
-        let repo = value.str_of("repo").unwrap_or("").to_string();
-        if repo.is_empty() {
-            return Err("the stored GitHub collection names no repository".to_string());
-        }
-        let body = value.str_of("readme").unwrap_or("").to_string();
-        let mut issues = Vec::new();
-        if let Some(arr) = value.get("issues").and_then(|v| v.as_arr()) {
-            for item in arr {
-                issues.push(Issue {
-                    number: item.get("number").and_then(|n| n.as_f64()).unwrap_or(0.0) as u64,
-                    title: item.str_of("title").unwrap_or("").to_string(),
-                    state: item.str_of("state").unwrap_or("").to_string(),
-                    author: item.str_of("author").unwrap_or("").to_string(),
-                    created: item.str_of("created").unwrap_or("").to_string(),
-                    body: item.str_of("body").unwrap_or("").to_string(),
-                    pull_request: false,
-                });
-            }
-        }
-        Ok(Collection {
-            repo,
-            readme: body,
-            issues,
-            skipped_pull_requests: value
-                .get("skipped_pull_requests")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0) as usize,
-            api_base: value.str_of("api_base").unwrap_or("").to_string(),
-        })
-    }
-
-    /// Blocks: the README first (as sections), then issues in ascending number order, so
-    /// "issue 12" means the same thing on every re-index.
-    pub fn blocks(&self) -> Vec<Block> {
-        let mut blocks: Vec<Block> = Vec::new();
-        if !self.readme.trim().is_empty() {
-            let mut readme_blocks = ingest::text::markdown_blocks(&self.readme);
-            for b in readme_blocks.iter_mut() {
-                b.locator.section = Some("README".to_string());
-                b.locator.kind = "section".to_string();
-            }
-            // The first paragraph is the heading; keep it, it is the README's own words.
-            blocks.append(&mut readme_blocks);
-        }
-        let mut issues: Vec<&Issue> = self.issues.iter().collect();
-        issues.sort_by_key(|i| i.number);
-        for issue in issues {
-            let mut text = format!("#{} {}", issue.number, issue.title);
-            let mut meta: Vec<String> = Vec::new();
-            if !issue.state.is_empty() {
-                meta.push(issue.state.clone());
-            }
-            if !issue.author.is_empty() {
-                meta.push(format!("opened by {}", issue.author));
-            }
-            if !issue.created.is_empty() {
-                meta.push(issue.created.clone());
-            }
-            if !meta.is_empty() {
-                text.push('\n');
-                text.push_str(&meta.join(" · "));
-            }
-            let body = issue.body.trim();
-            if !body.is_empty() {
-                text.push('\n');
-                text.push_str(body);
-            }
-            let section = format!("{} · {}", issue.number, issue.title);
-            blocks.push(Block {
-                text,
-                locator: Locator::issue(issue_pos(issue.number), &section),
-            });
-        }
-        blocks
-    }
-
-    pub fn warnings(&self) -> Vec<String> {
-        let mut w = Vec::new();
-        if self.skipped_pull_requests > 0 {
-            w.push(format!(
-                "{} pull request(s) were skipped: Forge reads issues, not code review threads",
-                self.skipped_pull_requests
-            ));
-        }
-        if self.readme.trim().is_empty() {
-            w.push("the repository has no README at the default branch".to_string());
-        }
-        w.push(format!(
-            "GitHub collection for {}: {} issue(s){} (public API, anonymous rate limits)",
-            self.repo,
-            self.issues.len(),
-            if self.readme.trim().is_empty() { String::new() } else { ", README included".to_string() }
-        ));
-        w
-    }
-}
-
-/// Build the parsed form used by the ingestion pipeline.
-pub fn extract(bytes: &[u8]) -> Result<Parsed, String> {
-    let collection = Collection::from_bytes(bytes)?;
-    let blocks = ingest::chunk_blocks(collection.blocks());
-    if blocks.is_empty() {
-        return Err("the repository produced no readable text (no README and no issues)".to_string());
-    }
-    Ok(Parsed {
-        page_count: collection.issues.len() as u32,
-        warnings: collection.warnings(),
-        blocks,
-        tables: Vec::new(),
-    })
-}
-
-/// A human title for the source row.
-pub fn title_for(collection: &Collection, include_readme: bool, include_issues: bool) -> String {
-    let parts: Vec<String> = [
-        include_readme.then(|| "README".to_string()),
-        include_issues.then(|| format!("{} issue(s)", collection.issues.len())),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    format!("{} — {}", collection.repo, parts.join(", "))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn repo_specs_are_parsed_from_the_shapes_people_paste() {
-        let expect = Repo { owner: "rust-lang".into(), name: "rust".into() };
-        for input in [
-            "rust-lang/rust",
-            "  rust-lang/rust  ",
-            "https://github.com/rust-lang/rust",
-            "https://github.com/rust-lang/rust.git",
-            "https://github.com/rust-lang/rust/issues?q=1",
-            "git@github.com:rust-lang/rust.git",
-        ] {
-            assert_eq!(Repo::parse(input).unwrap(), expect, "input={}", input);
-        }
-    }
-
-    #[test]
-    fn a_repo_spec_that_is_not_a_repo_is_refused() {
-        for bad in ["", "rust", "https://example.com/a/b"] {
-            let err = Repo::parse(bad).unwrap_err();
-            assert!(!err.is_empty());
-        }
-        assert!(Repo::parse("owner/na me").unwrap_err().contains("characters"));
-    }
-
-    const ISSUES: &str = r#"[
-      {"number":12,"title":"Retry budget is not respected","state":"open",
-       "user":{"login":"okafor"},"created_at":"2026-03-01T10:00:00Z",
-       "body":"With three tiers the client retries 5 times instead of 2."},
-      {"number":13,"title":"Add EPUB support","state":"closed",
-       "user":{"login":"menon"},"created_at":"2026-03-02T10:00:00Z",
-       "body":"Closed by the 3.0 release."},
-      {"number":14,"title":"Docs: wrong install line","state":"open",
-       "user":{"login":"lee"},"created_at":"2026-03-03T10:00:00Z",
-       "body":"","pull_request":{"url":"https://api.github.com/repos/o/n/pulls/14"}}
-    ]"#;
-
-    #[test]
-    fn issues_keep_numbers_dates_authors_and_bodies_and_pull_requests_are_flagged() {
-        let issues = parse_issues(ISSUES).unwrap();
-        assert_eq!(issues.len(), 3);
-        assert_eq!(issues[0].number, 12);
-        assert_eq!(issues[0].author, "okafor");
-        assert_eq!(issues[0].created, "2026-03-01T10:00:00Z");
-        assert!(issues[0].body.contains("5 times"));
-        assert!(!issues[0].pull_request);
-        assert!(issues[2].pull_request, "a PR is not an issue");
-    }
-
-    #[test]
-    fn a_non_array_answer_is_an_error_not_an_empty_list() {
-        let err = parse_issues(r#"{"message":"API rate limit exceeded"}"#).unwrap_err();
-        assert!(err.contains("not a JSON array"), "{}", err);
-        assert!(parse_issues("not json").is_err());
-    }
-
-    #[test]
-    fn blocks_are_a_readme_section_then_issues_in_number_order() {
-        let mut issues = parse_issues(ISSUES).unwrap();
-        issues.retain(|i| !i.pull_request);
-        issues.reverse(); // deliberately out of order; the locator must not follow the API
-        let collection = Collection {
-            repo: "acme/retry".into(),
-            readme: "# acme/retry\n\nThe retry budget is 2.75 attempts per request.".into(),
-            issues,
-            skipped_pull_requests: 1,
-            api_base: "http://127.0.0.1:1".into(),
-        };
-        let blocks = collection.blocks();
-        assert_eq!(blocks[0].locator.section.as_deref(), Some("README"));
-        assert!(
-            blocks.iter().any(|b| b.locator.section.as_deref() == Some("README") && b.text.contains("2.75 attempts")),
-            "the README body is kept: {:?}",
-            blocks.iter().map(|b| &b.text).collect::<Vec<_>>()
-        );
-        let issues: Vec<&Block> = blocks.iter().filter(|b| b.locator.kind == "issue").collect();
-        assert_eq!(issues[0].locator.human(), "issue 12 · Retry budget is not respected");
-        assert_eq!(issues[1].locator.human(), "issue 13 · Add EPUB support");
-        assert!(issues[0].text.starts_with("#12 Retry budget is not respected\nopen · opened by okafor"));
-    }
-
-    #[test]
-    fn the_retained_envelope_round_trips_through_bytes() {
-        let collection = Collection {
-            repo: "acme/retry".into(),
-            readme: "# Title\n\nBody with a \"quote\" and a newline\nin it.".into(),
-            issues: parse_issues(ISSUES).unwrap().into_iter().filter(|i| !i.pull_request).collect(),
-            skipped_pull_requests: 1,
-            api_base: "https://api.github.com".into(),
-        };
-        let bytes = collection.to_bytes();
-        let back = Collection::from_bytes(&bytes).unwrap();
-        assert_eq!(back, collection);
-        let parsed = extract(&bytes).unwrap();
-        assert_eq!(parsed.page_count, 2);
-        assert!(parsed.warnings.iter().any(|w| w.contains("pull request(s) were skipped")));
-        assert!(parsed.warnings.iter().any(|w| w.contains("GitHub collection for acme/retry")));
-    }
-
-    #[test]
-    fn a_collection_without_text_is_refused_rather_than_indexed_empty() {
-        let collection = Collection { repo: "acme/empty".into(), ..Default::default() };
-        let err = extract(&collection.to_bytes()).unwrap_err();
-        assert!(err.contains("no readable text"), "{}", err);
-        assert!(Collection::from_bytes(b"{}").is_err(), "a payload with no repo is refused");
-    }
-
-    #[test]
-    fn urls_point_at_the_public_api_and_respect_the_issue_cap() {
-        let repo = Repo::parse("acme/retry").unwrap();
-        std::env::set_var("FORGE_GITHUB_API", "http://127.0.0.1:1/");
-        assert_eq!(readme_url(&repo), "http://127.0.0.1:1/repos/acme/retry/readme");
-        assert!(issues_url(&repo, 5000).ends_with("per_page=100"), "the cap holds: {}", issues_url(&repo, 5000));
-        assert!(issues_url(&repo, 0).ends_with("per_page=0"));
-        std::env::remove_var("FORGE_GITHUB_API");
-        assert_eq!(readme_url(&repo), "https://api.github.com/repos/acme/retry/readme");
-    }
-}
-```
-
-## `crates/forge-core/src/ingest/feed.rs`
-
-```rust
-//! RSS 2.0, Atom 1.0 and RSS 1.0 (RDF) feeds.
-//!
-//! A feed is a *list of dated items*, and that structure is what makes it citable: an answer
-//! drawn from a feed must be able to say which item it came from and when that item was
-//! published, not just "somewhere in this XML". So every block is one item, and the locator
-//! carries the position and the title:
-//!
-//! ```text
-//! Locator { kind: "item", page: Some(3), section: Some("3 · The retention model"), .. }
-//! label: "item 3 · The retention model"
-//! ```
-//!
-//! Parsing is deliberately hand-written: Forge has no dependencies, and a feed is a flat list
-//! of elements — it does not need a general XML engine. What it does need is to *not lie*:
-//! an item with no date is left without a date (never stamped with the fetch time), an item
-//! with no body is skipped rather than cited as an empty quote, and a document that is not a
-//! feed is refused with a reason instead of being indexed as prose.
-
-use super::{text, Block, Parsed};
-use crate::domain::Locator;
-
-/// Beyond this an item is truncated; feeds are summaries, not books.
-const ITEM_MAX_CHARS: usize = 4000;
-/// A feed with more items than this keeps the newest-looking prefix and says so.
-const ITEM_MAX: usize = 200;
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Item {
-    pub title: String,
-    pub link: String,
-    pub published: String,
-    pub author: String,
-    pub summary: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Feed {
-    pub title: String,
-    pub link: String,
-    /// `rss`, `atom` or `rdf` — recorded so the source can say what it actually was.
-    pub flavour: String,
-    pub items: Vec<Item>,
-    pub warnings: Vec<String>,
-}
-
-/// Cheap sniff used before parsing, and by `fetch` to classify a response.
-pub fn looks_like_feed(bytes: &[u8]) -> bool {
-    let head: String = String::from_utf8_lossy(bytes).chars().take(4096).collect();
-    let mut lower = head.to_ascii_lowercase();
-    if let Some(at) = lower.find("<rss") {
-        lower.truncate(at + 64);
-        return true;
-    }
-    let lower = head.to_ascii_lowercase();
-    lower.contains("<feed") && (lower.contains("www.w3.org/2005/atom") || lower.contains("<entry"))
-        || lower.contains("<rdf:rdf")
-        || (lower.contains("<rss") && lower.contains("version"))
-}
-
-/// Return the text of `<tag ...>…</tag>`, CDATA unwrapped. `None` when absent.
-fn raw_element<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
-    let open = format!("<{}", tag);
-    let start = xml.find(&open)?;
-    let after = &xml[start..];
-    // reject `<itemize>` when looking for `<item`
-    let close_of_open = after.find('>')?;
-    let name_end = after[1..close_of_open].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-' || *c == '_').count();
-    if !after[..1 + name_end].eq_ignore_ascii_case(&open) {
-        return None;
-    }
-    if after[..close_of_open].ends_with('/') {
-        return Some(""); // self-closing
-    }
-    let close_tag = format!("</{}>", tag).to_ascii_lowercase();
-    let body_start = start + close_of_open + 1;
-    let body = &xml[body_start..];
-    let end = body.to_ascii_lowercase().find(&close_tag)?;
-    Some(&body[..end])
-}
-
-/// All occurrences of a repeating element (`item` / `entry`) inside `xml`.
-fn elements<'a>(xml: &'a str, tag: &str) -> Vec<&'a str> {
-    let mut out = Vec::new();
-    let mut rest = xml;
-    let open = format!("<{}", tag);
-    let close_tag = format!("</{}>", tag);
-    while let Some(start) = rest.find(&open) {
-        let after = &rest[start..];
-        // `<item>` and `<item foo="1">` only — not `<itemize>`
-        let name_len = after[1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-' || *c == '_').count();
-        if !after[..1 + name_len].eq_ignore_ascii_case(&open) {
-            rest = &after[1..];
-            continue;
-        }
-        let Some(gt) = after.find('>') else { break };
-        if after[..gt].ends_with('/') {
-            rest = &after[gt + 1..];
-            continue;
-        }
-        let body = &after[gt + 1..];
-        match body.to_ascii_lowercase().find(&close_tag) {
-            Some(end) => {
-                out.push(&body[..end]);
-                rest = &body[end + close_tag.len()..];
-            }
-            // An unclosed item means the document is broken; stop rather than guess the rest.
-            None => break,
-        }
-    }
-    out
-}
-
-/// Unwrap CDATA and trim. Entities are **not** decoded here: decoding first would turn an
-/// escaped `&lt;b&gt;` into markup that `strip_tags` would then delete as if it were a tag.
-fn cdata_or_text(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if let Some(stripped) = trimmed.strip_prefix("<![CDATA[") {
-        stripped.strip_suffix("]]>").unwrap_or(stripped).trim().to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-/// An Atom `<link href="..."/>` or an RSS `<link>text</link>`.
-fn link_of(item: &str) -> String {
-    // Atom: prefer rel="alternate", otherwise the first href that is not self/enclosure.
-    let mut fallback = String::new();
-    let mut rest = item;
-    while let Some(at) = rest.find("<link") {
-        let after = &rest[at..];
-        let Some(gt) = after.find('>') else { break };
-        let tag = &after[..gt];
-        let href = attr(tag, "href").unwrap_or_default();
-        let rel = attr(tag, "rel").unwrap_or_else(|| "alternate".to_string());
-        if !href.is_empty() && rel == "alternate" && fallback.is_empty() {
-            fallback = href;
-        } else if !href.is_empty() && fallback.is_empty() && rel != "self" && rel != "enclosure" {
-            fallback = href;
-        }
-        rest = &after[gt + 1..];
-    }
-    if !fallback.is_empty() {
-        return fallback;
-    }
-    // RSS: element text.
-    if let Some(raw) = raw_element(item, "link") {
-        let value = text::decode_entities(&cdata_or_text(raw)).trim().to_string();
-        if !value.is_empty() {
-            return value;
-        }
-    }
-    // RSS 1.0 often repeats the URL as the element's rdf:resource.
-    let lower = item.to_ascii_lowercase();
-    if let Some(at) = lower.find("<link") {
-        let tag = &item[at..];
-        if let Some(gt) = tag.find('>') {
-            if let Some(v) = attr(&tag[..gt], "rdf:resource") {
-                return v;
-            }
-        }
-    }
-    String::new()
-}
-
-fn shorten(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    s.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
-}
-
-fn attr(tag: &str, name: &str) -> Option<String> {
-    let lower = tag.to_ascii_lowercase();
-    let needle = format!("{}=", name.to_ascii_lowercase());
-    let mut from = 0usize;
-    while let Some(rel) = lower[from..].find(&needle) {
-        let at = from + rel;
-        // must be preceded by whitespace or '<', so `href` does not match `xhref`
-        let prev = lower[..at].chars().last();
-        if matches!(prev, Some(c) if c.is_whitespace() || c == '<') {
-            let rest = &tag[at + needle.len()..];
-            let quote = rest.chars().next()?;
-            if quote == '"' || quote == '\'' {
-                let value = &rest[1..];
-                let end = value.find(quote)?;
-                return Some(text::decode_entities(&value[..end]));
-            }
-            let end = rest.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(rest.len());
-            return Some(text::decode_entities(rest[..end].trim()));
-        }
-        from = at + needle.len();
-    }
-    None
-}
-
-/// First present element among `names`.
-fn first(item: &str, names: &[&str]) -> String {
-    for name in names {
-        if let Some(raw) = raw_element(item, name) {
-            let value = cdata_or_text(raw);
-            if !value.is_empty() {
-                return value;
-            }
-        }
-    }
-    String::new()
-}
-
-/// Tags that are markup in a feed body. Anything else — `<y>`, `<3`, a URL with `<` in it —
-/// is text, and is kept: over-stripping would silently delete the author's words.
-const KNOWN_TAGS: &[&str] = &[
-    "a", "abbr", "b", "blockquote", "br", "caption", "cite", "code", "dd", "del", "div", "dl",
-    "dt", "em", "figcaption", "figure", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "iframe",
-    "img", "ins", "li", "ol", "p", "pre", "q", "s", "small", "span", "strong", "sub", "sup",
-    "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul", "video", "audio", "source",
-    "script", "style", "svg", "path", "name", "email", "uri", "label",
-];
-
-/// Tags whose removal separates words; whitespace is collapsed afterwards, so the extra space
-/// only matters where two paragraphs would otherwise run together.
-const BLOCK_TAGS: &[&str] = &[
-    "p", "div", "br", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre",
-    "tr", "td", "th", "table", "thead", "tbody", "tfoot", "dd", "dt", "dl", "figure",
-    "figcaption", "hr", "caption",
-];
-
-fn strip_known_markup(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] == b'<' {
-            let rest = &text[i + 1..];
-            let name: String = rest
-                .chars()
-                .skip_while(|c| *c == '/')
-                .take_while(|c| c.is_ascii_alphanumeric())
-                .collect();
-            let lower = name.to_ascii_lowercase();
-            let is_tag = KNOWN_TAGS.contains(&lower.as_str());
-            if is_tag && !lower.is_empty() {
-                match rest.find('>') {
-                    Some(end) => {
-                        if BLOCK_TAGS.contains(&lower.as_str()) {
-                            out.push(' ');
-                        }
-                        i += 1 + end + 1;
-                        continue;
-                    }
-                    None => break,
-                }
-            }
-        }
-        let ch = text[i..].chars().next().unwrap_or(' ');
-        out.push(ch);
-        i += ch.len_utf8();
-    }
-    out
-}
-
-fn tidy_summary(raw: &str) -> String {
-    // Feed bodies are usually HTML. Strip real markup first, *then* decode entities, and then
-    // strip markup that was escaped into the text (`&lt;p&gt;` inside `<content type="html">`).
-    // A tag name that is not on the known list is left alone, so `x <y>` survives.
-    let plain = if raw.contains('<') { strip_known_markup(raw) } else { raw.to_string() };
-    let plain = text::decode_entities(&plain);
-    let plain = strip_known_markup(&plain);
-    plain
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(ITEM_MAX_CHARS)
-        .collect()
-}
-
-/// Parse a feed. `Err` means "this is not a feed", with the reason the user should see.
-pub fn parse(bytes: &[u8]) -> Result<Feed, String> {
-    let xml = super::decode_text(bytes);
-    if xml.trim().is_empty() {
-        return Err("the feed is empty".to_string());
-    }
-    let lower = xml.to_ascii_lowercase();
-
-    let mut feed = Feed::default();
-    let (flavour, root_title, raw_items) = if lower.contains("<rss") && lower.contains("<channel") {
-        ("rss", first(&xml, &["title"]), elements(&xml, "item"))
-    } else if lower.contains("<feed") {
-        ("atom", first(&xml, &["title"]), elements(&xml, "entry"))
-    } else if lower.contains("<rdf:rdf") {
-        ("rdf", first(&xml, &["title"]), elements(&xml, "item"))
-    } else {
-        return Err(
-            "not a feed: no <rss>, <feed> or <rdf:RDF> root element was found".to_string(),
-        );
-    };
-    feed.flavour = flavour.to_string();
-    feed.title = tidy_summary(&root_title);
-    feed.link = if flavour == "atom" { link_of(&xml) } else { first(&xml, &["link"]) };
-    if feed.link.contains('<') {
-        feed.link = link_of(&xml);
-    }
-
-    if raw_items.is_empty() {
-        return Err("the feed parses but contains no items".to_string());
-    }
-
-    for raw in raw_items {
-        let title = tidy_summary(&first(raw, &["title"]));
-        // `content:encoded` first: it is the body, `description` is often only a teaser.
-        let summary = tidy_summary(&first(raw, &["content:encoded", "content", "summary", "description"]));
-        let published = text::decode_entities(&first(raw, &["pubDate", "published", "updated", "dc:date", "date"])).trim().to_string();
-        // Atom nests the name: `<author><name>A. Menon</name></author>`. tidy_summary strips
-        // the wrapper, so both shapes give the same string.
-        let author = tidy_summary(&first(raw, &["dc:creator", "creator", "author", "name"]));
-        let link = link_of(raw);
-        if summary.is_empty() && title.is_empty() {
-            feed.warnings.push("an item had neither a title nor a body and was skipped".to_string());
-            continue;
-        }
-        if published.is_empty() {
-            // Deliberately not filled in with the fetch time: the publish date is the source's
-            // fact, and inventing one would let an answer cite a date the feed never claimed.
-            feed.warnings.push(format!(
-                "item \"{}\" has no publish date; it is indexed without one",
-                shorten(&title, 60)
-            ));
-        }
-        feed.items.push(Item { title, link, published, author, summary });
-    }
-
-    if feed.items.is_empty() {
-        return Err("every item in the feed was empty".to_string());
-    }
-    if feed.items.len() > ITEM_MAX {
-        feed.warnings.push(format!(
-            "the feed lists {} items; the first {} were indexed",
-            feed.items.len(),
-            ITEM_MAX
-        ));
-        feed.items.truncate(ITEM_MAX);
-    }
-    Ok(feed)
-}
-
-/// One block per item, in feed order (feeds are ordered by the publisher, so that order is
-/// kept rather than re-sorted: reordering would change which item is "item 1").
-pub fn blocks(feed: &Feed) -> Vec<Block> {
-    let mut out = Vec::new();
-    for (idx, item) in feed.items.iter().enumerate() {
-        let n = idx as u32 + 1;
-        let heading = if item.title.is_empty() {
-            format!("item {}", n)
-        } else {
-            item.title.clone()
-        };
-        let mut body = String::new();
-        body.push_str(&heading);
-        let mut meta: Vec<String> = Vec::new();
-        if !item.published.is_empty() {
-            meta.push(item.published.clone());
-        }
-        if !item.author.is_empty() {
-            meta.push(item.author.clone());
-        }
-        if !item.link.is_empty() {
-            meta.push(item.link.clone());
-        }
-        if !meta.is_empty() {
-            body.push('\n');
-            body.push_str(&meta.join(" · "));
-        }
-        if !item.summary.is_empty() {
-            body.push('\n');
-            body.push_str(&item.summary);
-        }
-        let section = if item.title.is_empty() { format!("{}", n) } else { format!("{} · {}", n, item.title) };
-        out.push(Block {
-            text: body,
-            locator: Locator::item(n, &shorten(&section, 120)),
-        });
-    }
-    out
-}
-
-/// The `Parsed` form used by the ingestion pipeline.
-pub fn feed(bytes: &[u8]) -> Result<Parsed, String> {
-    let parsed = parse(bytes)?;
-    let mut warnings = parsed.warnings.clone();
-    warnings.push(format!(
-        "feed read as {}: {} item(s){}",
-        match parsed.flavour.as_str() {
-            "atom" => "Atom 1.0",
-            "rdf" => "RSS 1.0 (RDF)",
-            _ => "RSS 2.0",
-        },
-        parsed.items.len(),
-        if parsed.title.is_empty() { String::new() } else { format!(" from \"{}\"", parsed.title) }
-    ));
-    let blocks = blocks(&parsed);
-    Ok(Parsed { blocks: super::chunk_blocks(blocks), warnings, page_count: parsed.items.len() as u32, tables: Vec::new() })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const RSS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel>
-  <title>Retention Weekly</title>
-  <link>https://example.test/</link>
-  <description>notes on retention</description>
-  <item>
-    <title>Churn fell after the onboarding rewrite</title>
-    <link>https://example.test/posts/onboarding</link>
-    <pubDate>Tue, 03 Mar 2026 09:00:00 GMT</pubDate>
-    <dc:creator>R. Okafor</dc:creator>
-    <description><![CDATA[<p>Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite.</p>]]></description>
-  </item>
-  <item>
-    <title>Legal hold overrides the thirty day window</title>
-    <link>https://example.test/posts/legal-hold</link>
-    <pubDate>Wed, 04 Mar 2026 12:30:00 GMT</pubDate>
-    <description>A legal hold suspends deletion regardless of the retention window.</description>
-  </item>
-</channel></rss>"#;
-
-    const ATOM: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <title>Forge release notes</title>
-  <link href="https://example.test/atom"/>
-  <entry>
-    <title>Version 3 stores item dates</title>
-    <link rel="alternate" href="https://example.test/atom/3"/>
-    <published>2026-02-01T10:00:00Z</published>
-    <author><name>A. Menon</name></author>
-    <summary>Feeds are now read as dated items.</summary>
-  </entry>
-  <entry>
-    <title>Version 2 added EPUB</title>
-    <link rel="alternate" href="https://example.test/atom/2"/>
-    <updated>2026-01-15T08:00:00Z</updated>
-    <summary>EPUB files are read in spine order.</summary>
-  </entry>
-</feed>"#;
-
-    #[test]
-    fn rss_items_keep_their_own_dates_authors_and_bodies() {
-        let feed = parse(RSS.as_bytes()).expect("rss parses");
-        assert_eq!(feed.flavour, "rss");
-        assert_eq!(feed.title, "Retention Weekly");
-        assert_eq!(feed.items.len(), 2);
-        assert_eq!(feed.items[0].published, "Tue, 03 Mar 2026 09:00:00 GMT");
-        assert_eq!(feed.items[0].author, "R. Okafor");
-        // CDATA is unwrapped and the HTML inside it is stripped, not indexed as markup.
-        assert_eq!(
-            feed.items[0].summary,
-            "Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite."
-        );
-        assert_eq!(feed.items[1].link, "https://example.test/posts/legal-hold");
-    }
-
-    #[test]
-    fn atom_entries_use_the_alternate_link_and_both_date_elements() {
-        let feed = parse(ATOM.as_bytes()).expect("atom parses");
-        assert_eq!(feed.flavour, "atom");
-        assert_eq!(feed.items.len(), 2);
-        assert_eq!(feed.items[0].link, "https://example.test/atom/3");
-        assert_eq!(feed.items[0].published, "2026-02-01T10:00:00Z");
-        assert_eq!(feed.items[0].author, "A. Menon");
-        // `<updated>` is a date too, and is used when `<published>` is absent.
-        assert_eq!(feed.items[1].published, "2026-01-15T08:00:00Z");
-        assert!(feed.warnings.is_empty(), "{:?}", feed.warnings);
-    }
-
-    #[test]
-    fn an_item_without_a_date_is_left_without_one_and_says_so() {
-        let xml = r#"<rss version="2.0"><channel><title>t</title>
-            <item><title>undated</title><description>body text</description></item>
-            </channel></rss>"#;
-        let feed = parse(xml.as_bytes()).expect("parses");
-        assert_eq!(feed.items[0].published, "");
-        assert!(feed.warnings.iter().any(|w| w.contains("no publish date")), "{:?}", feed.warnings);
-        let blocks = blocks(&feed);
-        assert!(!blocks[0].text.contains("©"), "no invented metadata");
-    }
-
-    #[test]
-    fn locators_point_at_the_item_and_read_as_item_n_title() {
-        let feed = parse(ATOM.as_bytes()).expect("parses");
-        let blocks = blocks(&feed);
-        assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[1].locator.kind, "item");
-        assert_eq!(blocks[1].locator.page, Some(2));
-        assert_eq!(blocks[1].locator.human(), "item 2 · Version 2 added EPUB");
-        assert!(blocks[1].text.starts_with("Version 2 added EPUB\n2026-01-15T08:00:00Z · "));
-    }
-
-    #[test]
-    fn a_document_that_is_not_a_feed_is_refused_with_a_reason() {
-        let e = parse(b"<html><body><h1>not a feed</h1></body></html>").unwrap_err();
-        assert!(e.contains("not a feed"), "{}", e);
-        let e = parse(b"<rss version=\"2.0\"><channel><title>empty</title></channel></rss>").unwrap_err();
-        assert!(e.contains("no items"), "{}", e);
-    }
-
-    #[test]
-    fn rdf_feeds_are_recognised_and_look_like_feed_does_not_overreach() {
-        let rdf = r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-              xmlns="http://purl.org/rss/1.0/"><channel><title>Old feed</title>
-              <link>https://example.test/</link></channel>
-              <item rdf:about="https://example.test/a"><title>A</title>
-              <link>https://example.test/a</link><description>first</description></item></rdf:RDF>"#;
-        let feed = parse(rdf.as_bytes()).expect("rdf parses");
-        assert_eq!(feed.flavour, "rdf");
-        assert_eq!(feed.items[0].link, "https://example.test/a");
-
-        assert!(looks_like_feed(RSS.as_bytes()));
-        assert!(looks_like_feed(ATOM.as_bytes()));
-        assert!(!looks_like_feed(b"<html><body>hi</body></html>"));
-        assert!(!looks_like_feed(b"{\"json\":true}"));
-    }
-
-    #[test]
-    fn escaped_html_in_a_content_element_is_markup_not_prose() {
-        // Real shape from a GitHub releases Atom feed: the body is escaped HTML.
-        let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Releases</title>
-            <entry><title>v1.2</title><published>2026-01-02T03:04:05Z</published>
-            <content type="html">&lt;p&gt;Fixes the retry loop.&lt;/p&gt;&lt;p&gt;Adds EPUB.&lt;/p&gt;</content>
-            </entry></feed>"#;
-        let feed = parse(xml.as_bytes()).expect("parses");
-        assert_eq!(feed.items[0].summary, "Fixes the retry loop. Adds EPUB.", "{:?}", feed.items[0].summary);
-        assert!(!feed.items[0].summary.contains('<'), "no markup leaks into the evidence text");
-    }
-
-    #[test]
-    fn a_less_than_that_is_not_a_tag_is_kept() {
-        assert_eq!(tidy_summary("x <y> and 3 < 4"), "x <y> and 3 < 4");
-    }
-
-    #[test]
-    fn entity_encoded_titles_are_decoded() {
-        let xml = r#"<rss version="2.0"><channel><title>A &amp; B</title>
-            <item><title>Q&amp;A &#8212; retention</title><description>x &lt;y&gt;</description></item>
-            </channel></rss>"#;
-        let feed = parse(xml.as_bytes()).expect("parses");
-        assert_eq!(feed.title, "A & B");
-        assert_eq!(feed.items[0].summary, "x <y>");
-    }
-
-    #[test]
-    fn the_pipeline_reports_what_it_read() {
-        let parsed = feed(RSS.as_bytes()).expect("parses");
-        assert_eq!(parsed.page_count, 2);
-        assert!(parsed.warnings[0].starts_with("feed read as RSS 2.0: 2 item(s)"), "{:?}", parsed.warnings);
-        assert_eq!(parsed.blocks.len(), 2);
-    }
-}
-```
-
 ## `.gitignore`
 
 ```
@@ -2702,12 +1691,46 @@ async function downloadConversation(id) {
 /// where the browser blocks downloads.
 async function downloadArtifact(id, format) {
   if (!id) { toast("Save the artifact first", "err"); return; }
+  const binary = format === "pdf" || format === "pptx" || format === "png";
   try {
     const res = await fetch(`/api/artifacts/${id}/export?format=${format}`, { headers: authHeaders() });
     if (!res.ok) {
       let data = null;
       try { data = await res.json(); } catch { /* non-JSON refusal */ }
       throw new Error((data && (data.error || data.message)) || `HTTP ${res.status}`);
+    }
+    if (binary) {
+      // A PDF/PPTX is bytes, not text. Showing them in a <pre> would print mojibake and pretend
+      // it was the export; describe the file instead and hand the bytes to the download.
+      const buf = await res.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      const magic = [...bytes.slice(0, 4)].map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : "·")).join("");
+      const size = bytes.length;
+      const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+        h("div", { class: "viewer" },
+          h("header", {},
+            h("div", { style: "flex:1" },
+              h("div", { style: "font-weight:600" }, `Export · ${format.toUpperCase()}`),
+              h("div", { class: "hint" }, `${size.toLocaleString()} bytes · ${res.headers.get("content-type") || "unknown type"}`)),
+            h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+          h("div", { class: "content" },
+            h("p", null, `This is a real ${format.toUpperCase()} file, not a renaming: it starts with ${magic} and it downloads as one.`),
+            h("p", { class: "hint" }, format === "pdf"
+              ? "One page per screenful, every bullet with its citation. Characters outside Latin-1 are shown as '?' — the footer says so."
+              : format === "pptx"
+                ? "One slide per deck slide, with the citation label on each bullet and the deck version in the footer."
+                : "Raster output is not available in this build."))));
+      document.body.append(overlay);
+      try {
+        const mime = format === "pdf" ? "application/pdf"
+          : format === "pptx" ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          : "image/png";
+        const url = URL.createObjectURL(new Blob([buf], { type: mime }));
+        const a = h("a", { href: url, download: `forge-artifact-${id}.${format}` });
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch { /* downloads can be blocked; the panel above is still the export */ }
+      return;
     }
     const text = await res.text();
     const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
@@ -2966,6 +1989,8 @@ async function showArtifact(id) {
           h("button", { class: "ghost", title: "Export Markdown", onclick: () => downloadArtifact(a.id, "md") }, "md"),
           h("button", { class: "ghost", title: "Export JSON", onclick: () => downloadArtifact(a.id, "json") }, "json"),
           a.kind === "mindmap" ? h("button", { class: "ghost", title: "Export SVG", onclick: () => downloadArtifact(a.id, "svg") }, "svg") : null,
+          a.kind === "slides" ? h("button", { class: "ghost", title: "Export PowerPoint (.pptx)", onclick: () => downloadArtifact(a.id, "pptx") }, "pptx") : null,
+          h("button", { class: "ghost", title: "Export PDF", onclick: () => downloadArtifact(a.id, "pdf") }, "pdf"),
           h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
         h("div", { class: "content" }, renderArtifact(a.payload, a))));
     document.body.append(overlay);
@@ -6589,7 +5614,8 @@ impl Api {
             "artifact_lifecycle" => obj! {
                 "status" => "supported",
                 "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
-                "export" => "Markdown and JSON always; SVG for concept maps only; PPTX/PDF return 501 format_unsupported",
+                "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
+                "export_note" => "the PPTX is a written-by-hand OPC package and the PDF a written-by-hand page tree, verified by reading both back with Forge's own readers and (one-off, outside the build) python-pptx and pypdf",
             },
             "conversations" => obj! {
                 "status" => "supported",
@@ -9036,13 +8062,28 @@ impl Api {
                         "SVG export exists for concept maps only; this artifact has no diagram",
                     ),
                 },
-                "pptx" | "pdf" | "png" => err(
+                "pptx" => match crate::render::pptx(art) {
+                    Some(bytes) => Response::new(
+                        200,
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        bytes,
+                    )
+                    .with_header("Content-Disposition", &format!("attachment; filename=\"{}.pptx\"", base)),
+                    None => err(
+                        409,
+                        "format_unavailable",
+                        "PPTX export exists for slide decks only; this artifact is not a deck",
+                    ),
+                },
+                "pdf" => {
+                    let bytes = crate::render::pdf(art, &sources);
+                    Response::new(200, "application/pdf", bytes)
+                        .with_header("Content-Disposition", &format!("attachment; filename=\"{}.pdf\"", base))
+                }
+                "png" => err(
                     501,
                     "format_unsupported",
-                    &format!(
-                        "this build has no {} renderer; export Markdown (format=md) and convert outside Forge",
-                        format
-                    ),
+                    "this build has no rasteriser; export PDF (format=pdf) or SVG (format=svg) and rasterise outside Forge",
                 ),
                 other => err(422, "bad_format", &format!("unknown format {}", other)),
             }
@@ -12146,10 +11187,13 @@ mod tests {
 ```rust
 //! Artifact export.
 //!
-//! Forge writes **Markdown**, **JSON** and (for concept maps) **SVG**. It does not write PPTX,
-//! PDF or PNG: those need a rendering stack this build does not have, and a hand-rolled
-//! PowerPoint writer that opens in one viewer and corrupts in another would be worse than an
-//! honest Markdown file. `/api/capabilities` states this per artifact kind.
+//! Forge writes **Markdown**, **JSON** and (for concept maps) **SVG** here, and hands the binary
+//! formats to `render`: **PDF** for any artifact, **PPTX** for slide decks. PNG is still refused
+//! with 501 rather than faked — there is no rasteriser in this build.
+//!
+//! The binary writers are hand-rolled because Forge has no dependency tree; that is only
+//! acceptable because the output is verified as the real format (see `render.rs` and
+//! `docs/TEST_MATRIX.md`), not merely named `.pptx`.
 //!
 //! Every export keeps the citations, because an exported answer without its evidence is a
 //! claim without support.
@@ -13109,6 +12153,454 @@ mod tests {
             got.body.as_slice().read_to_end(&mut buf).unwrap();
             assert!(buf.len() > 100);
         });
+    }
+}
+```
+
+## `crates/forge-core/src/github.rs`
+
+```rust
+//! GitHub repositories as sources: the README and the issue list.
+//!
+//! Forge has no GitHub account, no token, and no OAuth app — this module talks to the public
+//! REST API (`api.github.com`) with the same SSRF-guarded fetch path as any other URL, and
+//! nothing else. That has three consequences the code states out loud:
+//!
+//! * **Rate limits are the anonymous ones.** A 403/429 from GitHub is reported as such, with
+//!   GitHub's own message, instead of being retried into a wall.
+//! * **Only public repositories.** No credentials exist, so a private repo is simply a 404 as
+//!   far as Forge is concerned, and the error says which repository was asked for.
+//! * **Issues, not code.** Forge indexes issue titles and bodies as dated, numbered items. It
+//!   does not clone, browse files, or claim to have read the source tree.
+//!
+//! The bytes that reach the ingestion pipeline are a small JSON envelope of what was actually
+//! collected (`{"repo":…,"readme":…,"issues":[…]}`), which is also what is retained on disk so
+//! a retry re-indexes the same collection rather than silently fetching a newer one.
+
+use crate::domain::Locator;
+use crate::ingest::{self, Block, Parsed};
+use crate::json::{self, Value};
+use crate::obj;
+
+/// The issue number as a locator position. u32 because a locator position is an index, and
+/// GitHub issue numbers above 4 billion do not exist.
+fn issue_pos(number: u64) -> u32 {
+    number.min(u32::MAX as u64) as u32
+}
+
+/// Hard cap on issues per source: a repository with 40k issues is not a document, and
+/// indexing all of them would drown every other source in the notebook.
+pub const ISSUE_MAX: usize = 100;
+pub const ISSUE_DEFAULT: usize = 30;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Repo {
+    pub owner: String,
+    pub name: String,
+}
+
+impl Repo {
+    pub fn full(&self) -> String {
+        format!("{}/{}", self.owner, self.name)
+    }
+
+    /// Accept the shapes a person actually pastes: `owner/name`, a github.com URL (with or
+    /// without `.git`), or an SSH clone URL.
+    pub fn parse(input: &str) -> Result<Repo, String> {
+        let raw = input.trim();
+        if raw.is_empty() {
+            return Err("repo is required, e.g. \"rust-lang/rust\"".to_string());
+        }
+        let mut rest = raw.to_string();
+        if let Some((scheme, tail)) = raw.split_once("://") {
+            let host = tail.split('/').next().unwrap_or("").to_ascii_lowercase();
+            let host = host.split('@').next_back().unwrap_or("").to_string();
+            if !matches!(host.as_str(), "github.com" | "www.github.com") {
+                return Err(format!(
+                    "{} is not GitHub: this source reads github.com repositories only",
+                    scheme
+                ));
+            }
+        }
+        for prefix in ["https://", "http://", "git@", "ssh://git@"] {
+            if let Some(stripped) = rest.strip_prefix(prefix) {
+                rest = stripped.to_string();
+                break;
+            }
+        }
+        // git@host:owner/name
+        let rest = match rest.split_once(':') {
+            Some((host, tail)) if host.contains("github.com") && !tail.starts_with("//") => tail.to_string(),
+            _ => rest,
+        };
+        let rest = rest.strip_prefix("github.com/").unwrap_or(&rest).to_string();
+        let rest = rest.strip_suffix(".git").unwrap_or(&rest).to_string();
+        let rest = rest.split(['?', '#']).next().unwrap_or("").trim_end_matches('/').to_string();
+        let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+        if parts.len() < 2 {
+            return Err(format!("\"{}\" is not a repository: expected owner/name", raw));
+        }
+        let (owner, name) = (parts[0], parts[1]);
+        for (label, value) in [("owner", owner), ("repository", name)] {
+            if !value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+            {
+                return Err(format!("the {} \"{}\" has characters GitHub does not allow", label, value));
+            }
+        }
+        Ok(Repo { owner: owner.to_string(), name: name.to_string() })
+    }
+}
+
+/// The API root. Overridable so tests can point at a local origin without touching the code
+/// path that production uses; the default is the real public API.
+pub fn api_base() -> String {
+    std::env::var("FORGE_GITHUB_API")
+        .ok()
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "https://api.github.com".to_string())
+}
+
+pub fn readme_url(repo: &Repo) -> String {
+    format!("{}/repos/{}/{}/readme", api_base(), repo.owner, repo.name)
+}
+
+pub fn issues_url(repo: &Repo, limit: usize) -> String {
+    format!(
+        "{}/repos/{}/{}/issues?state=all&per_page={}",
+        api_base(),
+        repo.owner,
+        repo.name,
+        limit.min(ISSUE_MAX)
+    )
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Issue {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub author: String,
+    pub created: String,
+    pub body: String,
+    pub pull_request: bool,
+}
+
+/// Parse the JSON array returned by `/issues`. A non-array is an error, not an empty list:
+/// "GitHub answered with something else" must never look like "this repo has no issues".
+pub fn parse_issues(text: &str) -> Result<Vec<Issue>, String> {
+    let value = json::parse(text).map_err(|e| format!("GitHub's issue list is not JSON: {}", e))?;
+    let arr = value
+        .as_arr()
+        .ok_or_else(|| "GitHub's issue list is not a JSON array".to_string())?;
+    let mut out = Vec::new();
+    for item in arr {
+        let number = item
+            .get("number")
+            .and_then(|n| n.as_f64())
+            .ok_or_else(|| "an issue has no number".to_string())? as u64;
+        out.push(Issue {
+            number,
+            title: item.str_of("title").unwrap_or("").trim().to_string(),
+            state: item.str_of("state").unwrap_or("").trim().to_string(),
+            author: item
+                .get("user")
+                .and_then(|u| u.str_of("login"))
+                .unwrap_or("")
+                .to_string(),
+            created: item.str_of("created_at").unwrap_or("").trim().to_string(),
+            body: item.str_of("body").unwrap_or("").to_string(),
+            pull_request: item.get("pull_request").map(|p| !p.is_null()).unwrap_or(false),
+        });
+    }
+    Ok(out)
+}
+
+/// What is retained on disk and re-parsed by the ingestion pipeline.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Collection {
+    pub repo: String,
+    pub readme: String,
+    pub issues: Vec<Issue>,
+    pub skipped_pull_requests: usize,
+    pub api_base: String,
+}
+
+impl Collection {
+    /// The retained envelope. Bodies are kept verbatim so a citation can quote them.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let issues: Vec<Value> = self
+            .issues
+            .iter()
+            .map(|i| {
+                obj! {
+                    "number" => i.number as u64,
+                    "title" => i.title.as_str(),
+                    "state" => i.state.as_str(),
+                    "author" => i.author.as_str(),
+                    "created" => i.created.as_str(),
+                    "body" => i.body.as_str(),
+                }
+            })
+            .collect();
+        let doc = obj! {
+            "repo" => self.repo.as_str(),
+            "readme" => self.readme.as_str(),
+            "issues" => Value::Arr(issues),
+            "skipped_pull_requests" => self.skipped_pull_requests as u64,
+            "api_base" => self.api_base.as_str(),
+        };
+        json::to_string(&doc).into_bytes()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Collection, String> {
+        let text = ingest::decode_text(bytes);
+        let value = json::parse(&text).map_err(|e| format!("the stored GitHub collection is not JSON: {}", e))?;
+        let repo = value.str_of("repo").unwrap_or("").to_string();
+        if repo.is_empty() {
+            return Err("the stored GitHub collection names no repository".to_string());
+        }
+        let body = value.str_of("readme").unwrap_or("").to_string();
+        let mut issues = Vec::new();
+        if let Some(arr) = value.get("issues").and_then(|v| v.as_arr()) {
+            for item in arr {
+                issues.push(Issue {
+                    number: item.get("number").and_then(|n| n.as_f64()).unwrap_or(0.0) as u64,
+                    title: item.str_of("title").unwrap_or("").to_string(),
+                    state: item.str_of("state").unwrap_or("").to_string(),
+                    author: item.str_of("author").unwrap_or("").to_string(),
+                    created: item.str_of("created").unwrap_or("").to_string(),
+                    body: item.str_of("body").unwrap_or("").to_string(),
+                    pull_request: false,
+                });
+            }
+        }
+        Ok(Collection {
+            repo,
+            readme: body,
+            issues,
+            skipped_pull_requests: value
+                .get("skipped_pull_requests")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as usize,
+            api_base: value.str_of("api_base").unwrap_or("").to_string(),
+        })
+    }
+
+    /// Blocks: the README first (as sections), then issues in ascending number order, so
+    /// "issue 12" means the same thing on every re-index.
+    pub fn blocks(&self) -> Vec<Block> {
+        let mut blocks: Vec<Block> = Vec::new();
+        if !self.readme.trim().is_empty() {
+            let mut readme_blocks = ingest::text::markdown_blocks(&self.readme);
+            for b in readme_blocks.iter_mut() {
+                b.locator.section = Some("README".to_string());
+                b.locator.kind = "section".to_string();
+            }
+            // The first paragraph is the heading; keep it, it is the README's own words.
+            blocks.append(&mut readme_blocks);
+        }
+        let mut issues: Vec<&Issue> = self.issues.iter().collect();
+        issues.sort_by_key(|i| i.number);
+        for issue in issues {
+            let mut text = format!("#{} {}", issue.number, issue.title);
+            let mut meta: Vec<String> = Vec::new();
+            if !issue.state.is_empty() {
+                meta.push(issue.state.clone());
+            }
+            if !issue.author.is_empty() {
+                meta.push(format!("opened by {}", issue.author));
+            }
+            if !issue.created.is_empty() {
+                meta.push(issue.created.clone());
+            }
+            if !meta.is_empty() {
+                text.push('\n');
+                text.push_str(&meta.join(" · "));
+            }
+            let body = issue.body.trim();
+            if !body.is_empty() {
+                text.push('\n');
+                text.push_str(body);
+            }
+            let section = format!("{} · {}", issue.number, issue.title);
+            blocks.push(Block {
+                text,
+                locator: Locator::issue(issue_pos(issue.number), &section),
+            });
+        }
+        blocks
+    }
+
+    pub fn warnings(&self) -> Vec<String> {
+        let mut w = Vec::new();
+        if self.skipped_pull_requests > 0 {
+            w.push(format!(
+                "{} pull request(s) were skipped: Forge reads issues, not code review threads",
+                self.skipped_pull_requests
+            ));
+        }
+        if self.readme.trim().is_empty() {
+            w.push("the repository has no README at the default branch".to_string());
+        }
+        w.push(format!(
+            "GitHub collection for {}: {} issue(s){} (public API, anonymous rate limits)",
+            self.repo,
+            self.issues.len(),
+            if self.readme.trim().is_empty() { String::new() } else { ", README included".to_string() }
+        ));
+        w
+    }
+}
+
+/// Build the parsed form used by the ingestion pipeline.
+pub fn extract(bytes: &[u8]) -> Result<Parsed, String> {
+    let collection = Collection::from_bytes(bytes)?;
+    let blocks = ingest::chunk_blocks(collection.blocks());
+    if blocks.is_empty() {
+        return Err("the repository produced no readable text (no README and no issues)".to_string());
+    }
+    Ok(Parsed {
+        page_count: collection.issues.len() as u32,
+        warnings: collection.warnings(),
+        blocks,
+        tables: Vec::new(),
+    })
+}
+
+/// A human title for the source row.
+pub fn title_for(collection: &Collection, include_readme: bool, include_issues: bool) -> String {
+    let parts: Vec<String> = [
+        include_readme.then(|| "README".to_string()),
+        include_issues.then(|| format!("{} issue(s)", collection.issues.len())),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    format!("{} — {}", collection.repo, parts.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repo_specs_are_parsed_from_the_shapes_people_paste() {
+        let expect = Repo { owner: "rust-lang".into(), name: "rust".into() };
+        for input in [
+            "rust-lang/rust",
+            "  rust-lang/rust  ",
+            "https://github.com/rust-lang/rust",
+            "https://github.com/rust-lang/rust.git",
+            "https://github.com/rust-lang/rust/issues?q=1",
+            "git@github.com:rust-lang/rust.git",
+        ] {
+            assert_eq!(Repo::parse(input).unwrap(), expect, "input={}", input);
+        }
+    }
+
+    #[test]
+    fn a_repo_spec_that_is_not_a_repo_is_refused() {
+        for bad in ["", "rust", "https://example.com/a/b"] {
+            let err = Repo::parse(bad).unwrap_err();
+            assert!(!err.is_empty());
+        }
+        assert!(Repo::parse("owner/na me").unwrap_err().contains("characters"));
+    }
+
+    const ISSUES: &str = r#"[
+      {"number":12,"title":"Retry budget is not respected","state":"open",
+       "user":{"login":"okafor"},"created_at":"2026-03-01T10:00:00Z",
+       "body":"With three tiers the client retries 5 times instead of 2."},
+      {"number":13,"title":"Add EPUB support","state":"closed",
+       "user":{"login":"menon"},"created_at":"2026-03-02T10:00:00Z",
+       "body":"Closed by the 3.0 release."},
+      {"number":14,"title":"Docs: wrong install line","state":"open",
+       "user":{"login":"lee"},"created_at":"2026-03-03T10:00:00Z",
+       "body":"","pull_request":{"url":"https://api.github.com/repos/o/n/pulls/14"}}
+    ]"#;
+
+    #[test]
+    fn issues_keep_numbers_dates_authors_and_bodies_and_pull_requests_are_flagged() {
+        let issues = parse_issues(ISSUES).unwrap();
+        assert_eq!(issues.len(), 3);
+        assert_eq!(issues[0].number, 12);
+        assert_eq!(issues[0].author, "okafor");
+        assert_eq!(issues[0].created, "2026-03-01T10:00:00Z");
+        assert!(issues[0].body.contains("5 times"));
+        assert!(!issues[0].pull_request);
+        assert!(issues[2].pull_request, "a PR is not an issue");
+    }
+
+    #[test]
+    fn a_non_array_answer_is_an_error_not_an_empty_list() {
+        let err = parse_issues(r#"{"message":"API rate limit exceeded"}"#).unwrap_err();
+        assert!(err.contains("not a JSON array"), "{}", err);
+        assert!(parse_issues("not json").is_err());
+    }
+
+    #[test]
+    fn blocks_are_a_readme_section_then_issues_in_number_order() {
+        let mut issues = parse_issues(ISSUES).unwrap();
+        issues.retain(|i| !i.pull_request);
+        issues.reverse(); // deliberately out of order; the locator must not follow the API
+        let collection = Collection {
+            repo: "acme/retry".into(),
+            readme: "# acme/retry\n\nThe retry budget is 2.75 attempts per request.".into(),
+            issues,
+            skipped_pull_requests: 1,
+            api_base: "http://127.0.0.1:1".into(),
+        };
+        let blocks = collection.blocks();
+        assert_eq!(blocks[0].locator.section.as_deref(), Some("README"));
+        assert!(
+            blocks.iter().any(|b| b.locator.section.as_deref() == Some("README") && b.text.contains("2.75 attempts")),
+            "the README body is kept: {:?}",
+            blocks.iter().map(|b| &b.text).collect::<Vec<_>>()
+        );
+        let issues: Vec<&Block> = blocks.iter().filter(|b| b.locator.kind == "issue").collect();
+        assert_eq!(issues[0].locator.human(), "issue 12 · Retry budget is not respected");
+        assert_eq!(issues[1].locator.human(), "issue 13 · Add EPUB support");
+        assert!(issues[0].text.starts_with("#12 Retry budget is not respected\nopen · opened by okafor"));
+    }
+
+    #[test]
+    fn the_retained_envelope_round_trips_through_bytes() {
+        let collection = Collection {
+            repo: "acme/retry".into(),
+            readme: "# Title\n\nBody with a \"quote\" and a newline\nin it.".into(),
+            issues: parse_issues(ISSUES).unwrap().into_iter().filter(|i| !i.pull_request).collect(),
+            skipped_pull_requests: 1,
+            api_base: "https://api.github.com".into(),
+        };
+        let bytes = collection.to_bytes();
+        let back = Collection::from_bytes(&bytes).unwrap();
+        assert_eq!(back, collection);
+        let parsed = extract(&bytes).unwrap();
+        assert_eq!(parsed.page_count, 2);
+        assert!(parsed.warnings.iter().any(|w| w.contains("pull request(s) were skipped")));
+        assert!(parsed.warnings.iter().any(|w| w.contains("GitHub collection for acme/retry")));
+    }
+
+    #[test]
+    fn a_collection_without_text_is_refused_rather_than_indexed_empty() {
+        let collection = Collection { repo: "acme/empty".into(), ..Default::default() };
+        let err = extract(&collection.to_bytes()).unwrap_err();
+        assert!(err.contains("no readable text"), "{}", err);
+        assert!(Collection::from_bytes(b"{}").is_err(), "a payload with no repo is refused");
+    }
+
+    #[test]
+    fn urls_point_at_the_public_api_and_respect_the_issue_cap() {
+        let repo = Repo::parse("acme/retry").unwrap();
+        std::env::set_var("FORGE_GITHUB_API", "http://127.0.0.1:1/");
+        assert_eq!(readme_url(&repo), "http://127.0.0.1:1/repos/acme/retry/readme");
+        assert!(issues_url(&repo, 5000).ends_with("per_page=100"), "the cap holds: {}", issues_url(&repo, 5000));
+        assert!(issues_url(&repo, 0).ends_with("per_page=0"));
+        std::env::remove_var("FORGE_GITHUB_API");
+        assert_eq!(readme_url(&repo), "https://api.github.com/repos/acme/retry/readme");
     }
 }
 ```
@@ -15887,6 +15379,569 @@ mod fixture_tests {
 }
 ```
 
+## `crates/forge-core/src/ingest/feed.rs`
+
+```rust
+//! RSS 2.0, Atom 1.0 and RSS 1.0 (RDF) feeds.
+//!
+//! A feed is a *list of dated items*, and that structure is what makes it citable: an answer
+//! drawn from a feed must be able to say which item it came from and when that item was
+//! published, not just "somewhere in this XML". So every block is one item, and the locator
+//! carries the position and the title:
+//!
+//! ```text
+//! Locator { kind: "item", page: Some(3), section: Some("3 · The retention model"), .. }
+//! label: "item 3 · The retention model"
+//! ```
+//!
+//! Parsing is deliberately hand-written: Forge has no dependencies, and a feed is a flat list
+//! of elements — it does not need a general XML engine. What it does need is to *not lie*:
+//! an item with no date is left without a date (never stamped with the fetch time), an item
+//! with no body is skipped rather than cited as an empty quote, and a document that is not a
+//! feed is refused with a reason instead of being indexed as prose.
+
+use super::{text, Block, Parsed};
+use crate::domain::Locator;
+
+/// Beyond this an item is truncated; feeds are summaries, not books.
+const ITEM_MAX_CHARS: usize = 4000;
+/// A feed with more items than this keeps the newest-looking prefix and says so.
+const ITEM_MAX: usize = 200;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Item {
+    pub title: String,
+    pub link: String,
+    pub published: String,
+    pub author: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Feed {
+    pub title: String,
+    pub link: String,
+    /// `rss`, `atom` or `rdf` — recorded so the source can say what it actually was.
+    pub flavour: String,
+    pub items: Vec<Item>,
+    pub warnings: Vec<String>,
+}
+
+/// Cheap sniff used before parsing, and by `fetch` to classify a response.
+pub fn looks_like_feed(bytes: &[u8]) -> bool {
+    let head: String = String::from_utf8_lossy(bytes).chars().take(4096).collect();
+    let mut lower = head.to_ascii_lowercase();
+    if let Some(at) = lower.find("<rss") {
+        lower.truncate(at + 64);
+        return true;
+    }
+    let lower = head.to_ascii_lowercase();
+    lower.contains("<feed") && (lower.contains("www.w3.org/2005/atom") || lower.contains("<entry"))
+        || lower.contains("<rdf:rdf")
+        || (lower.contains("<rss") && lower.contains("version"))
+}
+
+/// Return the text of `<tag ...>…</tag>`, CDATA unwrapped. `None` when absent.
+fn raw_element<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{}", tag);
+    let start = xml.find(&open)?;
+    let after = &xml[start..];
+    // reject `<itemize>` when looking for `<item`
+    let close_of_open = after.find('>')?;
+    let name_end = after[1..close_of_open].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-' || *c == '_').count();
+    if !after[..1 + name_end].eq_ignore_ascii_case(&open) {
+        return None;
+    }
+    if after[..close_of_open].ends_with('/') {
+        return Some(""); // self-closing
+    }
+    let close_tag = format!("</{}>", tag).to_ascii_lowercase();
+    let body_start = start + close_of_open + 1;
+    let body = &xml[body_start..];
+    let end = body.to_ascii_lowercase().find(&close_tag)?;
+    Some(&body[..end])
+}
+
+/// All occurrences of a repeating element (`item` / `entry`) inside `xml`.
+fn elements<'a>(xml: &'a str, tag: &str) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let mut rest = xml;
+    let open = format!("<{}", tag);
+    let close_tag = format!("</{}>", tag);
+    while let Some(start) = rest.find(&open) {
+        let after = &rest[start..];
+        // `<item>` and `<item foo="1">` only — not `<itemize>`
+        let name_len = after[1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-' || *c == '_').count();
+        if !after[..1 + name_len].eq_ignore_ascii_case(&open) {
+            rest = &after[1..];
+            continue;
+        }
+        let Some(gt) = after.find('>') else { break };
+        if after[..gt].ends_with('/') {
+            rest = &after[gt + 1..];
+            continue;
+        }
+        let body = &after[gt + 1..];
+        match body.to_ascii_lowercase().find(&close_tag) {
+            Some(end) => {
+                out.push(&body[..end]);
+                rest = &body[end + close_tag.len()..];
+            }
+            // An unclosed item means the document is broken; stop rather than guess the rest.
+            None => break,
+        }
+    }
+    out
+}
+
+/// Unwrap CDATA and trim. Entities are **not** decoded here: decoding first would turn an
+/// escaped `&lt;b&gt;` into markup that `strip_tags` would then delete as if it were a tag.
+fn cdata_or_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(stripped) = trimmed.strip_prefix("<![CDATA[") {
+        stripped.strip_suffix("]]>").unwrap_or(stripped).trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// An Atom `<link href="..."/>` or an RSS `<link>text</link>`.
+fn link_of(item: &str) -> String {
+    // Atom: prefer rel="alternate", otherwise the first href that is not self/enclosure.
+    let mut fallback = String::new();
+    let mut rest = item;
+    while let Some(at) = rest.find("<link") {
+        let after = &rest[at..];
+        let Some(gt) = after.find('>') else { break };
+        let tag = &after[..gt];
+        let href = attr(tag, "href").unwrap_or_default();
+        let rel = attr(tag, "rel").unwrap_or_else(|| "alternate".to_string());
+        if !href.is_empty() && rel == "alternate" && fallback.is_empty() {
+            fallback = href;
+        } else if !href.is_empty() && fallback.is_empty() && rel != "self" && rel != "enclosure" {
+            fallback = href;
+        }
+        rest = &after[gt + 1..];
+    }
+    if !fallback.is_empty() {
+        return fallback;
+    }
+    // RSS: element text.
+    if let Some(raw) = raw_element(item, "link") {
+        let value = text::decode_entities(&cdata_or_text(raw)).trim().to_string();
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    // RSS 1.0 often repeats the URL as the element's rdf:resource.
+    let lower = item.to_ascii_lowercase();
+    if let Some(at) = lower.find("<link") {
+        let tag = &item[at..];
+        if let Some(gt) = tag.find('>') {
+            if let Some(v) = attr(&tag[..gt], "rdf:resource") {
+                return v;
+            }
+        }
+    }
+    String::new()
+}
+
+fn shorten(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
+}
+
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let needle = format!("{}=", name.to_ascii_lowercase());
+    let mut from = 0usize;
+    while let Some(rel) = lower[from..].find(&needle) {
+        let at = from + rel;
+        // must be preceded by whitespace or '<', so `href` does not match `xhref`
+        let prev = lower[..at].chars().last();
+        if matches!(prev, Some(c) if c.is_whitespace() || c == '<') {
+            let rest = &tag[at + needle.len()..];
+            let quote = rest.chars().next()?;
+            if quote == '"' || quote == '\'' {
+                let value = &rest[1..];
+                let end = value.find(quote)?;
+                return Some(text::decode_entities(&value[..end]));
+            }
+            let end = rest.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(rest.len());
+            return Some(text::decode_entities(rest[..end].trim()));
+        }
+        from = at + needle.len();
+    }
+    None
+}
+
+/// First present element among `names`.
+fn first(item: &str, names: &[&str]) -> String {
+    for name in names {
+        if let Some(raw) = raw_element(item, name) {
+            let value = cdata_or_text(raw);
+            if !value.is_empty() {
+                return value;
+            }
+        }
+    }
+    String::new()
+}
+
+/// Tags that are markup in a feed body. Anything else — `<y>`, `<3`, a URL with `<` in it —
+/// is text, and is kept: over-stripping would silently delete the author's words.
+const KNOWN_TAGS: &[&str] = &[
+    "a", "abbr", "b", "blockquote", "br", "caption", "cite", "code", "dd", "del", "div", "dl",
+    "dt", "em", "figcaption", "figure", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "iframe",
+    "img", "ins", "li", "ol", "p", "pre", "q", "s", "small", "span", "strong", "sub", "sup",
+    "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul", "video", "audio", "source",
+    "script", "style", "svg", "path", "name", "email", "uri", "label",
+];
+
+/// Tags whose removal separates words; whitespace is collapsed afterwards, so the extra space
+/// only matters where two paragraphs would otherwise run together.
+const BLOCK_TAGS: &[&str] = &[
+    "p", "div", "br", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre",
+    "tr", "td", "th", "table", "thead", "tbody", "tfoot", "dd", "dt", "dl", "figure",
+    "figcaption", "hr", "caption",
+];
+
+fn strip_known_markup(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            let rest = &text[i + 1..];
+            let name: String = rest
+                .chars()
+                .skip_while(|c| *c == '/')
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            let lower = name.to_ascii_lowercase();
+            let is_tag = KNOWN_TAGS.contains(&lower.as_str());
+            if is_tag && !lower.is_empty() {
+                match rest.find('>') {
+                    Some(end) => {
+                        if BLOCK_TAGS.contains(&lower.as_str()) {
+                            out.push(' ');
+                        }
+                        i += 1 + end + 1;
+                        continue;
+                    }
+                    None => break,
+                }
+            }
+        }
+        let ch = text[i..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn tidy_summary(raw: &str) -> String {
+    // Feed bodies are usually HTML. Strip real markup first, *then* decode entities, and then
+    // strip markup that was escaped into the text (`&lt;p&gt;` inside `<content type="html">`).
+    // A tag name that is not on the known list is left alone, so `x <y>` survives.
+    let plain = if raw.contains('<') { strip_known_markup(raw) } else { raw.to_string() };
+    let plain = text::decode_entities(&plain);
+    let plain = strip_known_markup(&plain);
+    plain
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(ITEM_MAX_CHARS)
+        .collect()
+}
+
+/// Parse a feed. `Err` means "this is not a feed", with the reason the user should see.
+pub fn parse(bytes: &[u8]) -> Result<Feed, String> {
+    let xml = super::decode_text(bytes);
+    if xml.trim().is_empty() {
+        return Err("the feed is empty".to_string());
+    }
+    let lower = xml.to_ascii_lowercase();
+
+    let mut feed = Feed::default();
+    let (flavour, root_title, raw_items) = if lower.contains("<rss") && lower.contains("<channel") {
+        ("rss", first(&xml, &["title"]), elements(&xml, "item"))
+    } else if lower.contains("<feed") {
+        ("atom", first(&xml, &["title"]), elements(&xml, "entry"))
+    } else if lower.contains("<rdf:rdf") {
+        ("rdf", first(&xml, &["title"]), elements(&xml, "item"))
+    } else {
+        return Err(
+            "not a feed: no <rss>, <feed> or <rdf:RDF> root element was found".to_string(),
+        );
+    };
+    feed.flavour = flavour.to_string();
+    feed.title = tidy_summary(&root_title);
+    feed.link = if flavour == "atom" { link_of(&xml) } else { first(&xml, &["link"]) };
+    if feed.link.contains('<') {
+        feed.link = link_of(&xml);
+    }
+
+    if raw_items.is_empty() {
+        return Err("the feed parses but contains no items".to_string());
+    }
+
+    for raw in raw_items {
+        let title = tidy_summary(&first(raw, &["title"]));
+        // `content:encoded` first: it is the body, `description` is often only a teaser.
+        let summary = tidy_summary(&first(raw, &["content:encoded", "content", "summary", "description"]));
+        let published = text::decode_entities(&first(raw, &["pubDate", "published", "updated", "dc:date", "date"])).trim().to_string();
+        // Atom nests the name: `<author><name>A. Menon</name></author>`. tidy_summary strips
+        // the wrapper, so both shapes give the same string.
+        let author = tidy_summary(&first(raw, &["dc:creator", "creator", "author", "name"]));
+        let link = link_of(raw);
+        if summary.is_empty() && title.is_empty() {
+            feed.warnings.push("an item had neither a title nor a body and was skipped".to_string());
+            continue;
+        }
+        if published.is_empty() {
+            // Deliberately not filled in with the fetch time: the publish date is the source's
+            // fact, and inventing one would let an answer cite a date the feed never claimed.
+            feed.warnings.push(format!(
+                "item \"{}\" has no publish date; it is indexed without one",
+                shorten(&title, 60)
+            ));
+        }
+        feed.items.push(Item { title, link, published, author, summary });
+    }
+
+    if feed.items.is_empty() {
+        return Err("every item in the feed was empty".to_string());
+    }
+    if feed.items.len() > ITEM_MAX {
+        feed.warnings.push(format!(
+            "the feed lists {} items; the first {} were indexed",
+            feed.items.len(),
+            ITEM_MAX
+        ));
+        feed.items.truncate(ITEM_MAX);
+    }
+    Ok(feed)
+}
+
+/// One block per item, in feed order (feeds are ordered by the publisher, so that order is
+/// kept rather than re-sorted: reordering would change which item is "item 1").
+pub fn blocks(feed: &Feed) -> Vec<Block> {
+    let mut out = Vec::new();
+    for (idx, item) in feed.items.iter().enumerate() {
+        let n = idx as u32 + 1;
+        let heading = if item.title.is_empty() {
+            format!("item {}", n)
+        } else {
+            item.title.clone()
+        };
+        let mut body = String::new();
+        body.push_str(&heading);
+        let mut meta: Vec<String> = Vec::new();
+        if !item.published.is_empty() {
+            meta.push(item.published.clone());
+        }
+        if !item.author.is_empty() {
+            meta.push(item.author.clone());
+        }
+        if !item.link.is_empty() {
+            meta.push(item.link.clone());
+        }
+        if !meta.is_empty() {
+            body.push('\n');
+            body.push_str(&meta.join(" · "));
+        }
+        if !item.summary.is_empty() {
+            body.push('\n');
+            body.push_str(&item.summary);
+        }
+        let section = if item.title.is_empty() { format!("{}", n) } else { format!("{} · {}", n, item.title) };
+        out.push(Block {
+            text: body,
+            locator: Locator::item(n, &shorten(&section, 120)),
+        });
+    }
+    out
+}
+
+/// The `Parsed` form used by the ingestion pipeline.
+pub fn feed(bytes: &[u8]) -> Result<Parsed, String> {
+    let parsed = parse(bytes)?;
+    let mut warnings = parsed.warnings.clone();
+    warnings.push(format!(
+        "feed read as {}: {} item(s){}",
+        match parsed.flavour.as_str() {
+            "atom" => "Atom 1.0",
+            "rdf" => "RSS 1.0 (RDF)",
+            _ => "RSS 2.0",
+        },
+        parsed.items.len(),
+        if parsed.title.is_empty() { String::new() } else { format!(" from \"{}\"", parsed.title) }
+    ));
+    let blocks = blocks(&parsed);
+    Ok(Parsed { blocks: super::chunk_blocks(blocks), warnings, page_count: parsed.items.len() as u32, tables: Vec::new() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RSS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Retention Weekly</title>
+  <link>https://example.test/</link>
+  <description>notes on retention</description>
+  <item>
+    <title>Churn fell after the onboarding rewrite</title>
+    <link>https://example.test/posts/onboarding</link>
+    <pubDate>Tue, 03 Mar 2026 09:00:00 GMT</pubDate>
+    <dc:creator>R. Okafor</dc:creator>
+    <description><![CDATA[<p>Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite.</p>]]></description>
+  </item>
+  <item>
+    <title>Legal hold overrides the thirty day window</title>
+    <link>https://example.test/posts/legal-hold</link>
+    <pubDate>Wed, 04 Mar 2026 12:30:00 GMT</pubDate>
+    <description>A legal hold suspends deletion regardless of the retention window.</description>
+  </item>
+</channel></rss>"#;
+
+    const ATOM: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Forge release notes</title>
+  <link href="https://example.test/atom"/>
+  <entry>
+    <title>Version 3 stores item dates</title>
+    <link rel="alternate" href="https://example.test/atom/3"/>
+    <published>2026-02-01T10:00:00Z</published>
+    <author><name>A. Menon</name></author>
+    <summary>Feeds are now read as dated items.</summary>
+  </entry>
+  <entry>
+    <title>Version 2 added EPUB</title>
+    <link rel="alternate" href="https://example.test/atom/2"/>
+    <updated>2026-01-15T08:00:00Z</updated>
+    <summary>EPUB files are read in spine order.</summary>
+  </entry>
+</feed>"#;
+
+    #[test]
+    fn rss_items_keep_their_own_dates_authors_and_bodies() {
+        let feed = parse(RSS.as_bytes()).expect("rss parses");
+        assert_eq!(feed.flavour, "rss");
+        assert_eq!(feed.title, "Retention Weekly");
+        assert_eq!(feed.items.len(), 2);
+        assert_eq!(feed.items[0].published, "Tue, 03 Mar 2026 09:00:00 GMT");
+        assert_eq!(feed.items[0].author, "R. Okafor");
+        // CDATA is unwrapped and the HTML inside it is stripped, not indexed as markup.
+        assert_eq!(
+            feed.items[0].summary,
+            "Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite."
+        );
+        assert_eq!(feed.items[1].link, "https://example.test/posts/legal-hold");
+    }
+
+    #[test]
+    fn atom_entries_use_the_alternate_link_and_both_date_elements() {
+        let feed = parse(ATOM.as_bytes()).expect("atom parses");
+        assert_eq!(feed.flavour, "atom");
+        assert_eq!(feed.items.len(), 2);
+        assert_eq!(feed.items[0].link, "https://example.test/atom/3");
+        assert_eq!(feed.items[0].published, "2026-02-01T10:00:00Z");
+        assert_eq!(feed.items[0].author, "A. Menon");
+        // `<updated>` is a date too, and is used when `<published>` is absent.
+        assert_eq!(feed.items[1].published, "2026-01-15T08:00:00Z");
+        assert!(feed.warnings.is_empty(), "{:?}", feed.warnings);
+    }
+
+    #[test]
+    fn an_item_without_a_date_is_left_without_one_and_says_so() {
+        let xml = r#"<rss version="2.0"><channel><title>t</title>
+            <item><title>undated</title><description>body text</description></item>
+            </channel></rss>"#;
+        let feed = parse(xml.as_bytes()).expect("parses");
+        assert_eq!(feed.items[0].published, "");
+        assert!(feed.warnings.iter().any(|w| w.contains("no publish date")), "{:?}", feed.warnings);
+        let blocks = blocks(&feed);
+        assert!(!blocks[0].text.contains("©"), "no invented metadata");
+    }
+
+    #[test]
+    fn locators_point_at_the_item_and_read_as_item_n_title() {
+        let feed = parse(ATOM.as_bytes()).expect("parses");
+        let blocks = blocks(&feed);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1].locator.kind, "item");
+        assert_eq!(blocks[1].locator.page, Some(2));
+        assert_eq!(blocks[1].locator.human(), "item 2 · Version 2 added EPUB");
+        assert!(blocks[1].text.starts_with("Version 2 added EPUB\n2026-01-15T08:00:00Z · "));
+    }
+
+    #[test]
+    fn a_document_that_is_not_a_feed_is_refused_with_a_reason() {
+        let e = parse(b"<html><body><h1>not a feed</h1></body></html>").unwrap_err();
+        assert!(e.contains("not a feed"), "{}", e);
+        let e = parse(b"<rss version=\"2.0\"><channel><title>empty</title></channel></rss>").unwrap_err();
+        assert!(e.contains("no items"), "{}", e);
+    }
+
+    #[test]
+    fn rdf_feeds_are_recognised_and_look_like_feed_does_not_overreach() {
+        let rdf = r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+              xmlns="http://purl.org/rss/1.0/"><channel><title>Old feed</title>
+              <link>https://example.test/</link></channel>
+              <item rdf:about="https://example.test/a"><title>A</title>
+              <link>https://example.test/a</link><description>first</description></item></rdf:RDF>"#;
+        let feed = parse(rdf.as_bytes()).expect("rdf parses");
+        assert_eq!(feed.flavour, "rdf");
+        assert_eq!(feed.items[0].link, "https://example.test/a");
+
+        assert!(looks_like_feed(RSS.as_bytes()));
+        assert!(looks_like_feed(ATOM.as_bytes()));
+        assert!(!looks_like_feed(b"<html><body>hi</body></html>"));
+        assert!(!looks_like_feed(b"{\"json\":true}"));
+    }
+
+    #[test]
+    fn escaped_html_in_a_content_element_is_markup_not_prose() {
+        // Real shape from a GitHub releases Atom feed: the body is escaped HTML.
+        let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Releases</title>
+            <entry><title>v1.2</title><published>2026-01-02T03:04:05Z</published>
+            <content type="html">&lt;p&gt;Fixes the retry loop.&lt;/p&gt;&lt;p&gt;Adds EPUB.&lt;/p&gt;</content>
+            </entry></feed>"#;
+        let feed = parse(xml.as_bytes()).expect("parses");
+        assert_eq!(feed.items[0].summary, "Fixes the retry loop. Adds EPUB.", "{:?}", feed.items[0].summary);
+        assert!(!feed.items[0].summary.contains('<'), "no markup leaks into the evidence text");
+    }
+
+    #[test]
+    fn a_less_than_that_is_not_a_tag_is_kept() {
+        assert_eq!(tidy_summary("x <y> and 3 < 4"), "x <y> and 3 < 4");
+    }
+
+    #[test]
+    fn entity_encoded_titles_are_decoded() {
+        let xml = r#"<rss version="2.0"><channel><title>A &amp; B</title>
+            <item><title>Q&amp;A &#8212; retention</title><description>x &lt;y&gt;</description></item>
+            </channel></rss>"#;
+        let feed = parse(xml.as_bytes()).expect("parses");
+        assert_eq!(feed.title, "A & B");
+        assert_eq!(feed.items[0].summary, "x <y>");
+    }
+
+    #[test]
+    fn the_pipeline_reports_what_it_read() {
+        let parsed = feed(RSS.as_bytes()).expect("parses");
+        assert_eq!(parsed.page_count, 2);
+        assert!(parsed.warnings[0].starts_with("feed read as RSS 2.0: 2 item(s)"), "{:?}", parsed.warnings);
+        assert_eq!(parsed.blocks.len(), 2);
+    }
+}
+```
+
 ## `crates/forge-core/src/ingest/mod.rs`
 
 ```rust
@@ -18475,6 +18530,7 @@ pub mod discovery;
 pub mod export;
 pub mod notebooklm;
 pub mod providers;
+pub mod render;
 pub mod retrieve;
 pub mod security;
 pub mod store;
@@ -20472,6 +20528,898 @@ mod tests {
         assert_eq!(delete_secret(&dir, "p1").as_deref(), Some("sk-secret-value"));
         assert!(read_secret(&dir, "p1").is_none());
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+```
+
+## `crates/forge-core/src/render.rs`
+
+```rust
+//! Binary renderers: PPTX for slide decks, PDF for any artifact.
+//!
+//! Forge has no dependency tree and no rendering stack, so both formats are written by hand —
+//! which is only defensible if the output is *actually* the format and is verified as such:
+//!
+//! * PPTX is an Office Open XML package: a ZIP of parts. `zip_store` writes a real archive
+//!   (local headers, central directory, end-of-central-directory, CRC-32), and every part below
+//!   is the schema-defined minimum for a one-layout presentation: content types, package rels,
+//!   presentation, slide master, one blank layout, a theme, and one part per slide.
+//! * PDF is written page by page with a real cross-reference table and a Helvetica font object.
+//!
+//! The evidence that these are genuine files lives in the test suite: our own PPTX and PDF
+//! *readers* parse what the writers produce, and `docs/TEST_MATRIX.md` records that the PPTX was
+//! additionally opened with python-pptx and the PDF with pypdf (independent implementations) as
+//! a one-off check in a scratch directory — those tools are not dependencies of the build.
+//!
+//! What neither renderer claims: images, embedded charts, speaker-note parts in the PDF,
+//! fonts outside the PDF base-14 set, or any non-ASCII text in the PDF body (unrepresentable
+//! characters become `?`, and the document says so in its own footer).
+
+use crate::domain::{Artifact, Source};
+use crate::json::Value;
+
+// --------------------------------------------------------------------- CRC-32 and ZIP
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut table = [0u32; 256];
+    for (i, slot) in table.iter_mut().enumerate() {
+        let mut c = i as u32;
+        for _ in 0..8 {
+            c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+        }
+        *slot = c;
+    }
+    let mut crc = 0xFFFF_FFFFu32;
+    for byte in data {
+        crc = table[((crc ^ *byte as u32) & 0xFF) as usize] ^ (crc >> 8);
+    }
+    crc ^ 0xFFFF_FFFF
+}
+
+fn push_u16(buf: &mut Vec<u8>, v: u16) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+
+fn push_u32(buf: &mut Vec<u8>, v: u32) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+
+/// An uncompressed (stored) ZIP archive. Office packages do not require deflate, and a stored
+/// archive is far easier to verify byte for byte; `ingest::zip` and any unzip read it.
+pub fn zip_store(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut central: Vec<u8> = Vec::new();
+    for (name, data) in entries {
+        let offset = out.len() as u32;
+        let crc = crc32(data);
+        // local file header
+        push_u32(&mut out, 0x0403_4b50);
+        push_u16(&mut out, 20); // version needed
+        push_u16(&mut out, 0); // flags
+        push_u16(&mut out, 0); // method: stored
+        push_u16(&mut out, 0); // time
+        push_u16(&mut out, 0x0021); // date: 1980-01-01
+        push_u32(&mut out, crc);
+        push_u32(&mut out, data.len() as u32);
+        push_u32(&mut out, data.len() as u32);
+        push_u16(&mut out, name.len() as u16);
+        push_u16(&mut out, 0); // extra
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+
+        // central directory entry
+        push_u32(&mut central, 0x0201_4b50);
+        push_u16(&mut central, 20); // version made by
+        push_u16(&mut central, 20); // version needed
+        push_u16(&mut central, 0);
+        push_u16(&mut central, 0);
+        push_u16(&mut central, 0);
+        push_u16(&mut central, 0x0021);
+        push_u32(&mut central, crc);
+        push_u32(&mut central, data.len() as u32);
+        push_u32(&mut central, data.len() as u32);
+        push_u16(&mut central, name.len() as u16);
+        push_u16(&mut central, 0); // extra
+        push_u16(&mut central, 0); // comment
+        push_u16(&mut central, 0); // disk
+        push_u16(&mut central, 0); // internal attrs
+        push_u32(&mut central, 0); // external attrs
+        push_u32(&mut central, offset);
+        central.extend_from_slice(name.as_bytes());
+    }
+    let central_offset = out.len() as u32;
+    out.extend_from_slice(&central);
+    // end of central directory
+    push_u32(&mut out, 0x0605_4b50);
+    push_u16(&mut out, 0);
+    push_u16(&mut out, 0);
+    push_u16(&mut out, entries.len() as u16);
+    push_u16(&mut out, entries.len() as u16);
+    push_u32(&mut out, central.len() as u32);
+    push_u32(&mut out, central_offset);
+    push_u16(&mut out, 0);
+    out
+}
+
+// --------------------------------------------------------------------- XML helpers
+
+fn xml_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            // Control characters are not legal in XML 1.0 and would make the package invalid.
+            c if (c as u32) < 0x20 && c != '\t' && c != '\n' => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const NS_P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
+const NS_PKG_REL: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+const NS_CT: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
+
+const XML_HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
+
+fn rels(entries: &[(String, String, String)]) -> String {
+    let mut out = format!("{XML_HEAD}<Relationships xmlns=\"{NS_PKG_REL}\">");
+    for (id, kind, target) in entries {
+        out.push_str(&format!(
+            "<Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"/>",
+            id,
+            kind,
+            xml_escape(target)
+        ));
+    }
+    out.push_str("</Relationships>");
+    out
+}
+
+const RT_OFFICE_DOC: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+const RT_SLIDE_MASTER: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster";
+const RT_SLIDE_LAYOUT: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout";
+const RT_SLIDE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide";
+const RT_THEME: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme";
+
+fn theme_xml() -> String {
+    let accents = ["2F5597", "C55A11", "70AD47", "7030A0", "FFC000", "00B0F0"];
+    let mut accent = String::new();
+    for (i, colour) in accents.iter().enumerate() {
+        accent.push_str(&format!(
+            "<a:accent{}><a:srgbClr val=\"{}\"/></a:accent{}>",
+            i + 1,
+            colour,
+            i + 1
+        ));
+    }
+    format!(
+        "{XML_HEAD}<a:theme xmlns:a=\"{NS_A}\" name=\"Forge\"><a:themeElements>\
+<a:clrScheme name=\"Forge\">\
+<a:dk1><a:sysClr val=\"windowText\" lastClr=\"000000\"/></a:dk1>\
+<a:lt1><a:sysClr val=\"window\" lastClr=\"FFFFFF\"/></a:lt1>\
+<a:dk2><a:srgbClr val=\"1F3864\"/></a:dk2><a:lt2><a:srgbClr val=\"E7E6E6\"/></a:lt2>\
+{accent}\
+<a:hlink><a:srgbClr val=\"0563C1\"/></a:hlink><a:folHlink><a:srgbClr val=\"954F72\"/></a:folHlink>\
+</a:clrScheme>\
+<a:fontScheme name=\"Forge\">\
+<a:majorFont><a:latin typeface=\"Calibri Light\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:majorFont>\
+<a:minorFont><a:latin typeface=\"Calibri\"/><a:ea typeface=\"\"/><a:cs typeface=\"\"/></a:minorFont>\
+</a:fontScheme>\
+<a:fmtScheme name=\"Forge\">\
+<a:fillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>\
+<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>\
+<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:fillStyleLst>\
+<a:lnStyleLst><a:ln w=\"6350\" cap=\"flat\" cmpd=\"sng\" algn=\"ctr\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:prstDash val=\"solid\"/></a:ln>\
+<a:ln w=\"12700\" cap=\"flat\" cmpd=\"sng\" algn=\"ctr\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:prstDash val=\"solid\"/></a:ln>\
+<a:ln w=\"19050\" cap=\"flat\" cmpd=\"sng\" algn=\"ctr\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill><a:prstDash val=\"solid\"/></a:ln></a:lnStyleLst>\
+<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle>\
+<a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst>\
+<a:bgFillStyleLst><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>\
+<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>\
+<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:bgFillStyleLst>\
+</a:fmtScheme></a:themeElements></a:theme>"
+    )
+}
+
+const SPRUCE_GROUP: &str = "<p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>\
+<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>";
+
+fn slide_master_xml() -> String {
+    format!(
+        "{XML_HEAD}<p:sldMaster xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\" xmlns:p=\"{NS_P}\">\
+<p:cSld><p:bg><p:bgRef idx=\"1001\"><a:schemeClr val=\"bg1\"/></p:bgRef></p:bg>\
+<p:spTree>{SPRUCE_GROUP}</p:spTree></p:cSld>\
+<p:clrMap bg1=\"lt1\" tx1=\"dk1\" bg2=\"lt2\" tx2=\"dk2\" accent1=\"accent1\" accent2=\"accent2\" \
+accent3=\"accent3\" accent4=\"accent4\" accent5=\"accent5\" accent6=\"accent6\" hlink=\"hlink\" folHlink=\"folHlink\"/>\
+<p:sldLayoutIdLst><p:sldLayoutId id=\"2147483649\" r:id=\"rId1\"/></p:sldLayoutIdLst>\
+<p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr sz=\"4000\" b=\"1\"/></a:lvl1pPr></p:titleStyle>\
+<p:bodyStyle><a:lvl1pPr><a:defRPr sz=\"2000\"/></a:lvl1pPr></p:bodyStyle>\
+<p:otherStyle><a:lvl1pPr><a:defRPr sz=\"1800\"/></a:lvl1pPr></p:otherStyle></p:txStyles>\
+</p:sldMaster>"
+    )
+}
+
+fn slide_layout_xml() -> String {
+    format!(
+        "{XML_HEAD}<p:sldLayout xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\" xmlns:p=\"{NS_P}\" type=\"blank\" preserve=\"1\">\
+<p:cSld name=\"Blank\"><p:spTree>{SPRUCE_GROUP}</p:spTree></p:cSld>\
+<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>"
+    )
+}
+
+/// One text box: title, bullet body or footer. `size` is in hundredths of a point (the DrawingML
+/// `sz` attribute), exactly as PowerPoint stores it.
+fn text_box(id: u32, name: &str, x: i64, y: i64, cx: i64, cy: i64, paragraphs: &[(String, u32, bool)]) -> String {
+    let mut body = String::new();
+    for (text, size, bold) in paragraphs {
+        body.push_str(&format!(
+            "<a:p><a:r><a:rPr lang=\"en-US\" sz=\"{}\" b=\"{}\"/><a:t>{}</a:t></a:r><a:endParaRPr lang=\"en-US\"/></a:p>",
+            size,
+            if *bold { 1 } else { 0 },
+            xml_escape(text)
+        ));
+    }
+    format!(
+        "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>\
+<p:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>\
+<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr>\
+<p:txBody><a:bodyPr wrap=\"square\"><a:normAutofit/></a:bodyPr><a:lstStyle/>{body}</p:txBody></p:sp>"
+    )
+}
+
+fn slide_xml(title: &str, bullets: &[(String, String)], footer: &str) -> String {
+    // 16:9 canvas in EMU.
+    let mut tree = String::new();
+    tree.push_str(&text_box(2, "Title", 609_600, 400_000, 10_972_800, 1_100_000, &[(title.to_string(), 3200, true)]));
+    if !bullets.is_empty() {
+        let paras: Vec<(String, u32, bool)> = bullets
+            .iter()
+            .map(|(text, source)| {
+                (
+                    if source.is_empty() { format!("• {}", text) } else { format!("• {}  [{}]", text, source) },
+                    1600,
+                    false,
+                )
+            })
+            .collect();
+        tree.push_str(&text_box(3, "Body", 609_600, 1_600_000, 10_972_800, 4_200_000, &paras));
+    }
+    if !footer.is_empty() {
+        tree.push_str(&text_box(4, "Footer", 609_600, 6_200_000, 10_972_800, 400_000, &[(footer.to_string(), 1000, false)]));
+    }
+    format!(
+        "{XML_HEAD}<p:sld xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\" xmlns:p=\"{NS_P}\">\
+<p:cSld><p:spTree>{SPRUCE_GROUP}{tree}</p:spTree></p:cSld>\
+<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
+    )
+}
+
+fn presentation_xml(slide_count: usize) -> String {
+    let mut ids = String::new();
+    let mut rid = 2; // rId1 is the slide master
+    for _ in 0..slide_count {
+        ids.push_str(&format!("<p:sldId id=\"{}\" r:id=\"rId{}\"/>", 255 + rid, rid));
+        rid += 1;
+    }
+    format!(
+        "{XML_HEAD}<p:presentation xmlns:a=\"{NS_A}\" xmlns:r=\"{NS_R}\" xmlns:p=\"{NS_P}\" saveSubsetFonts=\"1\">\
+<p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst>\
+<p:sldIdLst>{ids}</p:sldIdLst>\
+<p:sldSz cx=\"12192000\" cy=\"6858000\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/>\
+<p:defaultTextStyle><a:lvl1pPr><a:defRPr sz=\"1800\"/></a:lvl1pPr></p:defaultTextStyle>\
+</p:presentation>"
+    )
+}
+
+/// A citation label for a bullet: "title · locator". Evidence travels with the slide, because a
+/// quotation without its source is exactly what this product exists to avoid.
+fn citation_label(citation: &Value) -> String {
+    let title = citation.str_of("source_title").unwrap_or("").trim();
+    let label = citation.str_of("locator_label").unwrap_or("").trim();
+    match (title.is_empty(), label.is_empty()) {
+        (false, false) => format!("{} · {}", title, label),
+        (false, true) => title.to_string(),
+        (true, false) => label.to_string(),
+        (true, true) => String::new(),
+    }
+}
+
+fn slide_parts(art: &Artifact) -> Option<Vec<(String, Vec<(String, String)>)>> {
+    let slides = art.payload.get("slides")?.as_arr()?;
+    let mut out = Vec::new();
+    for slide in slides {
+        let title = slide.str_of("title").unwrap_or("").trim().to_string();
+        let mut bullets: Vec<(String, String)> = Vec::new();
+        if let Some(list) = slide.get("bullets").and_then(|b| b.as_arr()) {
+            for bullet in list {
+                let text = bullet.str_of("text").unwrap_or("").trim();
+                if text.is_empty() {
+                    continue;
+                }
+                let source = bullet
+                    .get("citation")
+                    .map(citation_label)
+                    .unwrap_or_default();
+                bullets.push((text.to_string(), source));
+            }
+        }
+        out.push((title, bullets));
+    }
+    Some(out)
+}
+
+/// Render a slide-deck artifact as a real `.pptx` package. `None` when the artifact is not a
+/// deck: a PowerPoint file pretending to hold flashcards would be a false artifact.
+pub fn pptx(art: &Artifact) -> Option<Vec<u8>> {
+    let slides = slide_parts(art)?;
+    if slides.is_empty() {
+        return None;
+    }
+    let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut overrides = String::new();
+
+    entries.push((
+        "_rels/.rels".to_string(),
+        rels(&[("rId1".into(), RT_OFFICE_DOC.into(), "ppt/presentation.xml".into())]).into_bytes(),
+    ));
+    entries.push(("ppt/presentation.xml".to_string(), presentation_xml(slides.len()).into_bytes()));
+
+    let mut pres_rels = vec![("rId1".to_string(), RT_SLIDE_MASTER.to_string(), "slideMasters/slideMaster1.xml".to_string())];
+    for (i, _) in slides.iter().enumerate() {
+        pres_rels.push((format!("rId{}", i + 2), RT_SLIDE.to_string(), format!("slides/slide{}.xml", i + 1)));
+    }
+    entries.push(("ppt/_rels/presentation.xml.rels".to_string(), rels(&pres_rels).into_bytes()));
+
+    entries.push(("ppt/slideMasters/slideMaster1.xml".to_string(), slide_master_xml().into_bytes()));
+    entries.push((
+        "ppt/slideMasters/_rels/slideMaster1.xml.rels".to_string(),
+        rels(&[
+            ("rId1".into(), RT_SLIDE_LAYOUT.into(), "../slideLayouts/slideLayout1.xml".into()),
+            ("rId2".into(), RT_THEME.into(), "../theme/theme1.xml".into()),
+        ])
+        .into_bytes(),
+    ));
+    entries.push(("ppt/slideLayouts/slideLayout1.xml".to_string(), slide_layout_xml().into_bytes()));
+    entries.push((
+        "ppt/slideLayouts/_rels/slideLayout1.xml.rels".to_string(),
+        rels(&[("rId1".into(), RT_SLIDE_MASTER.into(), "../slideMasters/slideMaster1.xml".into())])
+            .into_bytes(),
+    ));
+    entries.push(("ppt/theme/theme1.xml".to_string(), theme_xml().into_bytes()));
+
+    for (i, (title, bullets)) in slides.iter().enumerate() {
+        let n = i + 1;
+        entries.push((
+            format!("ppt/slides/slide{}.xml", n),
+            slide_xml(title, bullets, &format!("Forge · {} · version {}", art.title, art.version)).into_bytes(),
+        ));
+        entries.push((
+            format!("ppt/slides/_rels/slide{}.xml.rels", n),
+            rels(&[("rId1".into(), RT_SLIDE_LAYOUT.into(), "../slideLayouts/slideLayout1.xml".into())])
+                .into_bytes(),
+        ));
+        overrides.push_str(&format!(
+            "<Override PartName=\"/ppt/slides/slide{}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/>",
+            n
+        ));
+    }
+
+    let content_types = format!(
+        "{XML_HEAD}<Types xmlns=\"{NS_CT}\">\
+<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\
+<Default Extension=\"xml\" ContentType=\"application/xml\"/>\
+<Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/>\
+<Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml\"/>\
+<Override PartName=\"/ppt/slideLayouts/slideLayout1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/>\
+<Override PartName=\"/ppt/theme/theme1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/>\
+{overrides}</Types>"
+    );
+    // [Content_Types].xml must be the first part in an OPC package.
+    entries.insert(0, ("[Content_Types].xml".to_string(), content_types.into_bytes()));
+    Some(zip_store(&entries))
+}
+
+// --------------------------------------------------------------------- PDF
+
+/// Encode text for a base-14 font with `/WinAnsiEncoding`: **one byte per character**, so a
+/// Latin-1 character is written as its own code point (writing UTF-8 into a PDF string is what
+/// makes readers print `Â·`). Anything outside Latin-1 becomes `?`, and the footer says so.
+fn pdf_text(text: &str) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '(' => out.extend_from_slice(b"\\("),
+            ')' => out.extend_from_slice(b"\\)"),
+            '\\' => out.extend_from_slice(b"\\\\"),
+            '\n' | '\r' | '\t' => out.push(b' '),
+            c if (c as u32) < 0x20 => out.push(b' '),
+            c if (c as u32) < 0x7F => out.push(c as u8),
+            '–' | '—' => out.push(b'-'),
+            '‘' | '’' => out.push(b'\''),
+            '“' | '”' => out.push(b'"'),
+            '•' => out.push(b'-'),
+            '…' => out.extend_from_slice(b"..."),
+            // Latin-1 is byte-identical to the first 256 Unicode code points.
+            c if (c as u32) <= 0xFF => out.push(c as u8),
+            _ => out.push(b'?'),
+        }
+    }
+    out
+}
+
+/// Wrap on words to a fixed character budget; Helvetica at 10pt averages about 5.1pt per
+/// character on a 595pt page, so 100 characters is a conservative full line.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if current.is_empty() {
+            current.push_str(word);
+        } else if current.chars().count() + 1 + word.chars().count() <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        }
+        // A single "word" longer than the line is hard-split rather than allowed to run off page.
+        while current.chars().count() > width {
+            let head: String = current.chars().take(width).collect();
+            lines.push(head);
+            current = current.chars().skip(width).collect();
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Style {
+    Title,
+    Subtitle,
+    Heading,
+    Body,
+    Small,
+}
+
+struct Line {
+    text: String,
+    style: Style,
+}
+
+/// Turn any artifact into a printable document: a title block, then one section per logical row
+/// of its payload, always carrying the citation labels the artifact itself records.
+fn document_lines(art: &Artifact, sources: &[Source]) -> Vec<Line> {
+    let mut lines: Vec<Line> = Vec::new();
+    for l in wrap(&art.title, 60) {
+        lines.push(Line { text: l, style: Style::Title });
+    }
+    let meta = format!(
+        "Forge {} artifact · version {} · {} source(s)",
+        art.kind,
+        art.version,
+        art.source_ids.len()
+    );
+    for l in wrap(&meta, 95) {
+        lines.push(Line { text: l, style: Style::Subtitle });
+    }
+    lines.push(Line { text: String::new(), style: Style::Body });
+
+    let mut push_section = |heading: &str, body: &[String], lines: &mut Vec<Line>| {
+        if heading.is_empty() && body.is_empty() {
+            return;
+        }
+        if !heading.is_empty() {
+            for l in wrap(heading, 70) {
+                lines.push(Line { text: l, style: Style::Heading });
+            }
+        }
+        for item in body {
+            for (i, l) in wrap(item, 92).into_iter().enumerate() {
+                lines.push(Line {
+                    text: if i == 0 { format!("- {}", l) } else { format!("  {}", l) },
+                    style: Style::Body,
+                });
+            }
+        }
+        lines.push(Line { text: String::new(), style: Style::Body });
+    };
+
+    match art.payload.get("slides").and_then(|s| s.as_arr()) {
+        Some(slides) => {
+            for (i, slide) in slides.iter().enumerate() {
+                let title = slide.str_of("title").unwrap_or("");
+                let mut body: Vec<String> = Vec::new();
+                if let Some(list) = slide.get("bullets").and_then(|b| b.as_arr()) {
+                    for bullet in list {
+                        let text = bullet.str_of("text").unwrap_or("").trim();
+                        if text.is_empty() {
+                            continue;
+                        }
+                        let label = bullet.get("citation").map(citation_label).unwrap_or_default();
+                        body.push(if label.is_empty() { text.to_string() } else { format!("{} [{}]", text, label) });
+                    }
+                }
+                if let Some(notes) = slide.str_of("notes") {
+                    if !notes.trim().is_empty() {
+                        body.push(format!("notes: {}", notes.trim()));
+                    }
+                }
+                push_section(&format!("{}. {}", i + 1, title), &body, &mut lines);
+            }
+        }
+        None => {
+            // Generic walk: every array of objects becomes a section; scalar keys become lines.
+            if let Some(map) = art.payload.as_obj() {
+                for (key, value) in map {
+                    match value {
+                        Value::Arr(items) if !items.is_empty() => {
+                            let body: Vec<String> = items
+                                .iter()
+                                .map(|item| {
+                                    if let Some(text) = item.as_str() {
+                                        return text.to_string();
+                                    }
+                                    let mut parts: Vec<String> = Vec::new();
+                                    if let Some(map) = item.as_obj() {
+                                        for (k, v) in map {
+                                            match v {
+                                                Value::Str(s) => parts.push(format!("{}: {}", k, s)),
+                                                Value::Num(n) => parts.push(format!("{}: {}", k, n)),
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    parts.join(" · ")
+                                })
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            push_section(key, &body, &mut lines);
+                        }
+                        Value::Str(s) if !s.trim().is_empty() => {
+                            push_section(key, &[s.trim().to_string()], &mut lines);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    // Every artifact records its sources; the printed copy names them, because a bare id is not
+    // something a reader can look up once the notebook is closed.
+    if !art.source_ids.is_empty() {
+        lines.push(Line { text: "Sources".to_string(), style: Style::Heading });
+        for id in &art.source_ids {
+            let labelled = sources
+                .iter()
+                .find(|s| &s.id == id)
+                .map(|s| format!("{} ({})", s.title, s.kind))
+                .unwrap_or_else(|| format!("{} (not in this notebook any more)", id));
+            lines.push(Line { text: format!("- {}", labelled), style: Style::Small });
+        }
+    }
+    lines
+}
+
+/// Render any artifact as a PDF with a real xref table. Page furniture is deliberate: the
+/// footer carries "Forge · page n of m" and the non-ASCII caveat, so a printed page cannot be
+/// mistaken for a page whose characters were all representable.
+pub fn pdf(art: &Artifact, sources: &[Source]) -> Vec<u8> {
+    let lines = document_lines(art, sources);
+    // Usable vertical space: 842pt tall (A4), 60pt margins, ~16pt between baselines.
+    let per_page = 46usize;
+    let pages: Vec<&[Line]> = if lines.is_empty() {
+        vec![&[][..]]
+    } else {
+        lines.chunks(per_page).collect()
+    };
+    let total = pages.len();
+
+    let mut objects: Vec<Vec<u8>> = Vec::new();
+    // 1: catalog, 2: pages, 3: font regular, 4: font bold, then page/content pairs.
+    objects.push(Vec::new()); // index 0 unused so ids line up with the PDF numbering
+    objects.push(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
+    let kids: Vec<String> = (0..total).map(|i| format!("{} 0 R", 5 + i * 2)).collect();
+    objects.push(
+        format!("<< /Type /Pages /Count {} /Kids [{}] >>", total, kids.join(" ")).into_bytes(),
+    );
+    objects.push(
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+    );
+    objects.push(
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".to_vec(),
+    );
+
+    for (index, page_lines) in pages.iter().enumerate() {
+        let content_id = 6 + index * 2;
+        objects.push(
+            format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {} 0 R >>",
+                content_id
+            )
+            .into_bytes(),
+        );
+        let mut stream: Vec<u8> = Vec::new();
+        let mut y: f32 = 790.0;
+        for line in page_lines.iter() {
+            let (font, size, step) = match line.style {
+                Style::Title => ("F2", 20.0, 26.0),
+                Style::Subtitle => ("F1", 9.5, 14.0),
+                Style::Heading => ("F2", 13.0, 19.0),
+                Style::Body => ("F1", 10.0, 14.0),
+                Style::Small => ("F1", 8.5, 12.0),
+            };
+            if !line.text.is_empty() {
+                stream.extend_from_slice(
+                    format!("BT /{} {:.1} Tf 1 0 0 1 55 {:.1} Tm (", font, size, y).as_bytes(),
+                );
+                stream.extend_from_slice(&pdf_text(&line.text));
+                stream.extend_from_slice(b") Tj ET\n");
+            }
+            y -= step;
+        }
+        let footer = format!(
+            "Forge · {} · page {} of {} · non-ASCII characters outside Latin-1 are shown as '?'",
+            art.title,
+            index + 1,
+            total
+        );
+        stream.extend_from_slice(b"BT /F1 7.5 Tf 1 0 0 1 55 30 Tm (");
+        stream.extend_from_slice(&pdf_text(&footer));
+        stream.extend_from_slice(b") Tj ET\n");
+        let mut obj = format!("<< /Length {} >>\nstream\n", stream.len()).into_bytes();
+        obj.extend_from_slice(&stream);
+        obj.extend_from_slice(b"endstream");
+        objects.push(obj);
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    out.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+    let mut offsets: Vec<usize> = Vec::new();
+    for (i, body) in objects.iter().enumerate().skip(1) {
+        offsets.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n", i).as_bytes());
+        out.extend_from_slice(body);
+        out.extend_from_slice(b"\nendobj\n");
+    }
+    let xref_start = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n", objects.len()).as_bytes());
+    out.extend_from_slice(b"0000000000 65535 f \n");
+    for offset in &offsets {
+        out.extend_from_slice(format!("{:010} 00000 n \n", offset).as_bytes());
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            objects.len(),
+            xref_start
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Artifact, Source};
+
+    fn policy() -> Source {
+        Source {
+            id: "src-1".into(),
+            notebook_id: "nb-1".into(),
+            title: "Policy".into(),
+            kind: "text".into(),
+            ..Default::default()
+        }
+    }
+
+    fn deck() -> Artifact {
+        let payload = crate::obj! {
+            "kind" => "slides",
+            "slides" => Value::Arr(vec![
+                crate::obj! {
+                    "id" => "slide-1",
+                    "title" => "Retention & legal hold",
+                    "bullets" => Value::Arr(vec![]),
+                    "notes" => "Built from 1 source."
+                },
+                crate::obj! {
+                    "id" => "slide-2",
+                    "title" => "Policy",
+                    "bullets" => Value::Arr(vec![
+                        crate::obj! {
+                            "text" => "Customer records are retained for thirty days after account closure.",
+                            "citation" => crate::obj! {
+                                "source_title" => "Policy",
+                                "locator_label" => "paragraph 0",
+                                "quote" => "Customer records are retained for thirty days after account closure."
+                            }
+                        }
+                    ]),
+                    "notes" => "Quoted from Policy."
+                }
+            ])
+        };
+        Artifact {
+            id: "art-1".into(),
+            notebook_id: "nb-1".into(),
+            kind: "slides".into(),
+            title: "Retention deck".into(),
+            payload,
+            source_ids: vec!["src-1".into()],
+            version: 3,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_zip_writer_produces_an_archive_our_own_reader_can_open() {
+        let bytes = zip_store(&[
+            ("hello.txt".to_string(), b"hello".to_vec()),
+            ("dir/nested.txt".to_string(), b"nested".to_vec()),
+        ]);
+        assert_eq!(&bytes[..4], b"PK\x03\x04");
+        let entries = crate::ingest::zip::entries(&bytes).expect("our reader accepts the zip");
+        assert_eq!(entries.len(), 2);
+        let read = crate::ingest::zip::read(&bytes, &entries[1]).expect("read member");
+        assert_eq!(read, b"nested");
+    }
+
+    #[test]
+    fn crc32_matches_the_known_check_value() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+    }
+
+    #[test]
+    fn a_deck_renders_to_a_pptx_that_our_reader_reads_back() {
+        let bytes = pptx(&deck()).expect("a deck renders");
+        // The package reader rejects anything without slides, so this is the real check.
+        let (blocks, warnings) = crate::ingest::ooxml::pptx(&bytes).expect("pptx parses");
+        assert_eq!(blocks.len(), 2, "one block per slide: {:?}", warnings);
+        assert!(blocks[0].text.contains("Retention & legal hold"), "{:?}", blocks[0].text);
+        assert!(
+            blocks[1].text.contains("thirty days after account closure"),
+            "the quoted sentence survives the round trip: {:?}",
+            blocks[1].text
+        );
+        assert!(
+            blocks[1].text.contains("Policy · paragraph 0"),
+            "the citation label travels with the bullet: {:?}",
+            blocks[1].text
+        );
+        // The footer repeats the deck title on every slide, so an exported page can be identified.
+        assert!(blocks[0].text.contains("version 3"), "{:?}", blocks[0].text);
+    }
+
+    #[test]
+    fn only_a_deck_renders_as_a_deck() {
+        let mut art = deck();
+        art.kind = "flashcards".into();
+        art.payload = crate::obj! { "cards" => Value::Arr(vec![]) };
+        assert!(pptx(&art).is_none(), "flashcards are not a PowerPoint file");
+    }
+
+    #[test]
+    fn xml_special_characters_cannot_break_the_package() {
+        let mut art = deck();
+        art.title = "A & B <script> \"quoted\"".into();
+        let bytes = pptx(&art).expect("renders");
+        let entries = crate::ingest::zip::entries(&bytes).unwrap();
+        let slide = entries
+            .iter()
+            .find(|e| e.name == "ppt/slides/slide1.xml")
+            .expect("slide part exists");
+        let xml = String::from_utf8_lossy(&crate::ingest::zip::read(&bytes, slide).unwrap()).to_string();
+        assert!(!xml.contains("<script>"), "the title is escaped, not injected");
+        assert!(xml.contains("&amp;") && xml.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn a_deck_renders_to_a_pdf_that_our_reader_reads_back() {
+        let bytes = pdf(&deck(), &[policy()]);
+        assert!(bytes.starts_with(b"%PDF-1.4"));
+        assert!(bytes.ends_with(b"%%EOF\n"));
+        let doc = crate::ingest::pdf::extract(&bytes).expect("pdf parses");
+        let text: String = doc.pages.iter().map(|p| p.text.clone()).collect::<Vec<_>>().join(" ");
+        assert!(text.contains("Retention deck"), "title is on the page: {}", text);
+        assert!(text.contains("thirty days after account closure"), "body text is on the page: {}", text);
+        assert!(text.contains("paragraph 0"), "the citation label is on the page: {}", text);
+        assert!(text.contains("page 1 of"), "the footer states the page: {}", text);
+        assert!(
+            text.contains("Policy (text)"),
+            "the source is named, not just its id: {}",
+            text
+        );
+        assert_eq!(doc.pages.len() >= 1, true);
+        assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
+    }
+
+    #[test]
+    fn long_content_paginates_and_every_page_is_covered_by_the_xref() {
+        let mut art = deck();
+        let slides: Vec<Value> = (0..40)
+            .map(|i| {
+                crate::obj! {
+                    "title" => format!("Slide {}", i + 1),
+                    "bullets" => Value::Arr(vec![crate::obj! {
+                        "text" => "A sentence long enough to take a line of its own on the page.",
+                        "citation" => Value::Null
+                    }])
+                }
+            })
+            .collect();
+        art.payload = crate::obj! { "slides" => Value::Arr(slides) };
+        let bytes = pdf(&art, &[policy()]);
+        let doc = crate::ingest::pdf::extract(&bytes).expect("pdf parses");
+        assert!(doc.pages.len() > 1, "40 slides need more than one page: {}", doc.pages.len());
+        let text: String = doc.pages.iter().map(|p| p.text.clone()).collect::<Vec<_>>().join(" ");
+        assert!(text.contains("Slide 40"), "the last slide is printed");
+        // The xref must point at real objects. Byte offsets, not characters: a PDF is a binary
+        // file, and its offsets are into bytes.
+        let at = find_bytes(&bytes, b"\nxref\n").expect("the file has an xref table");
+        let tail = &bytes[at + 1..];
+        let table_end = find_bytes(tail, b"trailer").expect("trailer follows the xref");
+        let declared: Vec<usize> = tail[..table_end]
+            .split(|b| *b == b'\n')
+            .skip(2) // "xref" and the "0 N" count
+            .filter_map(|line| std::str::from_utf8(line).ok())
+            .filter_map(|line| line.split_whitespace().next().and_then(|n| n.parse::<usize>().ok()))
+            .filter(|n| *n > 0)
+            .collect();
+        assert_eq!(declared.len(), object_count(&bytes), "one entry per object");
+        for offset in declared {
+            let head = String::from_utf8_lossy(&bytes[offset..(offset + 12).min(bytes.len())]).to_string();
+            let mut parts = head.split_whitespace();
+            assert!(
+                parts.next().map(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).unwrap_or(false)
+                    && parts.next() == Some("0")
+                    && parts.next() == Some("obj"),
+                "xref offset {} points at an object header, got {:?}",
+                offset,
+                head
+            );
+        }
+    }
+
+    fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+        hay.windows(needle.len()).position(|w| w == needle)
+    }
+
+    /// Number of `N 0 obj` headers, used to prove the xref covers every object.
+    fn object_count(bytes: &[u8]) -> usize {
+        bytes
+            .split(|b| *b == b'\n')
+            .filter(|line| {
+                let mut parts = line.split(|b| *b == b' ').filter(|p| !p.is_empty());
+                let first = parts.next().map(|p| !p.is_empty() && p.iter().all(|c| c.is_ascii_digit())).unwrap_or(false);
+                first && parts.next() == Some(&b"0"[..]) && parts.next() == Some(&b"obj"[..])
+            })
+            .count()
+    }
+    #[test]
+    fn characters_outside_latin1_are_marked_rather_than_dropped() {
+        // One byte per character: `·` is 0xB7, not the two UTF-8 bytes 0xC2 0xB7.
+        assert_eq!(pdf_text("naïve — café · 東京"), b"na\xEFve - caf\xE9 \xB7 ??".to_vec());
+        assert_eq!(pdf_text("ünïcode stays"), b"\xFCn\xEFcode stays".to_vec());
+        assert_eq!(
+            pdf_text("a (parenthetical) \\ backslash"),
+            b"a \\(parenthetical\\) \\\\ backslash".to_vec()
+        );
     }
 }
 ```
@@ -23781,6 +24729,32 @@ impl Server {
         (status, body)
     }
 
+    /// Status, response headers and **raw bytes**. A PDF or a PPTX cannot survive a lossy UTF-8
+    /// round trip, so a test that checks a binary export has to read it as bytes.
+    fn raw_bytes(&self, method: &str, path: &str) -> (u16, String, Vec<u8>) {
+        let mut s = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let head = format!(
+            "{} {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+            method, path
+        );
+        s.write_all(head.as_bytes()).unwrap();
+        let mut raw = Vec::new();
+        s.read_to_end(&mut raw).unwrap();
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|i| i + 4)
+            .unwrap_or(0);
+        let header_text = String::from_utf8_lossy(&raw[..split]).to_string();
+        let status = header_text
+            .split_whitespace()
+            .nth(1)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        (status, header_text, raw[split.min(raw.len())..].to_vec())
+    }
+
     fn json(&self, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
         self.json_h(method, path, body, &[])
     }
@@ -25623,8 +26597,13 @@ fn journey_g_mindmap_exports_and_reopens() {
 
         // a format that does not apply is refused with a reason, not an empty file
         let (st, body) = s.raw("GET", &format!("/api/artifacts/{}/export?format=pptx", map_id), None, "text/plain");
-        assert_eq!(st, 501);
-        assert!(body.contains("no pptx renderer") || body.contains("format_unsupported"), "{}", body);
+        assert_eq!(st, 409, "a concept map is not a deck: {}", body);
+        assert!(body.contains("format_unavailable"), "{}", body);
+        // …while the PDF, which applies to every artifact, is a real PDF
+        let (st, headers, bytes) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pdf", map_id));
+        assert_eq!(st, 200);
+        assert!(headers.to_ascii_lowercase().contains("application/pdf"), "{}", headers);
+        assert!(bytes.starts_with(b"%PDF-1.4") && bytes.ends_with(b"%%EOF\n"), "a real pdf");
     }
 
     // 7. it is still there, with the same id, after a restart
@@ -25744,14 +26723,24 @@ fn journey_h_slides_are_editable_versioned_and_exportable() {
         let after_restore = restored.get("payload").and_then(|p| p.get("slides")).and_then(|s| s.as_arr()).cloned().unwrap_or_default();
         assert_eq!(after_restore.len(), count, "restore brings the slide back");
 
-        // 8. export: Markdown carries the edit; PPTX is refused with a reason
+        // 8. export: Markdown carries the edit, and the deck is a real PowerPoint file
         let (st, md) = s.raw("GET", &format!("/api/artifacts/{}/export?format=md", deck_id), None, "text/plain");
         assert_eq!(st, 200);
         assert!(md.contains("What changed in retention"), "{}", md);
         assert!(md.contains("Lead with the delta"), "notes are exported too: {}", md);
-        let (st, err) = s.raw("GET", &format!("/api/artifacts/{}/export?format=pptx", deck_id), None, "text/plain");
-        assert_eq!(st, 501);
-        assert!(err.contains("format_unsupported"), "{}", err);
+        let (st, headers, pptx) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pptx", deck_id));
+        assert_eq!(st, 200, "a deck exports as PowerPoint");
+        assert!(headers.to_ascii_lowercase().contains("presentationml.presentation"), "{}", headers);
+        assert!(pptx.starts_with(b"PK\x03\x04"), "a pptx is a zip package");
+        // The exported deck is re-readable by Forge itself, edit included — that is what proves
+        // the package is real rather than a file with the right extension.
+        let (slides_in_export, _) =
+            forge_core::ingest::ooxml::pptx(&pptx).expect("our reader accepts the exported deck");
+        assert!(
+            slides_in_export.iter().any(|b| b.text.contains("What changed in retention")),
+            "the edited slide is in the PowerPoint: {:?}",
+            slides_in_export.first().map(|b| b.text.clone())
+        );
 
         // 9. the version is persisted, not recomputed on read
         let (_, again) = s.json("GET", &format!("/api/artifacts/{}", deck_id), None);
@@ -26833,6 +27822,116 @@ fn github_repositories_are_read_as_readme_and_numbered_issues() {
 
     std::env::remove_var("FORGE_GITHUB_API");
     std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+}
+
+#[test]
+fn slide_decks_export_as_a_real_pptx_and_every_artifact_exports_as_a_real_pdf() {
+    let dir = tempdir("render-export");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Deck"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let (st, src) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Policy")),
+            (
+                "text",
+                Value::from(
+                    "Customer records are retained for thirty days after account closure.\n\nThe retention window can be extended by a legal hold.",
+                ),
+            ),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let src_id = src.str_of("source_id").unwrap().to_string();
+
+    let (st, deck) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[
+            ("kind", Value::from("slides")),
+            ("topic", Value::from("Retention policy")),
+            ("audience", Value::from("executive")),
+            ("source_ids", Value::Arr(vec![Value::from(src_id.as_str())])),
+        ])),
+    );
+    assert_eq!(st, 201, "{:?}", deck);
+    let deck_id = deck.str_of("id").unwrap().to_string();
+
+    // PPTX: a ZIP (PK\x03\x04) with the Office presentation content type, not a renamed file.
+    let (st, headers, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pptx", deck_id));
+    assert_eq!(st, 200);
+    assert!(
+        headers.to_ascii_lowercase().contains("presentationml.presentation"),
+        "the response declares PowerPoint: {}",
+        headers
+    );
+    assert!(body.starts_with(b"PK\x03\x04"), "a pptx is a zip package");
+    assert!(
+        body.windows(14).any(|w| w == b"ppt/slides/sli"),
+        "the package really contains slide parts"
+    );
+    let entries = forge_core::ingest::zip::entries(&body).expect("the archive is readable");
+    let mut names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+    names.sort();
+    for required in [
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "ppt/presentation.xml",
+        "ppt/slideMasters/slideMaster1.xml",
+        "ppt/slideLayouts/slideLayout1.xml",
+        "ppt/theme/theme1.xml",
+    ] {
+        assert!(names.contains(&required.to_string()), "missing OPC part {}: {:?}", required, names);
+    }
+    // Our own reader must accept it, which is what "it opens" means here.
+    let (blocks, _warnings) =
+        forge_core::ingest::ooxml::pptx(&body).expect("our pptx reader accepts the export");
+    assert!(blocks.len() >= 2, "the deck has its content slides: {}", blocks.len());
+    assert!(
+        blocks.iter().any(|b| b.text.contains("thirty days after account closure")),
+        "the quoted sentence survives the round trip"
+    );
+
+    // PDF: real header, real EOF, and citing text our own PDF reader can find again.
+    let (st, headers, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pdf", deck_id));
+    assert_eq!(st, 200);
+    assert!(headers.to_ascii_lowercase().contains("application/pdf"), "{}", headers);
+    assert!(body.starts_with(b"%PDF-1.4"));
+    assert!(body.ends_with(b"%%EOF\n"));
+    let doc = forge_core::ingest::pdf::extract(&body).expect("our pdf reader accepts the export");
+    let printed: String = doc.pages.iter().map(|p| p.text.clone()).collect::<Vec<_>>().join("\n");
+    assert!(printed.contains("paragraph 0"), "the citation label is printed: {}", printed);
+    assert!(printed.contains("Policy (text)"), "the source is named, not just its id: {}", printed);
+
+    // A PDF exists for any artifact kind; a PPTX only for decks.
+    let (st, flashcards) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[
+            ("kind", Value::from("flashcards")),
+            ("source_ids", Value::Arr(vec![Value::from(src_id.as_str())])),
+        ])),
+    );
+    assert_eq!(st, 201, "{:?}", flashcards);
+    let card_id = flashcards.str_of("id").unwrap().to_string();
+    let (st, _, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pdf", card_id));
+    assert_eq!(st, 200, "every artifact can be printed");
+    assert!(body.starts_with(b"%PDF"));
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=pptx", card_id), None);
+    assert_eq!(st, 409, "{:?}", body);
+    assert_eq!(body.str_of("code"), Some("format_unavailable"));
+
+    // A raster export is still refused rather than faked, and an unknown format is a 422.
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=png", deck_id), None);
+    assert_eq!(st, 501);
+    assert_eq!(body.str_of("code"), Some("format_unsupported"));
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=docx", deck_id), None);
+    assert_eq!(st, 422);
+    assert_eq!(body.str_of("code"), Some("bad_format"));
 }
 ```
 
@@ -30781,6 +31880,26 @@ Consequence for §14 Journey J: the roles, the refusal a viewer gets, revocation
 now implemented and tested (`journey_j_…`). What is *not* reimplemented is the account model
 behind them (email invites, groups, per-user identity); the link is the identity. That gap is in
 `UNKNOWN_AND_LIMITATIONS.md`.
+
+---
+
+## 2026-11-01 — feeds and GitHub are reachable: measured, not assumed
+
+Two source kinds were previously listed as "planned because the host is reachable". This entry
+records what the reachability actually is, because it changed how the features were built.
+
+| What | Result | Label |
+|---|---|---|
+| `api.github.com` from the sandbox | `GET /repos/rust-lang/rust/readme` → **200**; `GET /rate_limit` → `core: {limit: 5650, remaining: 5649}` on this egress IP | `LIVE_OBSERVED` |
+| Anonymous limit | GitHub documents 60 requests/hour for unauthenticated callers; 5650 observed here means this egress is not a bare anonymous client. Forge therefore **reports the limit it is given** (429/403 + GitHub's message) instead of hard-coding either number | `LIVE_OBSERVED` + `INFERRED` |
+| GitHub ingestion, live | `BurntSushi/ripgrep` → 172 chunks: 21,599-byte README plus 1 issue, 4 pull requests skipped and counted | `LIVE_OBSERVED` |
+| Atom feed, live | `https://github.com/BurntSushi/ripgrep/releases.atom` → `kind: feed`, `flavour: atom`, 10 items, e.g. `item 1 · ignore-0.4.34` with `2026-10-27T18:31:25Z · BurntSushi · <release url>` | `LIVE_OBSERVED` |
+| Feed body shape | That feed's `<content type="html">` carries **escaped** HTML (`&lt;p&gt;…&lt;/p&gt;`). Decoding before stripping tags put literal `<p>` into the evidence text, and stripping before decoding deleted real `<` characters. The parser now strips **known** tags only, at both stages, so `x <y>` survives and `<p>` does not | `CODE_CORROBORATED` (found by the live run, fixed, regression-tested) |
+| `github.blog/feed/` | `curl: (35) OpenSSL SSL_connect: SSL_ERROR_SYSCALL` — blocked by this sandbox's egress allowlist | `BLOCKED` — that is a sandbox fact, **not** evidence the feed is unavailable |
+
+Consequence: RSS/Atom and GitHub moved from "planned" to implemented source kinds with their own
+locator kinds (`item`, `issue`), and `UNKNOWN_AND_LIMITATIONS.md` states exactly which parts of a
+feed and of a repository are *not* read.
 ```
 
 ## `docs/RESEARCH_PLAN.md`
@@ -30955,7 +32074,7 @@ curl is out of scope for this layer.
 Last updated: 2026-11-01 (access control + share links, crash-resilient ingestion with retry,
 timed transcripts, discovery from seed pages, slide editing and artifact export, library
 search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export,
-RSS/Atom feeds, GitHub repositories).
+RSS/Atom feeds, GitHub repositories, PPTX and PDF export).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -30974,8 +32093,8 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **268 passing, 0 failing** (26 `bininspect` + 206 lib + 31 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **148 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **277 passing, 0 failing** (26 `bininspect` + 214 lib + 32 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **154 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -30997,6 +32116,8 @@ untested it says so.
 | Conversation export | `GET /api/conversations/:id/export?format=md/json` returns the stored transcript: each question, each answer, its evidence block (source · locator · quote) and any abstention/note. PDF and other formats are refused with `422 bad_format` | same e2e + 3 UI assertions |
 | RSS / Atom feeds | a fetched feed is recognised by its root element (not its `Content-Type`), split into one citable block per entry, and each entry keeps the **publisher's** date, author and link. A citation reads `item 3 · Churn fell`; an item with no date is indexed without one instead of being stamped with the fetch time. RSS 2.0, Atom 1.0 and RSS 1.0 (RDF) are read; a document that is not a feed is refused with the reason | `ingest::feed` (11 tests) + e2e `feed_sources_are_read_as_dated_items_and_cited_by_item` + 4 UI assertions; live: `github.com/BurntSushi/ripgrep/releases.atom` → 10 dated items |
 | GitHub repositories | `POST /api/notebooks/:id/sources/github` reads a **public** repo's README and issues through `api.github.com` with no token: issues are cited by number and title (`issue 12 · Retry budget…`), pull requests are skipped and counted, and a 403/429 is reported with GitHub's own message instead of being retried. The collected JSON envelope is retained, so a retry re-indexes the same collection | `github` (8 tests) + e2e `github_repositories_are_read_as_readme_and_numbered_issues`; live: `BurntSushi/ripgrep` → 21.6 KB README, 1 issue, 4 PRs skipped |
+| PPTX export | `GET /api/artifacts/:id/export?format=pptx` writes a real Office Open XML package by hand (stored-entry ZIP with CRC-32, content types, package rels, presentation, slide master, blank layout, theme, one part per slide). Bullets carry their citation label; the footer carries the deck title and version. A non-deck artifact is `409 format_unavailable` rather than a mislabelled file | `render::pptx` (5 tests) + e2e `slide_decks_export_as_a_real_pptx_and_every_artifact_exports_as_a_real_pdf` + journey H + 3 UI assertions |
+| PDF export | `format=pdf` works for **every** artifact: title block, one section per slide/row, citation labels inline, sources named (not just ids), real xref table, `page n of m` footer. Text is encoded one byte per character for WinAnsi, so a `·` is `0xB7` and not `Â·`; characters outside Latin-1 become `?` and the footer says so | `render::pdf` (4 tests) + journey G/H + 2 UI assertions |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
@@ -31097,8 +32218,7 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 
 ## Immediate next steps
 
-2. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
-3. Feed autodiscovery (an HTML page's `<link rel="alternate">` is not followed today) and
+2. Feed autodiscovery (an HTML page's `<link rel="alternate">` is not followed today) and
    GitHub pagination past one page of issues.
 3. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
 4. Wire a TLS client (not just the `curl` subprocess) so URL ingestion and remote providers
@@ -31116,7 +32236,7 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 268 tests: 206 lib + 31 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 277 tests: 214 lib + 32 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -31124,7 +32244,7 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 148 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 154 assertions
 ```
 
 ## Unit tests (188) — exact names from `cargo test --lib -- --list`
@@ -31845,6 +32965,27 @@ Honest limits:
   reported rate limit on this egress IP was 5650/hour, which is **not** the anonymous limit — a
   different egress may see 60/hour and hit `github_rate_limited` quickly. Forge reports what it
   receives; it does not assume a limit.
+
+## Binary export (PPTX / PDF)
+
+* **PPTX** is written for slide decks only, one slide per deck slide, with the citation label on
+  every bullet and the deck version in the footer. It has **no images, charts, animations,
+  speaker-notes parts, transitions or custom themes**, and only the blank layout. It opens in
+  PowerPoint, Keynote and LibreOffice because it is a valid OPC package, not because it reproduces
+  a designed deck.
+* **PDF** is written for every artifact kind. It uses the base-14 Helvetica fonts, so it embeds no
+  fonts, and text is WinAnsi-encoded: characters outside Latin-1 are printed as `?` and the page
+  footer states that. It does not paginate by measured text metrics — a fixed line budget is used,
+  so a very long single line wraps by character count rather than by glyph width.
+* Neither renderer is verified inside this build against a commercial office suite. What *is*
+  verified: Forge's own PPTX reader re-opens the export (slides, quoted sentences and citation
+  labels survive), Forge's own PDF reader finds the printed text and citation labels, and the
+  xref offsets are checked to land on object headers. As a one-off external check on 2026-11-01,
+  `python-pptx` opened the deck (3 slides, titles intact, re-saved successfully) and `pypdf`
+  extracted the text; those tools were installed into a scratch directory and are **not**
+  dependencies of the build or the test suite.
+* PNG export is refused with `501 format_unsupported`: there is no rasteriser, and a PNG that was
+  really a renamed SVG would be a false file.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -36160,7 +37301,8 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |
 | ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** — staleness is set on refresh, and `POST /api/artifacts/:id/regenerate` re-runs the stored parameters against the current text, clearing the flag and the review marks (and reporting how many) | `Artifact.stale`, `api::regenerate_artifact` | e2e + 3 UI |
 | ART-05 | audio / video overviews | documented | blocked | — | no TTS/ASR or renderer |
-| ART-07 | slides deck: generate, edit, reorder, delete/restore, version, export | documented | **partial** — quotation deck with per-bullet citations, audience setting, versioned slide ops, Markdown/JSON/SVG export; **no PPTX/PDF renderer** (501 `format_unsupported` rather than a fake file) | `artifacts::slides`, `api::update_artifact`, `export.rs` | 7 export unit + e2e Journey H + 6 UI |
+| ART-07 | slides deck: generate, edit, reorder, delete/restore, version, export | documented | **done** — quotation deck with per-bullet citations, audience setting, versioned slide ops, Markdown/JSON export, and a real **PPTX** package plus **PDF** written by hand (`render`). PNG still returns 501 rather than a fake file | `artifacts::slides`, `api::update_artifact`, `export.rs`, `render.rs` | 5 PPTX + 4 PDF unit + e2e Journey H + 6 UI |
+| ART-08 | any artifact as a printable PDF with its citations | not in reference | **done** — title block, one section per slide/row, citation labels inline, sources named, xref table, `page n of m` footer | `render::pdf`, `export?format=pdf` | 4 unit + 2 e2e + 2 UI |
 | ART-08 | difficulty / audience as generation parameters | documented (flashcards difficulty) | **done** — difficulty changes cards (easy drops cloze, hard puts cloze first) and is recorded on the artifact; audience changes bullets per slide | `artifacts::Difficulty`, `slides` | lib + e2e F/H + 4 UI |
 | ART-09 | learner review marks (known / unknown) | documented (study progress) | **done** — stored per card on the artifact, survives restart, counts returned | `Artifact.reviews`, `api::review_card` | e2e F + 5 UI |
 | ART-06 | data tables as an artifact (schema inference, per-cell evidence, export) | documented | planned — querying source grids is done (CHAT-08); *creating* a new table from prose is not | — | needs extraction + review UI |
@@ -39262,9 +40404,44 @@ async function main() {
   await wait(700);
   check("markdown export shows the exact bytes", /Edited opening slide|Slide outline/.test($(".export-body")?.textContent || ""),
     $(".export-body")?.textContent?.slice(0, 120));
-  check("export controls offer md and json only",
+  check("export controls offer json, a deck PowerPoint and a PDF",
     $$(".viewer header button").some((b) => b.textContent === "json") &&
-      !$$(".viewer header button").some((b) => /pptx/i.test(b.textContent)));
+      $$(".viewer header button").some((b) => b.textContent === "pptx") &&
+      $$(".viewer header button").some((b) => b.textContent === "pdf"),
+    $$(".viewer header button").map((b) => b.textContent).join(","));
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+
+  // --- a deck downloads as a real PowerPoint file, described as bytes not printed as mojibake
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+  window.showArtifact(deck.id);
+  await wait(800);
+  const lastOverlay = () => $$(".overlay").pop();
+  const headerBtn = (label) => [...(lastOverlay()?.querySelectorAll("header button") || [])]
+    .find((b) => b.textContent.trim() === label);
+  const pptxBtn = headerBtn("pptx");
+  check("a deck offers a PowerPoint export", !!pptxBtn,
+    [...(lastOverlay()?.querySelectorAll("header button") || [])].map((b) => b.textContent).join(","));
+  pptxBtn.click();
+  await wait(1000);
+  const pptxOverlay = lastOverlay()?.textContent || "";
+  check("the PowerPoint export describes the file it made",
+    /real PPTX file/.test(pptxOverlay) && /starts with PK/.test(pptxOverlay) &&
+      /\d[\d,]* bytes/.test(pptxOverlay) && /presentationml\.presentation/.test(pptxOverlay),
+    pptxOverlay.slice(0, 200));
+  check("the PowerPoint export is not rendered as mojibake text",
+    !lastOverlay()?.querySelector(".export-body"), "an export-body <pre> appeared for a binary format");
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+  window.showArtifact(deck.id);
+  await wait(800);
+  headerBtn("pdf").click();
+  await wait(1000);
+  const pdfOverlay = lastOverlay()?.textContent || "";
+  check("the PDF export describes the file it made",
+    /real PDF file/.test(pdfOverlay) && /starts with %PDF/.test(pdfOverlay) && /application\/pdf/.test(pdfOverlay),
+    pdfOverlay.slice(0, 200));
   $$(".overlay").forEach((o) => o.remove());
   await wait(150);
 

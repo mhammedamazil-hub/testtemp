@@ -76,6 +76,32 @@ impl Server {
         (status, body)
     }
 
+    /// Status, response headers and **raw bytes**. A PDF or a PPTX cannot survive a lossy UTF-8
+    /// round trip, so a test that checks a binary export has to read it as bytes.
+    fn raw_bytes(&self, method: &str, path: &str) -> (u16, String, Vec<u8>) {
+        let mut s = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let head = format!(
+            "{} {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+            method, path
+        );
+        s.write_all(head.as_bytes()).unwrap();
+        let mut raw = Vec::new();
+        s.read_to_end(&mut raw).unwrap();
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|i| i + 4)
+            .unwrap_or(0);
+        let header_text = String::from_utf8_lossy(&raw[..split]).to_string();
+        let status = header_text
+            .split_whitespace()
+            .nth(1)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        (status, header_text, raw[split.min(raw.len())..].to_vec())
+    }
+
     fn json(&self, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
         self.json_h(method, path, body, &[])
     }
@@ -1918,8 +1944,13 @@ fn journey_g_mindmap_exports_and_reopens() {
 
         // a format that does not apply is refused with a reason, not an empty file
         let (st, body) = s.raw("GET", &format!("/api/artifacts/{}/export?format=pptx", map_id), None, "text/plain");
-        assert_eq!(st, 501);
-        assert!(body.contains("no pptx renderer") || body.contains("format_unsupported"), "{}", body);
+        assert_eq!(st, 409, "a concept map is not a deck: {}", body);
+        assert!(body.contains("format_unavailable"), "{}", body);
+        // …while the PDF, which applies to every artifact, is a real PDF
+        let (st, headers, bytes) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pdf", map_id));
+        assert_eq!(st, 200);
+        assert!(headers.to_ascii_lowercase().contains("application/pdf"), "{}", headers);
+        assert!(bytes.starts_with(b"%PDF-1.4") && bytes.ends_with(b"%%EOF\n"), "a real pdf");
     }
 
     // 7. it is still there, with the same id, after a restart
@@ -2039,14 +2070,24 @@ fn journey_h_slides_are_editable_versioned_and_exportable() {
         let after_restore = restored.get("payload").and_then(|p| p.get("slides")).and_then(|s| s.as_arr()).cloned().unwrap_or_default();
         assert_eq!(after_restore.len(), count, "restore brings the slide back");
 
-        // 8. export: Markdown carries the edit; PPTX is refused with a reason
+        // 8. export: Markdown carries the edit, and the deck is a real PowerPoint file
         let (st, md) = s.raw("GET", &format!("/api/artifacts/{}/export?format=md", deck_id), None, "text/plain");
         assert_eq!(st, 200);
         assert!(md.contains("What changed in retention"), "{}", md);
         assert!(md.contains("Lead with the delta"), "notes are exported too: {}", md);
-        let (st, err) = s.raw("GET", &format!("/api/artifacts/{}/export?format=pptx", deck_id), None, "text/plain");
-        assert_eq!(st, 501);
-        assert!(err.contains("format_unsupported"), "{}", err);
+        let (st, headers, pptx) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pptx", deck_id));
+        assert_eq!(st, 200, "a deck exports as PowerPoint");
+        assert!(headers.to_ascii_lowercase().contains("presentationml.presentation"), "{}", headers);
+        assert!(pptx.starts_with(b"PK\x03\x04"), "a pptx is a zip package");
+        // The exported deck is re-readable by Forge itself, edit included — that is what proves
+        // the package is real rather than a file with the right extension.
+        let (slides_in_export, _) =
+            forge_core::ingest::ooxml::pptx(&pptx).expect("our reader accepts the exported deck");
+        assert!(
+            slides_in_export.iter().any(|b| b.text.contains("What changed in retention")),
+            "the edited slide is in the PowerPoint: {:?}",
+            slides_in_export.first().map(|b| b.text.clone())
+        );
 
         // 9. the version is persisted, not recomputed on read
         let (_, again) = s.json("GET", &format!("/api/artifacts/{}", deck_id), None);
@@ -3128,4 +3169,114 @@ fn github_repositories_are_read_as_readme_and_numbered_issues() {
 
     std::env::remove_var("FORGE_GITHUB_API");
     std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+}
+
+#[test]
+fn slide_decks_export_as_a_real_pptx_and_every_artifact_exports_as_a_real_pdf() {
+    let dir = tempdir("render-export");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Deck"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let (st, src) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Policy")),
+            (
+                "text",
+                Value::from(
+                    "Customer records are retained for thirty days after account closure.\n\nThe retention window can be extended by a legal hold.",
+                ),
+            ),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let src_id = src.str_of("source_id").unwrap().to_string();
+
+    let (st, deck) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[
+            ("kind", Value::from("slides")),
+            ("topic", Value::from("Retention policy")),
+            ("audience", Value::from("executive")),
+            ("source_ids", Value::Arr(vec![Value::from(src_id.as_str())])),
+        ])),
+    );
+    assert_eq!(st, 201, "{:?}", deck);
+    let deck_id = deck.str_of("id").unwrap().to_string();
+
+    // PPTX: a ZIP (PK\x03\x04) with the Office presentation content type, not a renamed file.
+    let (st, headers, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pptx", deck_id));
+    assert_eq!(st, 200);
+    assert!(
+        headers.to_ascii_lowercase().contains("presentationml.presentation"),
+        "the response declares PowerPoint: {}",
+        headers
+    );
+    assert!(body.starts_with(b"PK\x03\x04"), "a pptx is a zip package");
+    assert!(
+        body.windows(14).any(|w| w == b"ppt/slides/sli"),
+        "the package really contains slide parts"
+    );
+    let entries = forge_core::ingest::zip::entries(&body).expect("the archive is readable");
+    let mut names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+    names.sort();
+    for required in [
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "ppt/presentation.xml",
+        "ppt/slideMasters/slideMaster1.xml",
+        "ppt/slideLayouts/slideLayout1.xml",
+        "ppt/theme/theme1.xml",
+    ] {
+        assert!(names.contains(&required.to_string()), "missing OPC part {}: {:?}", required, names);
+    }
+    // Our own reader must accept it, which is what "it opens" means here.
+    let (blocks, _warnings) =
+        forge_core::ingest::ooxml::pptx(&body).expect("our pptx reader accepts the export");
+    assert!(blocks.len() >= 2, "the deck has its content slides: {}", blocks.len());
+    assert!(
+        blocks.iter().any(|b| b.text.contains("thirty days after account closure")),
+        "the quoted sentence survives the round trip"
+    );
+
+    // PDF: real header, real EOF, and citing text our own PDF reader can find again.
+    let (st, headers, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pdf", deck_id));
+    assert_eq!(st, 200);
+    assert!(headers.to_ascii_lowercase().contains("application/pdf"), "{}", headers);
+    assert!(body.starts_with(b"%PDF-1.4"));
+    assert!(body.ends_with(b"%%EOF\n"));
+    let doc = forge_core::ingest::pdf::extract(&body).expect("our pdf reader accepts the export");
+    let printed: String = doc.pages.iter().map(|p| p.text.clone()).collect::<Vec<_>>().join("\n");
+    assert!(printed.contains("paragraph 0"), "the citation label is printed: {}", printed);
+    assert!(printed.contains("Policy (text)"), "the source is named, not just its id: {}", printed);
+
+    // A PDF exists for any artifact kind; a PPTX only for decks.
+    let (st, flashcards) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[
+            ("kind", Value::from("flashcards")),
+            ("source_ids", Value::Arr(vec![Value::from(src_id.as_str())])),
+        ])),
+    );
+    assert_eq!(st, 201, "{:?}", flashcards);
+    let card_id = flashcards.str_of("id").unwrap().to_string();
+    let (st, _, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pdf", card_id));
+    assert_eq!(st, 200, "every artifact can be printed");
+    assert!(body.starts_with(b"%PDF"));
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=pptx", card_id), None);
+    assert_eq!(st, 409, "{:?}", body);
+    assert_eq!(body.str_of("code"), Some("format_unavailable"));
+
+    // A raster export is still refused rather than faked, and an unknown format is a 422.
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=png", deck_id), None);
+    assert_eq!(st, 501);
+    assert_eq!(body.str_of("code"), Some("format_unsupported"));
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=docx", deck_id), None);
+    assert_eq!(st, 422);
+    assert_eq!(body.str_of("code"), Some("bad_format"));
 }

@@ -1549,12 +1549,46 @@ async function downloadConversation(id) {
 /// where the browser blocks downloads.
 async function downloadArtifact(id, format) {
   if (!id) { toast("Save the artifact first", "err"); return; }
+  const binary = format === "pdf" || format === "pptx" || format === "png";
   try {
     const res = await fetch(`/api/artifacts/${id}/export?format=${format}`, { headers: authHeaders() });
     if (!res.ok) {
       let data = null;
       try { data = await res.json(); } catch { /* non-JSON refusal */ }
       throw new Error((data && (data.error || data.message)) || `HTTP ${res.status}`);
+    }
+    if (binary) {
+      // A PDF/PPTX is bytes, not text. Showing them in a <pre> would print mojibake and pretend
+      // it was the export; describe the file instead and hand the bytes to the download.
+      const buf = await res.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      const magic = [...bytes.slice(0, 4)].map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : "·")).join("");
+      const size = bytes.length;
+      const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+        h("div", { class: "viewer" },
+          h("header", {},
+            h("div", { style: "flex:1" },
+              h("div", { style: "font-weight:600" }, `Export · ${format.toUpperCase()}`),
+              h("div", { class: "hint" }, `${size.toLocaleString()} bytes · ${res.headers.get("content-type") || "unknown type"}`)),
+            h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+          h("div", { class: "content" },
+            h("p", null, `This is a real ${format.toUpperCase()} file, not a renaming: it starts with ${magic} and it downloads as one.`),
+            h("p", { class: "hint" }, format === "pdf"
+              ? "One page per screenful, every bullet with its citation. Characters outside Latin-1 are shown as '?' — the footer says so."
+              : format === "pptx"
+                ? "One slide per deck slide, with the citation label on each bullet and the deck version in the footer."
+                : "Raster output is not available in this build."))));
+      document.body.append(overlay);
+      try {
+        const mime = format === "pdf" ? "application/pdf"
+          : format === "pptx" ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          : "image/png";
+        const url = URL.createObjectURL(new Blob([buf], { type: mime }));
+        const a = h("a", { href: url, download: `forge-artifact-${id}.${format}` });
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch { /* downloads can be blocked; the panel above is still the export */ }
+      return;
     }
     const text = await res.text();
     const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
@@ -1813,6 +1847,8 @@ async function showArtifact(id) {
           h("button", { class: "ghost", title: "Export Markdown", onclick: () => downloadArtifact(a.id, "md") }, "md"),
           h("button", { class: "ghost", title: "Export JSON", onclick: () => downloadArtifact(a.id, "json") }, "json"),
           a.kind === "mindmap" ? h("button", { class: "ghost", title: "Export SVG", onclick: () => downloadArtifact(a.id, "svg") }, "svg") : null,
+          a.kind === "slides" ? h("button", { class: "ghost", title: "Export PowerPoint (.pptx)", onclick: () => downloadArtifact(a.id, "pptx") }, "pptx") : null,
+          h("button", { class: "ghost", title: "Export PDF", onclick: () => downloadArtifact(a.id, "pdf") }, "pdf"),
           h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
         h("div", { class: "content" }, renderArtifact(a.payload, a))));
     document.body.append(overlay);

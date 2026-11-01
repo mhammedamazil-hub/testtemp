@@ -288,3 +288,24 @@ Honest limits:
   reported rate limit on this egress IP was 5650/hour, which is **not** the anonymous limit — a
   different egress may see 60/hour and hit `github_rate_limited` quickly. Forge reports what it
   receives; it does not assume a limit.
+
+## Binary export (PPTX / PDF)
+
+* **PPTX** is written for slide decks only, one slide per deck slide, with the citation label on
+  every bullet and the deck version in the footer. It has **no images, charts, animations,
+  speaker-notes parts, transitions or custom themes**, and only the blank layout. It opens in
+  PowerPoint, Keynote and LibreOffice because it is a valid OPC package, not because it reproduces
+  a designed deck.
+* **PDF** is written for every artifact kind. It uses the base-14 Helvetica fonts, so it embeds no
+  fonts, and text is WinAnsi-encoded: characters outside Latin-1 are printed as `?` and the page
+  footer states that. It does not paginate by measured text metrics — a fixed line budget is used,
+  so a very long single line wraps by character count rather than by glyph width.
+* Neither renderer is verified inside this build against a commercial office suite. What *is*
+  verified: Forge's own PPTX reader re-opens the export (slides, quoted sentences and citation
+  labels survive), Forge's own PDF reader finds the printed text and citation labels, and the
+  xref offsets are checked to land on object headers. As a one-off external check on 2026-11-01,
+  `python-pptx` opened the deck (3 slides, titles intact, re-saved successfully) and `pypdf`
+  extracted the text; those tools were installed into a scratch directory and are **not**
+  dependencies of the build or the test suite.
+* PNG export is refused with `501 format_unsupported`: there is no rasteriser, and a PNG that was
+  really a renamed SVG would be a false file.

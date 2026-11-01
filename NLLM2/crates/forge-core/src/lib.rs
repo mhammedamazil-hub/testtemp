@@ -22,6 +22,7 @@ pub mod discovery;
 pub mod export;
 pub mod notebooklm;
 pub mod providers;
+pub mod render;
 pub mod retrieve;
 pub mod security;
 pub mod store;

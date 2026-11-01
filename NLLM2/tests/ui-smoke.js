@@ -424,9 +424,44 @@ async function main() {
   await wait(700);
   check("markdown export shows the exact bytes", /Edited opening slide|Slide outline/.test($(".export-body")?.textContent || ""),
     $(".export-body")?.textContent?.slice(0, 120));
-  check("export controls offer md and json only",
+  check("export controls offer json, a deck PowerPoint and a PDF",
     $$(".viewer header button").some((b) => b.textContent === "json") &&
-      !$$(".viewer header button").some((b) => /pptx/i.test(b.textContent)));
+      $$(".viewer header button").some((b) => b.textContent === "pptx") &&
+      $$(".viewer header button").some((b) => b.textContent === "pdf"),
+    $$(".viewer header button").map((b) => b.textContent).join(","));
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+
+  // --- a deck downloads as a real PowerPoint file, described as bytes not printed as mojibake
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+  window.showArtifact(deck.id);
+  await wait(800);
+  const lastOverlay = () => $$(".overlay").pop();
+  const headerBtn = (label) => [...(lastOverlay()?.querySelectorAll("header button") || [])]
+    .find((b) => b.textContent.trim() === label);
+  const pptxBtn = headerBtn("pptx");
+  check("a deck offers a PowerPoint export", !!pptxBtn,
+    [...(lastOverlay()?.querySelectorAll("header button") || [])].map((b) => b.textContent).join(","));
+  pptxBtn.click();
+  await wait(1000);
+  const pptxOverlay = lastOverlay()?.textContent || "";
+  check("the PowerPoint export describes the file it made",
+    /real PPTX file/.test(pptxOverlay) && /starts with PK/.test(pptxOverlay) &&
+      /\d[\d,]* bytes/.test(pptxOverlay) && /presentationml\.presentation/.test(pptxOverlay),
+    pptxOverlay.slice(0, 200));
+  check("the PowerPoint export is not rendered as mojibake text",
+    !lastOverlay()?.querySelector(".export-body"), "an export-body <pre> appeared for a binary format");
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+  window.showArtifact(deck.id);
+  await wait(800);
+  headerBtn("pdf").click();
+  await wait(1000);
+  const pdfOverlay = lastOverlay()?.textContent || "";
+  check("the PDF export describes the file it made",
+    /real PDF file/.test(pdfOverlay) && /starts with %PDF/.test(pdfOverlay) && /application\/pdf/.test(pdfOverlay),
+    pdfOverlay.slice(0, 200));
   $$(".overlay").forEach((o) => o.remove());
   await wait(150);
 

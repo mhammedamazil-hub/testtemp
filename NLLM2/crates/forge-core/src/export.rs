@@ -1,9 +1,12 @@
 //! Artifact export.
 //!
-//! Forge writes **Markdown**, **JSON** and (for concept maps) **SVG**. It does not write PPTX,
-//! PDF or PNG: those need a rendering stack this build does not have, and a hand-rolled
-//! PowerPoint writer that opens in one viewer and corrupts in another would be worse than an
-//! honest Markdown file. `/api/capabilities` states this per artifact kind.
+//! Forge writes **Markdown**, **JSON** and (for concept maps) **SVG** here, and hands the binary
+//! formats to `render`: **PDF** for any artifact, **PPTX** for slide decks. PNG is still refused
+//! with 501 rather than faked — there is no rasteriser in this build.
+//!
+//! The binary writers are hand-rolled because Forge has no dependency tree; that is only
+//! acceptable because the output is verified as the real format (see `render.rs` and
+//! `docs/TEST_MATRIX.md`), not merely named `.pptx`.
 //!
 //! Every export keeps the citations, because an exported answer without its evidence is a
 //! claim without support.

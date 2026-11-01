@@ -3,7 +3,7 @@
 Last updated: 2026-11-01 (access control + share links, crash-resilient ingestion with retry,
 timed transcripts, discovery from seed pages, slide editing and artifact export, library
 search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export,
-RSS/Atom feeds, GitHub repositories).
+RSS/Atom feeds, GitHub repositories, PPTX and PDF export).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -22,8 +22,8 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **268 passing, 0 failing** (26 `bininspect` + 206 lib + 31 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **148 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **277 passing, 0 failing** (26 `bininspect` + 214 lib + 32 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **154 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -45,6 +45,8 @@ untested it says so.
 | Conversation export | `GET /api/conversations/:id/export?format=md/json` returns the stored transcript: each question, each answer, its evidence block (source · locator · quote) and any abstention/note. PDF and other formats are refused with `422 bad_format` | same e2e + 3 UI assertions |
 | RSS / Atom feeds | a fetched feed is recognised by its root element (not its `Content-Type`), split into one citable block per entry, and each entry keeps the **publisher's** date, author and link. A citation reads `item 3 · Churn fell`; an item with no date is indexed without one instead of being stamped with the fetch time. RSS 2.0, Atom 1.0 and RSS 1.0 (RDF) are read; a document that is not a feed is refused with the reason | `ingest::feed` (11 tests) + e2e `feed_sources_are_read_as_dated_items_and_cited_by_item` + 4 UI assertions; live: `github.com/BurntSushi/ripgrep/releases.atom` → 10 dated items |
 | GitHub repositories | `POST /api/notebooks/:id/sources/github` reads a **public** repo's README and issues through `api.github.com` with no token: issues are cited by number and title (`issue 12 · Retry budget…`), pull requests are skipped and counted, and a 403/429 is reported with GitHub's own message instead of being retried. The collected JSON envelope is retained, so a retry re-indexes the same collection | `github` (8 tests) + e2e `github_repositories_are_read_as_readme_and_numbered_issues`; live: `BurntSushi/ripgrep` → 21.6 KB README, 1 issue, 4 PRs skipped |
+| PPTX export | `GET /api/artifacts/:id/export?format=pptx` writes a real Office Open XML package by hand (stored-entry ZIP with CRC-32, content types, package rels, presentation, slide master, blank layout, theme, one part per slide). Bullets carry their citation label; the footer carries the deck title and version. A non-deck artifact is `409 format_unavailable` rather than a mislabelled file | `render::pptx` (5 tests) + e2e `slide_decks_export_as_a_real_pptx_and_every_artifact_exports_as_a_real_pdf` + journey H + 3 UI assertions |
+| PDF export | `format=pdf` works for **every** artifact: title block, one section per slide/row, citation labels inline, sources named (not just ids), real xref table, `page n of m` footer. Text is encoded one byte per character for WinAnsi, so a `·` is `0xB7` and not `Â·`; characters outside Latin-1 become `?` and the footer says so | `render::pdf` (4 tests) + journey G/H + 2 UI assertions |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
@@ -145,8 +147,7 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 
 ## Immediate next steps
 
-2. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
-3. Feed autodiscovery (an HTML page's `<link rel="alternate">` is not followed today) and
+2. Feed autodiscovery (an HTML page's `<link rel="alternate">` is not followed today) and
    GitHub pagination past one page of issues.
 3. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
 4. Wire a TLS client (not just the `curl` subprocess) so URL ingestion and remote providers
