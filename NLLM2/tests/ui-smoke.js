@@ -68,6 +68,59 @@ async function main() {
   check("sort offers recent, title, created and sources", ["recent", "title", "created", "sources"].every((v) => sortValues.includes(v)),
     sortValues.join(","));
 
+  // --- settings (7.17): appearance and defaults are applied, and stored on the server
+  check("header exposes a settings control", !!$("#settingsBtn"));
+  $("#settingsBtn").click();
+  await wait(400);
+  check("settings panel opens", !!$("#settingsPanel"));
+  check("panel offers theme, text size, motion and contrast",
+    !!$("#setTheme") && !!$("#setFontScale") && !!$("#setReducedMotion") && !!$("#setHighContrast"));
+  const rootEl = window.document.documentElement;
+  const fire = (sel, type) => {
+    const el = $(sel);
+    el.dispatchEvent(new window.Event(type, { bubbles: true }));
+  };
+  $("#setTheme").value = "light";
+  fire("#setTheme", "change");
+  await wait(50);
+  check("theme choice repaints the app immediately", rootEl.dataset.theme === "light", rootEl.dataset.theme);
+  $("#setFontScale").value = "1.2";
+  fire("#setFontScale", "input");
+  check("text size drives the root font scale",
+    rootEl.style.getPropertyValue("--font-scale") === "1.2", rootEl.style.getPropertyValue("--font-scale"));
+  check("text size is shown as a percentage", $("#setFontScaleValue").textContent === "120%", $("#setFontScaleValue").textContent);
+  $("#setReducedMotion").checked = true;
+  fire("#setReducedMotion", "change");
+  check("reduced motion sets a root attribute", rootEl.dataset.motion === "reduced", rootEl.dataset.motion);
+  $("#setHighContrast").checked = true;
+  fire("#setHighContrast", "change");
+  check("high contrast sets a root attribute", rootEl.dataset.contrast === "high", rootEl.dataset.contrast);
+  $("#setDefaultLength").value = "thorough";
+  fire("#setDefaultLength", "change");
+  $("#setLibrarySort").value = "title";
+  fire("#setLibrarySort", "change");
+  await wait(400);
+  check("storage panel measures real bytes", /(B|KB|MB)/.test($("#storageUsage")?.textContent || ""),
+    $("#storageUsage")?.textContent);
+  check("storage says the number is measured locally",
+    /measured from the data directory/.test($("#storageUsage")?.textContent || ""), $("#storageUsage")?.textContent);
+  $("#saveSettings").click();
+  await wait(600);
+  check("saving reports success", /Saved/.test($("#settingsStatus")?.textContent || ""), $("#settingsStatus")?.textContent);
+  const savedSettings = await (await window.fetch("/api/settings")).json();
+  check("theme persisted on the server", savedSettings.theme === "light", JSON.stringify(savedSettings));
+  check("text size persisted on the server", savedSettings.font_scale === 1.2, String(savedSettings.font_scale));
+  check("reduced motion persisted on the server", savedSettings.reduced_motion === true);
+  check("high contrast persisted on the server", savedSettings.high_contrast === true);
+  check("default length persisted on the server", savedSettings.default_length === "thorough", savedSettings.default_length);
+  check("panel says what the build does not offer",
+    /not offered: model selection/.test($("#settingsPanel")?.textContent || ""),
+    ($("#settingsPanel")?.textContent || "").slice(-400));
+  $("#settingsPanel").closest(".overlay").querySelector("header button").click();
+  await wait(200);
+  check("settings panel closes", !$("#settingsPanel"));
+  check("library offers an archived toggle", !!$("#archivedToggle"));
+
   // --- create a notebook through the form
   const form = $(".new-card form");
   form.querySelector('[name="title"]').value = "UI smoke notebook";
@@ -175,6 +228,8 @@ async function main() {
   // --- chat presentation controls are real (they change the answer)
   check("composer exposes a style control", !!$("#chatStyle") && !!$("#chatStyle").getAttribute("aria-label"));
   check("composer exposes a length control", !!$("#chatLength"));
+  check("a new conversation starts from the saved default length", $("#chatLength").value === "thorough",
+    $("#chatLength").value);
   const setLen = (v) => {
     const sel = $("#chatLength");
     sel.value = v;

@@ -12,387 +12,273 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
-## `crates/forge-core/src/research.rs`
+## `crates/forge-core/src/settings.rs`
 
 ```rust
-//! Research briefs scoped to the notebook.
+//! Server-stored preferences, and honest usage reporting.
 //!
-//! The reference product has "Fast Research" (search the web or Drive and import what you find)
-//! and "Deep Research" (a multi-step research task that ends in a report). Forge has **no search
-//! provider** — no key, no vendor, no crawler — so neither can be reproduced honestly over the
-//! web, and this module does not pretend to. What it does instead is the part that does not need
-//! a provider: it **plans a multi-step investigation over the sources the user already has**.
+//! The spec's §7.17 asks for user control: theme, appearance, defaults, storage, privacy and
+//! accessibility. The temptation with a settings screen is to offer everything and wire up half
+//! of it. This module takes the opposite line: every field here **changes behaviour somewhere**,
+//! and the things Forge cannot do (interface languages, model selection without a provider,
+//! server-side font rendering) are named as unsupported in `/api/capabilities` instead of being
+//! shown as dead toggles.
 //!
-//! The plan is derived, not invented: the question is decomposed into sub-questions built from
-//! the question's own content words and from the notebook's own vocabulary, each sub-question is
-//! answered by the ordinary grounded answerer (same evidence floor, same citation verification),
-//! and every sub-question that no passage can support is listed as a **gap** rather than being
-//! answered from the rest. The brief's value is precisely that it says which parts of the question
-//! the notebook cannot answer — that is what tells a researcher what to go and find.
-//!
-//! Naming matters here, so: this is a *notebook-scoped research brief*, not Deep Research. The
-//! capability payload says `web_search: "none"` and explains the difference, because calling a
-//! decomposition pass "Deep Research" would be the exact kind of overclaim the spec forbids.
+//! Settings are stored in the same `db.json` as everything else, so a backup carries them and a
+//! restart keeps them — a preference that resets on restart is not a preference.
 
-use crate::domain::{Chunk, Source};
-use crate::grounded::{self, Answer, AnswerOptions, Length, Style};
-use crate::retrieve;
+use crate::grounded::{Length, Style};
+use crate::json::Value;
+use crate::obj;
 
-/// Upper bound on sub-questions. Each one costs a retrieval pass, and a brief with thirty
-/// sub-questions is a pile of fragments, not an investigation.
-pub const MAX_SUB_QUESTIONS: usize = 6;
-pub const DEFAULT_SUB_QUESTIONS: usize = 4;
+/// Theme names the UI understands.
+pub const THEMES: [&str; 3] = ["dark", "light", "system"];
+/// Library sort orders the notebook list accepts.
+pub const SORTS: [&str; 4] = ["recent", "title", "created", "sources"];
+/// Font scale bounds. Below 0.9 the interface stops being readable; above 1.4 the layout breaks.
+pub const FONT_SCALE_MIN: f64 = 0.9;
+pub const FONT_SCALE_MAX: f64 = 1.4;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SubQuestion {
-    pub text: String,
-    /// Why this question was asked — "decomposed from the question", "from a term the sources
-    /// repeat". Shown to the user so the plan is auditable rather than magic.
-    pub origin: &'static str,
+pub struct Settings {
+    pub theme: String,
+    /// Multiplier applied to the root font size by the client.
+    pub font_scale: f64,
+    /// Removes non-essential animation and smooth scrolling.
+    pub reduced_motion: bool,
+    /// Raises contrast for text and borders.
+    pub high_contrast: bool,
+    /// Default answer presentation for a new chat.
+    pub default_style: String,
+    /// Default citation budget for a new chat.
+    pub default_length: String,
+    /// Default order of the notebook library.
+    pub library_sort: String,
+    /// Whether the library hides archived notebooks by default.
+    pub hide_archived: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct Section {
-    pub question: String,
-    pub origin: String,
-    pub answer: Answer,
-    /// `answered` when the answer rests on citations, `gap` when it does not.
-    pub status: &'static str,
-    /// Distinct sources cited in this section.
-    pub sources_cited: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct Brief {
-    pub question: String,
-    pub sections: Vec<Section>,
-    pub gaps: Vec<String>,
-    pub sources_used: Vec<String>,
-    pub coverage: f64,
-    pub engine: String,
-}
-
-/// Split a question on the conjunctions people actually write. Deliberately mechanical: a
-/// "decomposition" that silently rewrote the question would be a paraphrase, and paraphrases are
-/// not evidence.
-fn split_question(question: &str) -> Vec<String> {
-    let mut parts: Vec<String> = Vec::new();
-    let lower = question.to_ascii_lowercase();
-    let mut current = String::new();
-    let words: Vec<&str> = question.split_whitespace().collect();
-    let lower_words: Vec<&str> = lower.split_whitespace().collect();
-    for (i, word) in words.iter().enumerate() {
-        let bare = lower_words
-            .get(i)
-            .copied()
-            .unwrap_or("")
-            .trim_matches(|c: char| !c.is_alphanumeric());
-        if matches!(bare, "and" | "plus" | "also") && current.split_whitespace().count() >= 3 {
-            parts.push(current.trim().to_string());
-            current = String::new();
-        } else {
-            if !current.is_empty() {
-                current.push(' ');
-            }
-            current.push_str(word);
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            theme: "dark".into(),
+            font_scale: 1.0,
+            reduced_motion: false,
+            high_contrast: false,
+            default_style: "evidence".into(),
+            default_length: "standard".into(),
+            library_sort: "recent".into(),
+            hide_archived: true,
         }
     }
-    if !current.trim().is_empty() {
-        parts.push(current.trim().to_string());
-    }
-    parts
 }
 
-/// Build the plan. `max` is clamped to `MAX_SUB_QUESTIONS`.
-///
-/// The first sub-question is always the question as asked — the brief must answer the actual
-/// question, not only its parts. The rest come from content words that the corpus actually
-/// contains (a term absent from every source would guarantee a gap, which is noise, not
-/// information) and from a comparison when the question asks for one.
-pub fn plan(question: &str, chunks: &[Chunk], max: usize) -> Vec<SubQuestion> {
-    let limit = max.clamp(1, MAX_SUB_QUESTIONS);
-    let asked = question.trim();
-    if asked.is_empty() {
-        return Vec::new();
-    }
-    let mut out = vec![SubQuestion { text: asked.to_string(), origin: "the question as asked" }];
-
-    // Explicit conjunctions first: "X and Y" is two questions and the user is entitled to both.
-    for part in split_question(asked).into_iter().skip(1) {
-        if out.len() >= limit {
-            return out;
-        }
-        if part.split_whitespace().count() >= 3 {
-            out.push(SubQuestion { text: part, origin: "decomposed from the question" });
+impl Settings {
+    pub fn to_json(&self) -> Value {
+        obj! {
+            "theme" => self.theme.as_str(),
+            "font_scale" => self.font_scale,
+            "reduced_motion" => self.reduced_motion,
+            "high_contrast" => self.high_contrast,
+            "default_style" => self.default_style.as_str(),
+            "default_length" => self.default_length.as_str(),
+            "library_sort" => self.library_sort.as_str(),
+            "hide_archived" => self.hide_archived,
         }
     }
 
-    // A comparison is a real sub-question even when the wording is not a conjunction.
-    let lower = asked.to_ascii_lowercase();
-    if (lower.contains(" vs ") || lower.contains(" versus ") || lower.starts_with("compare"))
-        && out.len() < limit
-    {
-        out.push(SubQuestion {
-            text: format!("what does each source say about {}", first_terms(asked, 3).join(" ")),
-            origin: "asked as a comparison",
-        });
-    }
-
-    // Then the terms the notebook actually repeats: they are what the sources are about.
-    let mut doc_freq: Vec<(String, usize)> = Vec::new();
-    for term in retrieve::terms(asked) {
-        let df = chunks.iter().filter(|c| c.text.to_ascii_lowercase().contains(&term)).count();
-        if df > 0 {
-            doc_freq.push((term, df));
+    pub fn from_json(v: &Value) -> Settings {
+        let d = Settings::default();
+        Settings {
+            theme: v.str_of("theme").map(|s| s.to_string()).unwrap_or(d.theme),
+            font_scale: v.get("font_scale").and_then(|x| x.as_f64()).unwrap_or(d.font_scale),
+            reduced_motion: v.get("reduced_motion").and_then(|x| x.as_bool()).unwrap_or(d.reduced_motion),
+            high_contrast: v.get("high_contrast").and_then(|x| x.as_bool()).unwrap_or(d.high_contrast),
+            default_style: v.str_of("default_style").map(|s| s.to_string()).unwrap_or(d.default_style),
+            default_length: v.str_of("default_length").map(|s| s.to_string()).unwrap_or(d.default_length),
+            library_sort: v.str_of("library_sort").map(|s| s.to_string()).unwrap_or(d.library_sort),
+            hide_archived: v.get("hide_archived").and_then(|x| x.as_bool()).unwrap_or(d.hide_archived),
         }
     }
-    doc_freq.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    for (term, _) in doc_freq {
-        if out.len() >= limit {
-            break;
-        }
-        let text = format!("what do the sources say about {}", term);
-        if !out.iter().any(|q| q.text.eq_ignore_ascii_case(&text)) {
-            out.push(SubQuestion { text, origin: "from a term the sources repeat" });
-        }
-    }
-    out
-}
 
-fn first_terms(text: &str, n: usize) -> Vec<String> {
-    retrieve::terms(text).into_iter().take(n).collect()
-}
-
-/// Run the plan with the same grounded answerer chat uses, so every quotation in the brief has
-/// passed the same citation checks as a chat answer.
-pub fn run(
-    question: &str,
-    chunks: &[Chunk],
-    sources: &[Source],
-    max_sub_questions: usize,
-) -> Brief {
-    let questions = plan(question, chunks, max_sub_questions);
-    let opts = AnswerOptions { style: Style::Detailed, length: Length::Standard };
-    let mut sections: Vec<Section> = Vec::new();
-    let mut gaps: Vec<String> = Vec::new();
-    let mut used: Vec<String> = Vec::new();
-
-    for sub in questions {
-        let answer = grounded::answer_with(&sub.text, chunks, sources, opts);
-        let mut cited: Vec<String> = Vec::new();
-        for c in &answer.citations {
-            if !cited.contains(&c.source_id) {
-                cited.push(c.source_id.clone());
-            }
-            if !used.contains(&c.source_title) {
-                used.push(c.source_title.clone());
+    /// Apply a partial update. Each rejected value is reported by name, so a client that sends one
+    /// bad field learns which one it was instead of losing the whole update.
+    pub fn apply(&mut self, patch: &Value) -> Vec<String> {
+        let mut rejected: Vec<String> = Vec::new();
+        if let Some(theme) = patch.str_of("theme") {
+            let t = theme.trim().to_ascii_lowercase();
+            if THEMES.contains(&t.as_str()) {
+                self.theme = t;
+            } else {
+                rejected.push(format!("theme must be one of {}", THEMES.join(", ")));
             }
         }
-        // "Answered" means it rests on evidence, not that it produced text: an abstention has
-        // text too, and calling that an answer is exactly the failure this product exists to avoid.
-        let answered = !answer.abstained && !answer.citations.is_empty();
-        if !answered {
-            gaps.push(sub.text.clone());
+        if let Some(scale) = patch.get("font_scale").and_then(|v| v.as_f64()) {
+            if (FONT_SCALE_MIN..=FONT_SCALE_MAX).contains(&scale) {
+                // Two decimals is what the UI renders; keeping the raw value would round-trip noise.
+                self.font_scale = (scale * 100.0).round() / 100.0;
+            } else {
+                rejected.push(format!(
+                    "font_scale must be between {} and {}",
+                    FONT_SCALE_MIN, FONT_SCALE_MAX
+                ));
+            }
         }
-        sections.push(Section {
-            question: sub.text,
-            origin: sub.origin.to_string(),
-            status: if answered { "answered" } else { "gap" },
-            sources_cited: cited.len(),
-            answer,
-        });
-    }
-
-    let total = sections.len().max(1);
-    let answered = sections.iter().filter(|s| s.status == "answered").count();
-    let coverage = answered as f64 / total as f64;
-    used.sort();
-
-    Brief {
-        question: question.trim().to_string(),
-        sections,
-        gaps,
-        sources_used: used,
-        coverage,
-        engine: "extractive · notebook-scoped plan".to_string(),
+        if let Some(flag) = patch.get("reduced_motion").and_then(|v| v.as_bool()) {
+            self.reduced_motion = flag;
+        }
+        if let Some(flag) = patch.get("high_contrast").and_then(|v| v.as_bool()) {
+            self.high_contrast = flag;
+        }
+        if let Some(style) = patch.str_of("default_style") {
+            match Style::parse(style) {
+                Some(s) => self.default_style = s.as_str().to_string(),
+                None => rejected.push("default_style must be evidence, concise or detailed".into()),
+            }
+        }
+        if let Some(length) = patch.str_of("default_length") {
+            match Length::parse(length) {
+                Some(l) => self.default_length = l.as_str().to_string(),
+                None => rejected.push("default_length must be brief, standard or thorough".into()),
+            }
+        }
+        if let Some(sort) = patch.str_of("library_sort") {
+            let s = sort.trim().to_ascii_lowercase();
+            if SORTS.contains(&s.as_str()) {
+                self.library_sort = s;
+            } else {
+                rejected.push(format!("library_sort must be one of {}", SORTS.join(", ")));
+            }
+        }
+        if let Some(flag) = patch.get("hide_archived").and_then(|v| v.as_bool()) {
+            self.hide_archived = flag;
+        }
+        rejected
     }
 }
 
-/// The brief as Markdown, for the export path. Every section keeps its citations; the gaps are
-/// listed last and are the point of the document as much as the answers are.
-pub fn to_markdown(brief: &Brief) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("# Research brief: {}\n\n", brief.question));
-    out.push_str(&format!(
-        "_Forge · notebook-scoped brief · {} of {} sub-questions answered ({:.0}%) · engine: {}_\n\n",
-        brief.sections.iter().filter(|s| s.status == "answered").count(),
-        brief.sections.len(),
-        brief.coverage * 100.0,
-        brief.engine
-    ));
-    out.push_str(
-        "> Scope: this brief decomposes the question and answers each part from the notebook's \
-         sources. Forge performs **no web search** in this build — a sub-question the sources \
-         cannot support is listed as a gap, not filled from outside knowledge.\n\n",
-    );
-    for (i, s) in brief.sections.iter().enumerate() {
-        out.push_str(&format!("## {}. {}\n\n", i + 1, s.question));
-        out.push_str(&format!("_{} · {}_\n\n", s.origin, s.status));
-        if s.status == "gap" {
-            out.push_str(&format!("{}\n\n", s.answer.text.trim()));
-            continue;
-        }
-        out.push_str(s.answer.text.trim());
-        out.push_str("\n\n### Evidence\n\n");
-        for c in &s.answer.citations {
-            out.push_str(&format!(
-                "- **{}** · {} — “{}”\n",
-                c.source_title,
-                c.locator.human(),
-                c.quote.trim()
-            ));
-        }
-        out.push('\n');
+/// Real on-disk usage, measured rather than estimated from record counts.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Usage {
+    pub database_bytes: u64,
+    pub blob_bytes: u64,
+    pub blob_count: u64,
+    pub backup_count: u64,
+    pub backup_bytes: u64,
+    pub notebook_count: u64,
+    pub source_count: u64,
+    pub chunk_count: u64,
+    pub artifact_count: u64,
+    pub conversation_count: u64,
+}
+
+impl Usage {
+    pub fn total_bytes(&self) -> u64 {
+        self.database_bytes + self.blob_bytes + self.backup_bytes
     }
-    if !brief.gaps.is_empty() {
-        out.push_str("## Gaps\n\n");
-        out.push_str("These parts of the question no passage in the notebook supports. Forge does not answer them from outside knowledge:\n\n");
-        for gap in &brief.gaps {
-            out.push_str(&format!("- {}\n", gap));
+
+    pub fn to_json(&self) -> Value {
+        obj! {
+            "database_bytes" => self.database_bytes,
+            "blob_bytes" => self.blob_bytes,
+            "blob_count" => self.blob_count,
+            "backup_bytes" => self.backup_bytes,
+            "backup_count" => self.backup_count,
+            "total_bytes" => self.total_bytes(),
+            "records" => obj! {
+                "notebooks" => self.notebook_count,
+                "sources" => self.source_count,
+                "chunks" => self.chunk_count,
+                "artifacts" => self.artifact_count,
+                "conversations" => self.conversation_count,
+            },
+            "note" => "measured from the data directory: db.json plus the retained source blobs and rolling backups",
         }
-        out.push('\n');
     }
-    if !brief.sources_used.is_empty() {
-        out.push_str(&format!("Sources used: {}.\n", brief.sources_used.join("; ")));
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Locator;
 
-    fn source(id: &str, title: &str) -> Source {
-        Source {
-            id: id.into(),
-            notebook_id: "nb".into(),
-            title: title.into(),
-            kind: "text".into(),
-            status: "ready".into(),
+    #[test]
+    fn defaults_are_the_documented_defaults() {
+        let s = Settings::default();
+        assert_eq!(s.theme, "dark");
+        assert_eq!(s.default_style, "evidence");
+        assert_eq!(s.default_length, "standard");
+        assert!(s.hide_archived);
+        assert_eq!(Settings::from_json(&s.to_json()), s, "settings round-trip through JSON");
+    }
+
+    #[test]
+    fn a_patch_changes_only_what_it_names() {
+        let mut s = Settings::default();
+        let rejected = s.apply(&crate::obj! { "theme" => "light" });
+        assert!(rejected.is_empty());
+        assert_eq!(s.theme, "light");
+        assert_eq!(s.default_length, "standard", "untouched fields keep their value");
+    }
+
+    #[test]
+    fn bad_values_are_named_and_not_applied() {
+        let mut s = Settings::default();
+        let rejected = s.apply(&crate::obj! {
+            "theme" => "neon",
+            "font_scale" => 9.0,
+            "default_style" => "shouty",
+            "default_length" => "epic",
+            "library_sort" => "vibes",
+        });
+        assert_eq!(rejected.len(), 5, "{:?}", rejected);
+        assert!(rejected.iter().any(|r| r.contains("theme")));
+        assert!(rejected.iter().any(|r| r.contains("font_scale")));
+        assert!(rejected.iter().any(|r| r.contains("default_style")));
+        assert!(rejected.iter().any(|r| r.contains("default_length")));
+        assert!(rejected.iter().any(|r| r.contains("library_sort")));
+        // Nothing bad was applied.
+        assert_eq!(s, Settings::default());
+    }
+
+    #[test]
+    fn good_values_in_the_same_patch_still_apply_when_others_are_rejected() {
+        let mut s = Settings::default();
+        let rejected = s.apply(&crate::obj! { "theme" => "light", "font_scale" => 99.0 });
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(s.theme, "light", "a good field is not thrown away because a sibling was bad");
+    }
+
+    #[test]
+    fn font_scale_is_rounded_to_what_the_ui_renders() {
+        let mut s = Settings::default();
+        assert!(s.apply(&crate::obj! { "font_scale" => 1.234 }).is_empty());
+        assert_eq!(s.font_scale, 1.23);
+    }
+
+    #[test]
+    fn an_old_database_with_no_settings_decodes_to_defaults() {
+        let s = Settings::from_json(&Value::Null);
+        assert_eq!(s, Settings::default());
+        // A partial object fills the rest from defaults rather than zeroing them.
+        let partial = Settings::from_json(&crate::obj! { "theme" => "light" });
+        assert_eq!(partial.theme, "light");
+        assert_eq!(partial.font_scale, 1.0);
+        assert_eq!(partial.default_style, "evidence");
+    }
+
+    #[test]
+    fn usage_adds_up_and_reports_what_it_measured() {
+        let u = Usage {
+            database_bytes: 1000,
+            blob_bytes: 250,
+            backup_bytes: 500,
+            blob_count: 2,
             ..Default::default()
-        }
-    }
-
-    fn corpus() -> (Vec<Chunk>, Vec<Source>) {
-        let chunks = vec![
-            Chunk {
-                id: "k1".into(),
-                source_id: "s1".into(),
-                notebook_id: "nb".into(),
-                ordinal: 0,
-                text: "Customer records are retained for thirty days after account closure.".into(),
-                locator: Locator::paragraph(0, 0, 70),
-            },
-            Chunk {
-                id: "k2".into(),
-                source_id: "s2".into(),
-                notebook_id: "nb".into(),
-                ordinal: 0,
-                text: "A legal hold suspends the retention window until the hold is released.".into(),
-                locator: Locator::paragraph(0, 0, 76),
-            },
-        ];
-        (chunks, vec![source("s1", "Policy"), source("s2", "Legal")])
-    }
-
-    #[test]
-    fn the_plan_answers_the_question_as_asked_first() {
-        let (chunks, _) = corpus();
-        let planned = plan("how long are customer records retained", &chunks, 4);
-        assert_eq!(planned[0].text, "how long are customer records retained");
-        assert_eq!(planned[0].origin, "the question as asked");
-        assert!(planned.len() <= 4);
-        // Every later sub-question is labelled with where it came from.
-        for q in planned.iter().skip(1) {
-            assert!(!q.origin.is_empty());
-        }
-    }
-
-    #[test]
-    fn a_conjunction_becomes_two_questions_and_a_comparison_gets_its_own() {
-        let (chunks, _) = corpus();
-        let planned = plan("how long are customer records retained and what does a legal hold do", &chunks, 6);
-        assert!(
-            planned.iter().any(|q| q.text.contains("what does a legal hold do")),
-            "{:?}",
-            planned.iter().map(|q| &q.text).collect::<Vec<_>>()
-        );
-        let cmp = plan("retention vs legal hold", &chunks, 6);
-        assert!(cmp.iter().any(|q| q.origin == "asked as a comparison"), "{:?}", cmp);
-    }
-
-    #[test]
-    fn terms_absent_from_every_source_are_not_planned_into_a_guaranteed_gap() {
-        let (chunks, _) = corpus();
-        let planned = plan("retention blockchain regulation", &chunks, 6);
-        // The question as asked is kept verbatim (that is the user's own words), but no *derived*
-        // sub-question is built from a term the notebook has never seen: that would guarantee a
-        // gap and add nothing.
-        assert!(
-            !planned.iter().skip(1).any(|q| q.text.contains("blockchain") || q.text.contains("regulation")),
-            "a term no source contains cannot be researched from the notebook: {:?}",
-            planned.iter().map(|q| &q.text).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn the_plan_is_capped() {
-        let (chunks, _) = corpus();
-        let capped = plan("customer records retention legal hold account closure policy", &chunks, 99);
-        assert!(capped.len() <= MAX_SUB_QUESTIONS);
-        assert_eq!(plan("", &chunks, 3).len(), 0, "an empty question plans nothing");
-    }
-
-    #[test]
-    fn every_answered_section_carries_citations_and_unsupported_parts_become_gaps() {
-        let (chunks, sources) = corpus();
-        let brief = run("how long are customer records retained", &chunks, &sources, 4);
-        assert!(!brief.sections.is_empty());
-        let answered: Vec<&Section> = brief.sections.iter().filter(|s| s.status == "answered").collect();
-        assert!(!answered.is_empty(), "{:?}", brief.sections.iter().map(|s| (&s.question, s.status)).collect::<Vec<_>>());
-        for s in answered {
-            assert!(!s.answer.citations.is_empty());
-            assert!(s.sources_cited >= 1);
-        }
-        // The gap list is derived from the sections, not maintained separately.
-        let gap_count = brief.sections.iter().filter(|s| s.status == "gap").count();
-        assert_eq!(brief.gaps.len(), gap_count);
-        assert!(brief.coverage > 0.0 && brief.coverage <= 1.0);
-        assert!(brief.sources_used.contains(&"Policy".to_string()));
-    }
-
-    #[test]
-    fn a_question_the_sources_cannot_answer_is_all_gaps_and_says_so() {
-        let (chunks, sources) = corpus();
-        let brief = run("what is the refund policy for gift cards", &chunks, &sources, 3);
-        assert!(brief.sections.iter().all(|s| s.status == "gap"), "{:?}", brief.sections.iter().map(|s| s.status).collect::<Vec<_>>());
-        assert_eq!(brief.coverage, 0.0);
-        let md = to_markdown(&brief);
-        assert!(md.contains("Gaps"), "{}", md);
-        assert!(md.contains("no web search"), "the scope line is present: {}", md);
-    }
-
-    #[test]
-    fn the_markdown_keeps_quotes_locators_and_the_scope_statement() {
-        let (chunks, sources) = corpus();
-        let brief = run("how long are customer records retained", &chunks, &sources, 4);
-        let md = to_markdown(&brief);
-        assert!(md.starts_with("# Research brief: how long are customer records retained"));
-        assert!(md.contains("### Evidence"));
-        assert!(md.contains("— “"), "quotes are marked as quotes: {}", md);
-        assert!(md.contains("paragraph 0"), "locators survive: {}", md);
-        assert!(md.contains("no web search"));
+        };
+        assert_eq!(u.total_bytes(), 1750);
+        let json = u.to_json();
+        assert_eq!(json.get("total_bytes").and_then(|v| v.as_f64()), Some(1750.0));
+        assert!(json.str_of("note").unwrap_or("").contains("measured"));
     }
 }
 ```
@@ -586,6 +472,8 @@ const api = {
       const err = new Error(msg);
       err.code = data && data.code;
       err.status = res.status;
+      err.data = data;                 // callers that need the structured refusal
+      err.rejected = (data && data.rejected) || [];
       if (res.status === 401) showTokenPrompt(msg);
       throw err;
     }
@@ -694,12 +582,16 @@ window.addEventListener("hashchange", route);
 // The library is a real list, not a wall of cards: it can be searched (title, description,
 // tag or the name of a source inside it), sorted, and each notebook carries the last time
 // something actually happened in it.
-const library = { q: "", sort: "recent" };
+const library = { q: "", sort: "recent", sortTouched: false };
 
 async function renderLibrary(app) {
   const params = new URLSearchParams();
   if (library.q) params.set("q", library.q);
   params.set("sort", library.sort);
+  // Archived notebooks are noise by default; the preference is stored on the server so it
+  // follows the operator, not the browser.
+  const hideArchived = prefs.value ? prefs.value.hide_archived !== false : false;
+  if (hideArchived) params.set("archived", "false");
   const data = await api.get("/notebooks" + (params.toString() ? `?${params}` : ""));
   state.notebooks = data.notebooks || [];
 
@@ -782,16 +674,29 @@ async function renderLibrary(app) {
   });
   const sort = h("select", {
     id: "librarySort", "aria-label": "Sort notebooks",
-    onchange: (e) => { library.sort = e.target.value; route(); },
+    onchange: (e) => { library.sort = e.target.value; library.sortTouched = true; route(); },
   }, [["recent", "recent activity"], ["title", "title"], ["created", "newest"], ["sources", "most sources"]]
     .map(([v, label]) => h("option", { value: v, selected: library.sort === v }, label)));
 
+  const archivedToggle = h("button", {
+    class: "ghost", id: "archivedToggle",
+    title: hideArchived ? "Archived notebooks are hidden" : "Archived notebooks are listed",
+    onclick: async () => {
+      try {
+        const saved = await saveSettings({ hide_archived: !hideArchived });
+        toast(saved.hide_archived ? "Archived notebooks hidden" : "Archived notebooks shown");
+        route();
+      } catch (e) { toast(e.message, "err"); }
+    },
+  }, hideArchived ? "Show archived" : "Hide archived");
+
   const toolbar = h("div", { class: "row-between", style: "margin:10px 0;gap:8px;flex-wrap:wrap" },
-    search, sort,
+    search, sort, archivedToggle,
+    h("button", { class: "ghost", id: "settingsBtnToolbar", title: "Appearance, defaults and storage", onclick: openSettings }, "⚙ Settings"),
     h("span", { class: "hint", id: "libraryCount" },
       library.q
         ? `${state.notebooks.length} matching${state.notebooks.length === 1 ? "" : "s"} of ${data.total ?? "?"}`
-        : `${state.notebooks.length} notebook${state.notebooks.length === 1 ? "" : "s"}`));
+        : `${state.notebooks.length} notebook${state.notebooks.length === 1 ? "" : "s"}${hideArchived ? " (archived hidden)" : ""}`));
 
   const body = library.q && !state.notebooks.length
     ? h("p", { class: "empty" }, `Nothing matches “${library.q}”. Search covers the title, description, tags and source titles.`)
@@ -2521,17 +2426,235 @@ async function showArtifact(id) {
   } catch (e) { toast(e.message, "err"); }
 }
 
-// ---------------------------------------------------------------- theme + boot
-document.getElementById("themeBtn").addEventListener("click", () => {
+// ---------------------------------------------------------------- settings
+// Preferences live on the server (db.json), so they survive a restart, follow the operator
+// rather than the browser profile, and travel inside a backup. A copy is cached in
+// localStorage purely to paint the right theme on the first frame after a reload.
+const prefs = { value: null };
+
+const THEMES = [["dark", "dark"], ["light", "light"], ["system", "follow the system"]];
+const STYLES = [["evidence", "evidence first"], ["concise", "concise"], ["detailed", "detailed"]];
+const LENGTHS = [["brief", "brief"], ["standard", "standard"], ["thorough", "thorough"]];
+const SORTS = [["recent", "recent activity"], ["title", "title"], ["created", "newest"], ["sources", "most sources"]];
+
+function applyAppearance(s) {
+  if (!s) return;
   const root = document.documentElement;
-  const next = root.dataset.theme === "light" ? "dark" : "light";
-  root.dataset.theme = next;
-  localStorage.setItem("forge.theme", next);
-});
-{
-  const saved = localStorage.getItem("forge.theme");
-  if (saved) document.documentElement.dataset.theme = saved;
+  if (s.theme === "system") delete root.dataset.theme;
+  else root.dataset.theme = s.theme;
+  const scale = Number(s.font_scale) || 1;
+  root.style.setProperty("--font-scale", String(scale));
+  root.dataset.motion = s.reduced_motion ? "reduced" : "full";
+  root.dataset.contrast = s.high_contrast ? "high" : "normal";
+  try {
+    localStorage.setItem("forge.appearance", JSON.stringify({
+      theme: s.theme, font_scale: scale,
+      reduced_motion: !!s.reduced_motion, high_contrast: !!s.high_contrast,
+    }));
+  } catch (e) { /* a full quota must not break the app */ }
 }
+
+/// Server defaults apply to a fresh browser; an explicit choice made here already wins.
+function applyDefaults(s) {
+  if (!s) return;
+  if (!localStorage.getItem("forge.style")) state.style = s.default_style || state.style;
+  if (!localStorage.getItem("forge.length")) state.length = s.default_length || state.length;
+  if (!library.sortTouched && s.library_sort) library.sort = s.library_sort;
+}
+
+async function loadSettings() {
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem("forge.appearance") || "null"); } catch (e) { cached = null; }
+  if (cached) applyAppearance(cached); // no flash of the wrong theme
+  try {
+    prefs.value = await api.get("/settings");
+  } catch (e) {
+    return; // the cached appearance stands; the panel will report the failure
+  }
+  applyAppearance(prefs.value);
+  applyDefaults(prefs.value);
+}
+
+/// One place that writes preferences. A 422 from the server is not a total failure: the
+/// fields it accepted are stored, so the UI adopts the server's answer and names the rest.
+async function saveSettings(patch) {
+  try {
+    const saved = await api.patch("/settings", patch);
+    prefs.value = saved;
+    applyAppearance(saved);
+    applyDefaults(saved);
+    return saved;
+  } catch (e) {
+    if (e.status === 422 && e.data && e.data.settings) {
+      prefs.value = e.data.settings;
+      applyAppearance(prefs.value);
+    }
+    throw e;
+  }
+}
+
+function fmtBytes(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+  return `${(v / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+async function openSettings() {
+  document.getElementById("settingsPanel")?.closest(".overlay")?.remove();
+  if (!prefs.value) {
+    try { prefs.value = await api.get("/settings"); } catch (e) { toast(e.message, "err"); return; }
+  }
+  const stored = prefs.value;
+  const draft = Object.assign({}, stored);
+
+  const select = (id, options, value, onchange) => h("select", { id, onchange },
+    options.map(([v, label]) => h("option", { value: v, selected: v === value }, label)));
+  const field = (label, control, hint) => h("div", { class: "note-item" },
+    h("label", { style: "font-weight:600;display:block;margin-bottom:4px" }, label),
+    control,
+    hint ? h("div", { class: "hint", style: "margin-top:4px" }, hint) : null);
+
+  const scaleOut = h("output", { id: "setFontScaleValue", style: "margin-left:8px" }, `${Math.round(draft.font_scale * 100)}%`);
+  const scale = h("input", {
+    type: "range", id: "setFontScale", min: "0.9", max: "1.4", step: "0.05",
+    value: String(draft.font_scale), "aria-label": "Text size",
+    oninput: (e) => {
+      draft.font_scale = Number(e.target.value);
+      scaleOut.textContent = `${Math.round(draft.font_scale * 100)}%`;
+      applyAppearance(draft); // preview now, persist on save
+    },
+  });
+
+  const theme = select("setTheme", THEMES, draft.theme, (e) => {
+    draft.theme = e.target.value; applyAppearance(draft);
+  });
+  const motion = h("input", { type: "checkbox", id: "setReducedMotion", checked: !!draft.reduced_motion,
+    onchange: (e) => { draft.reduced_motion = e.target.checked; applyAppearance(draft); },
+  });
+  const contrast = h("input", { type: "checkbox", id: "setHighContrast", checked: !!draft.high_contrast,
+    onchange: (e) => { draft.high_contrast = e.target.checked; applyAppearance(draft); },
+  });
+  const style = select("setDefaultStyle", STYLES, draft.default_style, (e) => { draft.default_style = e.target.value; });
+  const length = select("setDefaultLength", LENGTHS, draft.default_length, (e) => { draft.default_length = e.target.value; });
+  const sort = select("setLibrarySort", SORTS, draft.library_sort, (e) => { draft.library_sort = e.target.value; });
+  const hidden = h("input", { type: "checkbox", id: "setHideArchived", checked: !!draft.hide_archived,
+    onchange: (e) => { draft.hide_archived = e.target.checked; },
+  });
+
+  const errors = h("div", { class: "stack", id: "settingsErrors" });
+  const status = h("div", { class: "hint", id: "settingsStatus" }, "Preferences are stored with your data on this machine.");
+  const usage = h("div", { class: "stack", id: "storageUsage" }, h("p", { class: "empty" }, "measuring…"));
+
+  const paintUsage = (u) => usage.replaceChildren(
+    kvTable([
+      ["total", fmtBytes(u.total_bytes)],
+      ["database (db.json)", fmtBytes(u.database_bytes)],
+      ["source blobs", `${fmtBytes(u.blob_bytes)} in ${u.blob_count} file(s)`],
+      ["backups", `${fmtBytes(u.backup_bytes)} in ${u.backup_count} file(s)`],
+      ["records", `${u.records.notebooks} notebooks · ${u.records.sources} sources · ${u.records.chunks} passages · ${u.records.artifacts} artifacts · ${u.records.conversations} conversations`],
+    ]),
+    h("p", { class: "hint" }, u.note || ""));
+
+  const refreshUsage = async () => {
+    try { paintUsage(await api.get("/storage")); }
+    catch (e) { usage.replaceChildren(h("p", { class: "empty" }, e.message)); }
+  };
+  refreshUsage();
+
+  const save = h("button", { class: "primary", id: "saveSettings", onclick: async () => {
+    save.disabled = true;
+    errors.replaceChildren();
+    try {
+      const saved = await saveSettings(draft);
+      Object.assign(draft, saved);
+      status.textContent = "Saved.";
+      route();
+    } catch (e) {
+      const rejected = e.rejected || [];
+      if (rejected.length) {
+        errors.replaceChildren(h("div", { class: "note-item" },
+          h("strong", {}, "Not saved:"),
+          ...rejected.map((r) => h("div", { class: "hint" }, r)),
+          h("div", { class: "hint" }, "Every other field was saved.")));
+        status.textContent = "Some fields were refused; the panel now shows what is stored.";
+      } else {
+        errors.replaceChildren(h("p", { class: "empty" }, e.message));
+      }
+    } finally { save.disabled = false; }
+  } }, "Save preferences");
+
+  const reset = h("button", { class: "ghost", id: "resetSettings", onclick: async () => {
+    try {
+      const saved = await api.del("/settings");
+      prefs.value = saved;
+      Object.assign(draft, saved);
+      applyAppearance(saved);
+      applyDefaults(saved);
+      status.textContent = "Restored the documented defaults.";
+      overlay.remove();
+      await openSettings();
+      route();
+    } catch (e) { toast(e.message, "err"); }
+  } }, "Reset to defaults");
+
+  const backup = h("button", { class: "ghost", id: "backupNow", onclick: async () => {
+    try {
+      const r = await api.post("/backup", {});
+      status.textContent = `Backup written: ${r.name} (${fmtBytes(r.bytes)}).`;
+      refreshUsage();
+    } catch (e) { toast(e.message, "err"); }
+  } }, "Create a backup now");
+
+  const caps = state.caps || {};
+  const gaps = caps.settings && caps.settings.unsupported ? caps.settings.unsupported : {};
+  const unsupported = Object.entries(gaps).map(([k, v]) => h("div", { class: "hint" },
+    `not offered: ${k.replace(/_/g, " ")} — ${v}`));
+
+  const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    h("div", { class: "viewer", id: "settingsPanel" },
+      h("header", {},
+        h("div", { style: "flex:1" },
+          h("div", { style: "font-weight:600" }, "Settings"),
+          h("div", { class: "hint" }, "appearance, new-conversation defaults, library behaviour and measured storage")),
+        h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+      h("div", { class: "content stack" },
+        h("h2", { style: "font-size:15px;margin:0" }, "Appearance"),
+        field("Theme", theme, "“follow the system” uses your operating system's light/dark preference."),
+        field("Text size", h("div", { class: "row", style: "gap:8px" }, scale, scaleOut),
+          "Between 90% and 140%. Every pane scales; nothing is hidden or reflowed away."),
+        field("Reduce motion", motion, "Turns off the spinner and transition animations."),
+        field("High contrast", contrast, "Strengthens borders and muted text without leaving the theme."),
+        h("h2", { style: "font-size:15px;margin:12px 0 0" }, "Defaults for new conversations"),
+        field("Answer style", style, "How a grounded answer is laid out. It never changes which passages are cited."),
+        field("Response length", length, "How many passages an answer may cite."),
+        h("h2", { style: "font-size:15px;margin:12px 0 0" }, "Library"),
+        field("Sort notebooks by", sort),
+        field("Hide archived notebooks", hidden),
+        h("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, save, reset),
+        errors, status,
+        h("h2", { style: "font-size:15px;margin:12px 0 0" }, "Storage and usage"),
+        usage,
+        h("div", { class: "row", style: "gap:8px;flex-wrap:wrap" },
+          h("button", { class: "ghost", onclick: refreshUsage }, "Re-measure"),
+          backup,
+          h("a", { class: "badge", href: "#/capabilities", onclick: () => overlay.remove() }, "capabilities")),
+        h("p", { class: "hint" },
+          "Deleting a notebook deletes its sources, notes, artifacts and conversations from the database. Backups are written to the server's data directory and are never uploaded; copy that directory if you want to keep them elsewhere."),
+        unsupported.length ? h("div", { class: "note-item" }, h("strong", {}, "What this build does not offer"), ...unsupported) : null)));
+  document.body.append(overlay);
+}
+
+// ---------------------------------------------------------------- theme + boot
+document.getElementById("themeBtn").addEventListener("click", async () => {
+  const current = (prefs.value && prefs.value.theme) || document.documentElement.dataset.theme || "system";
+  const next = current === "light" ? "dark" : "light";
+  applyAppearance(Object.assign({ font_scale: 1, reduced_motion: false, high_contrast: false }, prefs.value || {}, { theme: next }));
+  try {
+    prefs.value = await saveSettings({ theme: next });
+  } catch (e) { toast(`Theme applied for this session only: ${e.message}`, "err"); }
+});
+document.getElementById("settingsBtn").addEventListener("click", openSettings);
 
 async function boot() {
   try {
@@ -2554,6 +2677,7 @@ async function boot() {
     document.getElementById("engineBadge").textContent = "engine: unknown";
     document.getElementById("engineBadge").classList.add("err");
   }
+  await loadSettings();
   await route();
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -2746,6 +2870,7 @@ function renderBinaryReport(r) {
     <span class="badge" id="engineBadge" title="Answering engine">engine: …</span>
     <span class="badge" id="accessBadge" title="Who this instance lets in">access: …</span>
     <a class="badge" id="capsLink" href="#/capabilities" title="What this build supports">capabilities</a>
+    <button class="ghost" id="settingsBtn" aria-label="Settings" title="Appearance, defaults and storage">⚙</button>
     <button class="ghost" id="themeBtn" aria-label="Toggle theme" title="Toggle theme">◐</button>
   </header>
   <main id="app" tabindex="-1">
@@ -2812,11 +2937,39 @@ html[data-theme="light"] {
   --accent: #a85f13; --accent-soft: #fdf1e2;
 }
 
+/* Settings (7.17): every appearance preference is a CSS variable or a root attribute, so the
+   whole app honours it without per-view special cases. */
+html { --font-scale: 1; }
+html[data-contrast="high"] {
+  --line: #566371;
+  --muted: #c8d2dc;
+  --faint: #a9b6c2;
+}
+html[data-contrast="high"][data-theme="light"] {
+  --line: #6b7784;
+  --muted: #33404d;
+  --faint: #4a5764;
+}
+@media (prefers-color-scheme: light) {
+  html[data-contrast="high"]:not([data-theme="dark"]) {
+    --line: #6b7784; --muted: #33404d; --faint: #4a5764;
+  }
+}
+/* Reduced motion keeps the layout identical and drops the movement, including the spinner. */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+  scroll-behavior: auto !important;
+}
+
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
-  font-family: var(--sans); font-size: 15px; line-height: 1.55;
+  font-family: var(--sans); font-size: calc(15px * var(--font-scale, 1)); line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); }
@@ -5971,6 +6124,9 @@ impl Api {
     /// The coarse verb a route needs: read, write, or manage (owner only).
     fn route_action(method: &str, segs: &[&str]) -> &'static str {
         match (method, segs) {
+            // Storage is instance-wide (every notebook's bytes), so it is owner-only — matched
+            // before the read catch-all below.
+            ("GET", ["api", "storage"]) => "manage",
             ("GET", _) | ("HEAD", _) => "read",
             ("POST", ["api", "notebooks"]) => "manage",
             ("POST", ["api", "notebooks", _, "chat"]) => "read",
@@ -5988,6 +6144,7 @@ impl Api {
             ("POST", ["api", "notebooklm", ..]) => "manage",
             ("POST", ["api", "media", "inspect"]) => "manage",
             ("POST", ["api", "auth", ..]) => "manage",
+            ("PATCH", ["api", "settings"]) | ("DELETE", ["api", "settings"]) => "manage",
             _ => "write",
         }
     }
@@ -6049,6 +6206,10 @@ impl Api {
 
         let result = match (req.method.as_str(), segs.as_slice()) {
             ("GET", ["api", "health"]) => Ok(self.health()),
+            ("GET", ["api", "settings"]) => Ok(ok(self.store.read(|db| db.settings.to_json()))),
+            ("PATCH", ["api", "settings"]) => self.update_settings(req),
+            ("DELETE", ["api", "settings"]) => self.reset_settings(),
+            ("GET", ["api", "storage"]) => Ok(ok(self.storage_usage())),
             ("GET", ["api", "capabilities"]) => Ok(ok(self.capabilities())),
             ("GET", ["api", "notebooks"]) => Ok(ok(self.list_notebooks(&identity, req))),
             ("POST", ["api", "notebooks"]) => self.create_notebook(req),
@@ -6156,6 +6317,27 @@ impl Api {
                 "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
                 "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
                 "export_note" => "the PPTX is a written-by-hand OPC package and the PDF a written-by-hand page tree, verified by reading both back with Forge's own readers and (one-off, outside the build) python-pptx and pypdf",
+            },
+            "settings" => obj! {
+                "status" => "partial",
+                "endpoint" => "GET/PATCH /api/settings, GET /api/storage",
+                "persisted" => Value::Arr(vec![
+                    Value::from("theme"), Value::from("font_scale"), Value::from("reduced_motion"),
+                    Value::from("high_contrast"), Value::from("default_style"), Value::from("default_length"),
+                    Value::from("library_sort"), Value::from("hide_archived"),
+                ]),
+                "unsupported" => obj! {
+                    "interface_language" => "no localisation exists in this build, so there is no language selector to offer",
+                    "model_selection" => "no model runs here: answers are extracted, so choosing a model would be a dead control. Providers can be configured for a future model-backed engine, and their keys are stored 0600",
+                    "server_side_fonts" => "the PDF export uses the base-14 fonts and says so; there is no font picker",
+                    "per_user_settings" => "settings are per data directory (one operator), not per share link",
+                    "keyboard_shortcuts" => "there is no shortcut map; the UI relies on native focus order and browser defaults",
+                },
+            },
+            "usage" => obj! {
+                "status" => "supported",
+                "endpoint" => "GET /api/storage",
+                "note" => "measured bytes: db.json, retained blobs and rolling backups, plus record counts",
             },
             "research" => obj! {
                 "status" => "notebook_scoped_only",
@@ -6975,6 +7157,80 @@ impl Api {
             "chunk_count" => chunk_count as u64,
             "attempts" => (attempts + 1) as u64,
         }))
+    }
+
+    /// `PATCH /api/settings` — partial update, with every rejected field named.
+    fn update_settings(&self, req: &Request) -> Result<Response, Response> {
+        let patch = parse_body(req)?;
+        let (settings, rejected) = self
+            .store
+            .write(|db| {
+                let rejected = db.settings.apply(&patch);
+                (db.settings.clone(), rejected)
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        if !rejected.is_empty() {
+            // 422 with the current settings attached: the client can re-render the truth without
+            // guessing which of its fields survived.
+            return Err(Response::json(
+                422,
+                &obj! {
+                    "error" => rejected.join("; "),
+                    "code" => "bad_setting",
+                    "status" => 422u64,
+                    "rejected" => Value::Arr(rejected.iter().map(|r| Value::from(r.as_str())).collect()),
+                    "settings" => settings.to_json(),
+                },
+            ));
+        }
+        Ok(ok(settings.to_json()))
+    }
+
+    /// `DELETE /api/settings` — back to the documented defaults.
+    fn reset_settings(&self) -> Result<Response, Response> {
+        let settings = self
+            .store
+            .write(|db| {
+                db.settings = crate::settings::Settings::default();
+                db.settings.clone()
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        Ok(ok(settings.to_json()))
+    }
+
+    /// `GET /api/storage` — measured usage of the data directory, not an estimate.
+    fn storage_usage(&self) -> Value {
+        let dir = self.store.dir.clone();
+        let size_of = |path: &std::path::Path| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let read_dir = |name: &str| {
+            std::fs::read_dir(dir.join(name))
+                .map(|entries| entries.flatten().collect::<Vec<_>>())
+                .unwrap_or_default()
+        };
+        let blobs = read_dir("blobs");
+        let backups = read_dir("backups");
+        let counts = self.store.read(|db| {
+            (
+                db.notebooks.len() as u64,
+                db.sources.len() as u64,
+                db.chunks.len() as u64,
+                db.artifacts.len() as u64,
+                db.conversations.len() as u64,
+            )
+        });
+        crate::settings::Usage {
+            database_bytes: size_of(&self.store.path()),
+            blob_bytes: blobs.iter().map(|e| e.metadata().map(|m| m.len()).unwrap_or(0)).sum(),
+            blob_count: blobs.len() as u64,
+            backup_bytes: backups.iter().map(|e| e.metadata().map(|m| m.len()).unwrap_or(0)).sum(),
+            backup_count: backups.len() as u64,
+            notebook_count: counts.0,
+            source_count: counts.1,
+            chunk_count: counts.2,
+            artifact_count: counts.3,
+            conversation_count: counts.4,
+        }
+        .to_json()
     }
 
     /// `POST /api/notebooks/:id/research`
@@ -20043,6 +20299,7 @@ pub mod render;
 pub mod research;
 pub mod retrieve;
 pub mod security;
+pub mod settings;
 pub mod store;
 pub mod tables;
 pub mod untrusted;
@@ -22975,6 +23232,391 @@ mod tests {
 }
 ```
 
+## `crates/forge-core/src/research.rs`
+
+```rust
+//! Research briefs scoped to the notebook.
+//!
+//! The reference product has "Fast Research" (search the web or Drive and import what you find)
+//! and "Deep Research" (a multi-step research task that ends in a report). Forge has **no search
+//! provider** — no key, no vendor, no crawler — so neither can be reproduced honestly over the
+//! web, and this module does not pretend to. What it does instead is the part that does not need
+//! a provider: it **plans a multi-step investigation over the sources the user already has**.
+//!
+//! The plan is derived, not invented: the question is decomposed into sub-questions built from
+//! the question's own content words and from the notebook's own vocabulary, each sub-question is
+//! answered by the ordinary grounded answerer (same evidence floor, same citation verification),
+//! and every sub-question that no passage can support is listed as a **gap** rather than being
+//! answered from the rest. The brief's value is precisely that it says which parts of the question
+//! the notebook cannot answer — that is what tells a researcher what to go and find.
+//!
+//! Naming matters here, so: this is a *notebook-scoped research brief*, not Deep Research. The
+//! capability payload says `web_search: "none"` and explains the difference, because calling a
+//! decomposition pass "Deep Research" would be the exact kind of overclaim the spec forbids.
+
+use crate::domain::{Chunk, Source};
+use crate::grounded::{self, Answer, AnswerOptions, Length, Style};
+use crate::retrieve;
+
+/// Upper bound on sub-questions. Each one costs a retrieval pass, and a brief with thirty
+/// sub-questions is a pile of fragments, not an investigation.
+pub const MAX_SUB_QUESTIONS: usize = 6;
+pub const DEFAULT_SUB_QUESTIONS: usize = 4;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubQuestion {
+    pub text: String,
+    /// Why this question was asked — "decomposed from the question", "from a term the sources
+    /// repeat". Shown to the user so the plan is auditable rather than magic.
+    pub origin: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct Section {
+    pub question: String,
+    pub origin: String,
+    pub answer: Answer,
+    /// `answered` when the answer rests on citations, `gap` when it does not.
+    pub status: &'static str,
+    /// Distinct sources cited in this section.
+    pub sources_cited: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Brief {
+    pub question: String,
+    pub sections: Vec<Section>,
+    pub gaps: Vec<String>,
+    pub sources_used: Vec<String>,
+    pub coverage: f64,
+    pub engine: String,
+}
+
+/// Split a question on the conjunctions people actually write. Deliberately mechanical: a
+/// "decomposition" that silently rewrote the question would be a paraphrase, and paraphrases are
+/// not evidence.
+fn split_question(question: &str) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let lower = question.to_ascii_lowercase();
+    let mut current = String::new();
+    let words: Vec<&str> = question.split_whitespace().collect();
+    let lower_words: Vec<&str> = lower.split_whitespace().collect();
+    for (i, word) in words.iter().enumerate() {
+        let bare = lower_words
+            .get(i)
+            .copied()
+            .unwrap_or("")
+            .trim_matches(|c: char| !c.is_alphanumeric());
+        if matches!(bare, "and" | "plus" | "also") && current.split_whitespace().count() >= 3 {
+            parts.push(current.trim().to_string());
+            current = String::new();
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+    }
+    if !current.trim().is_empty() {
+        parts.push(current.trim().to_string());
+    }
+    parts
+}
+
+/// Build the plan. `max` is clamped to `MAX_SUB_QUESTIONS`.
+///
+/// The first sub-question is always the question as asked — the brief must answer the actual
+/// question, not only its parts. The rest come from content words that the corpus actually
+/// contains (a term absent from every source would guarantee a gap, which is noise, not
+/// information) and from a comparison when the question asks for one.
+pub fn plan(question: &str, chunks: &[Chunk], max: usize) -> Vec<SubQuestion> {
+    let limit = max.clamp(1, MAX_SUB_QUESTIONS);
+    let asked = question.trim();
+    if asked.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![SubQuestion { text: asked.to_string(), origin: "the question as asked" }];
+
+    // Explicit conjunctions first: "X and Y" is two questions and the user is entitled to both.
+    for part in split_question(asked).into_iter().skip(1) {
+        if out.len() >= limit {
+            return out;
+        }
+        if part.split_whitespace().count() >= 3 {
+            out.push(SubQuestion { text: part, origin: "decomposed from the question" });
+        }
+    }
+
+    // A comparison is a real sub-question even when the wording is not a conjunction.
+    let lower = asked.to_ascii_lowercase();
+    if (lower.contains(" vs ") || lower.contains(" versus ") || lower.starts_with("compare"))
+        && out.len() < limit
+    {
+        out.push(SubQuestion {
+            text: format!("what does each source say about {}", first_terms(asked, 3).join(" ")),
+            origin: "asked as a comparison",
+        });
+    }
+
+    // Then the terms the notebook actually repeats: they are what the sources are about.
+    let mut doc_freq: Vec<(String, usize)> = Vec::new();
+    for term in retrieve::terms(asked) {
+        let df = chunks.iter().filter(|c| c.text.to_ascii_lowercase().contains(&term)).count();
+        if df > 0 {
+            doc_freq.push((term, df));
+        }
+    }
+    doc_freq.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    for (term, _) in doc_freq {
+        if out.len() >= limit {
+            break;
+        }
+        let text = format!("what do the sources say about {}", term);
+        if !out.iter().any(|q| q.text.eq_ignore_ascii_case(&text)) {
+            out.push(SubQuestion { text, origin: "from a term the sources repeat" });
+        }
+    }
+    out
+}
+
+fn first_terms(text: &str, n: usize) -> Vec<String> {
+    retrieve::terms(text).into_iter().take(n).collect()
+}
+
+/// Run the plan with the same grounded answerer chat uses, so every quotation in the brief has
+/// passed the same citation checks as a chat answer.
+pub fn run(
+    question: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    max_sub_questions: usize,
+) -> Brief {
+    let questions = plan(question, chunks, max_sub_questions);
+    let opts = AnswerOptions { style: Style::Detailed, length: Length::Standard };
+    let mut sections: Vec<Section> = Vec::new();
+    let mut gaps: Vec<String> = Vec::new();
+    let mut used: Vec<String> = Vec::new();
+
+    for sub in questions {
+        let answer = grounded::answer_with(&sub.text, chunks, sources, opts);
+        let mut cited: Vec<String> = Vec::new();
+        for c in &answer.citations {
+            if !cited.contains(&c.source_id) {
+                cited.push(c.source_id.clone());
+            }
+            if !used.contains(&c.source_title) {
+                used.push(c.source_title.clone());
+            }
+        }
+        // "Answered" means it rests on evidence, not that it produced text: an abstention has
+        // text too, and calling that an answer is exactly the failure this product exists to avoid.
+        let answered = !answer.abstained && !answer.citations.is_empty();
+        if !answered {
+            gaps.push(sub.text.clone());
+        }
+        sections.push(Section {
+            question: sub.text,
+            origin: sub.origin.to_string(),
+            status: if answered { "answered" } else { "gap" },
+            sources_cited: cited.len(),
+            answer,
+        });
+    }
+
+    let total = sections.len().max(1);
+    let answered = sections.iter().filter(|s| s.status == "answered").count();
+    let coverage = answered as f64 / total as f64;
+    used.sort();
+
+    Brief {
+        question: question.trim().to_string(),
+        sections,
+        gaps,
+        sources_used: used,
+        coverage,
+        engine: "extractive · notebook-scoped plan".to_string(),
+    }
+}
+
+/// The brief as Markdown, for the export path. Every section keeps its citations; the gaps are
+/// listed last and are the point of the document as much as the answers are.
+pub fn to_markdown(brief: &Brief) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# Research brief: {}\n\n", brief.question));
+    out.push_str(&format!(
+        "_Forge · notebook-scoped brief · {} of {} sub-questions answered ({:.0}%) · engine: {}_\n\n",
+        brief.sections.iter().filter(|s| s.status == "answered").count(),
+        brief.sections.len(),
+        brief.coverage * 100.0,
+        brief.engine
+    ));
+    out.push_str(
+        "> Scope: this brief decomposes the question and answers each part from the notebook's \
+         sources. Forge performs **no web search** in this build — a sub-question the sources \
+         cannot support is listed as a gap, not filled from outside knowledge.\n\n",
+    );
+    for (i, s) in brief.sections.iter().enumerate() {
+        out.push_str(&format!("## {}. {}\n\n", i + 1, s.question));
+        out.push_str(&format!("_{} · {}_\n\n", s.origin, s.status));
+        if s.status == "gap" {
+            out.push_str(&format!("{}\n\n", s.answer.text.trim()));
+            continue;
+        }
+        out.push_str(s.answer.text.trim());
+        out.push_str("\n\n### Evidence\n\n");
+        for c in &s.answer.citations {
+            out.push_str(&format!(
+                "- **{}** · {} — “{}”\n",
+                c.source_title,
+                c.locator.human(),
+                c.quote.trim()
+            ));
+        }
+        out.push('\n');
+    }
+    if !brief.gaps.is_empty() {
+        out.push_str("## Gaps\n\n");
+        out.push_str("These parts of the question no passage in the notebook supports. Forge does not answer them from outside knowledge:\n\n");
+        for gap in &brief.gaps {
+            out.push_str(&format!("- {}\n", gap));
+        }
+        out.push('\n');
+    }
+    if !brief.sources_used.is_empty() {
+        out.push_str(&format!("Sources used: {}.\n", brief.sources_used.join("; ")));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::Locator;
+
+    fn source(id: &str, title: &str) -> Source {
+        Source {
+            id: id.into(),
+            notebook_id: "nb".into(),
+            title: title.into(),
+            kind: "text".into(),
+            status: "ready".into(),
+            ..Default::default()
+        }
+    }
+
+    fn corpus() -> (Vec<Chunk>, Vec<Source>) {
+        let chunks = vec![
+            Chunk {
+                id: "k1".into(),
+                source_id: "s1".into(),
+                notebook_id: "nb".into(),
+                ordinal: 0,
+                text: "Customer records are retained for thirty days after account closure.".into(),
+                locator: Locator::paragraph(0, 0, 70),
+            },
+            Chunk {
+                id: "k2".into(),
+                source_id: "s2".into(),
+                notebook_id: "nb".into(),
+                ordinal: 0,
+                text: "A legal hold suspends the retention window until the hold is released.".into(),
+                locator: Locator::paragraph(0, 0, 76),
+            },
+        ];
+        (chunks, vec![source("s1", "Policy"), source("s2", "Legal")])
+    }
+
+    #[test]
+    fn the_plan_answers_the_question_as_asked_first() {
+        let (chunks, _) = corpus();
+        let planned = plan("how long are customer records retained", &chunks, 4);
+        assert_eq!(planned[0].text, "how long are customer records retained");
+        assert_eq!(planned[0].origin, "the question as asked");
+        assert!(planned.len() <= 4);
+        // Every later sub-question is labelled with where it came from.
+        for q in planned.iter().skip(1) {
+            assert!(!q.origin.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_conjunction_becomes_two_questions_and_a_comparison_gets_its_own() {
+        let (chunks, _) = corpus();
+        let planned = plan("how long are customer records retained and what does a legal hold do", &chunks, 6);
+        assert!(
+            planned.iter().any(|q| q.text.contains("what does a legal hold do")),
+            "{:?}",
+            planned.iter().map(|q| &q.text).collect::<Vec<_>>()
+        );
+        let cmp = plan("retention vs legal hold", &chunks, 6);
+        assert!(cmp.iter().any(|q| q.origin == "asked as a comparison"), "{:?}", cmp);
+    }
+
+    #[test]
+    fn terms_absent_from_every_source_are_not_planned_into_a_guaranteed_gap() {
+        let (chunks, _) = corpus();
+        let planned = plan("retention blockchain regulation", &chunks, 6);
+        // The question as asked is kept verbatim (that is the user's own words), but no *derived*
+        // sub-question is built from a term the notebook has never seen: that would guarantee a
+        // gap and add nothing.
+        assert!(
+            !planned.iter().skip(1).any(|q| q.text.contains("blockchain") || q.text.contains("regulation")),
+            "a term no source contains cannot be researched from the notebook: {:?}",
+            planned.iter().map(|q| &q.text).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn the_plan_is_capped() {
+        let (chunks, _) = corpus();
+        let capped = plan("customer records retention legal hold account closure policy", &chunks, 99);
+        assert!(capped.len() <= MAX_SUB_QUESTIONS);
+        assert_eq!(plan("", &chunks, 3).len(), 0, "an empty question plans nothing");
+    }
+
+    #[test]
+    fn every_answered_section_carries_citations_and_unsupported_parts_become_gaps() {
+        let (chunks, sources) = corpus();
+        let brief = run("how long are customer records retained", &chunks, &sources, 4);
+        assert!(!brief.sections.is_empty());
+        let answered: Vec<&Section> = brief.sections.iter().filter(|s| s.status == "answered").collect();
+        assert!(!answered.is_empty(), "{:?}", brief.sections.iter().map(|s| (&s.question, s.status)).collect::<Vec<_>>());
+        for s in answered {
+            assert!(!s.answer.citations.is_empty());
+            assert!(s.sources_cited >= 1);
+        }
+        // The gap list is derived from the sections, not maintained separately.
+        let gap_count = brief.sections.iter().filter(|s| s.status == "gap").count();
+        assert_eq!(brief.gaps.len(), gap_count);
+        assert!(brief.coverage > 0.0 && brief.coverage <= 1.0);
+        assert!(brief.sources_used.contains(&"Policy".to_string()));
+    }
+
+    #[test]
+    fn a_question_the_sources_cannot_answer_is_all_gaps_and_says_so() {
+        let (chunks, sources) = corpus();
+        let brief = run("what is the refund policy for gift cards", &chunks, &sources, 3);
+        assert!(brief.sections.iter().all(|s| s.status == "gap"), "{:?}", brief.sections.iter().map(|s| s.status).collect::<Vec<_>>());
+        assert_eq!(brief.coverage, 0.0);
+        let md = to_markdown(&brief);
+        assert!(md.contains("Gaps"), "{}", md);
+        assert!(md.contains("no web search"), "the scope line is present: {}", md);
+    }
+
+    #[test]
+    fn the_markdown_keeps_quotes_locators_and_the_scope_statement() {
+        let (chunks, sources) = corpus();
+        let brief = run("how long are customer records retained", &chunks, &sources, 4);
+        let md = to_markdown(&brief);
+        assert!(md.starts_with("# Research brief: how long are customer records retained"));
+        assert!(md.contains("### Evidence"));
+        assert!(md.contains("— “"), "quotes are marked as quotes: {}", md);
+        assert!(md.contains("paragraph 0"), "locators survive: {}", md);
+        assert!(md.contains("no web search"));
+    }
+}
+```
+
 ## `crates/forge-core/src/retrieve.rs`
 
 ```rust
@@ -23779,6 +24421,8 @@ pub struct Db {
     pub jobs: Vec<Job>,
     /// Share links. Only token hashes are stored (see `auth.rs`).
     pub shares: Vec<crate::auth::ShareGrant>,
+    /// User preferences. Stored here so a backup carries them and a restart keeps them.
+    pub settings: crate::settings::Settings,
 }
 
 /// `Clone` is cheap and shares the same in-memory database (`Arc<Mutex<Db>>`). It exists so a
@@ -23935,6 +24579,7 @@ fn encode_db(db: &Db) -> Value {
     m.insert("tables".into(), Value::Arr(db.tables.iter().map(table_json).collect()));
     m.insert("jobs".into(), Value::Arr(db.jobs.iter().map(job_json).collect()));
     m.insert("shares".into(), Value::Arr(db.shares.iter().map(share_json).collect()));
+    m.insert("settings".into(), db.settings.to_json());
     Value::Obj(m)
 }
 
@@ -23951,6 +24596,11 @@ fn decode_db(text: &str) -> Option<Db> {
         tables: arr("tables").iter().filter_map(table_from).collect(),
         jobs: arr("jobs").iter().map(job_from).collect(),
         shares: arr("shares").iter().map(share_from).collect(),
+        // A database written before settings existed decodes to the documented defaults.
+        settings: v
+            .get("settings")
+            .map(crate::settings::Settings::from_json)
+            .unwrap_or_default(),
     })
 }
 
@@ -28746,6 +29396,18 @@ fn journey_j_share_links_are_scoped_by_role_and_revocable() {
     let (st, _) = s.json_h("POST", &format!("/api/notebooks/{}/chat", nb_b), Some(obj(&[("question", Value::from("when"))])), &viewer_hdr);
     assert_eq!(st, 403);
 
+    // Settings and storage are instance-wide, so a share grant — even an editor's — cannot
+    // read or rewrite them. Otherwise one recipient could repaint every other operator's UI.
+    let (st, _) = s.json_h("GET", "/api/settings", None, &viewer_hdr);
+    assert_eq!(st, 403, "a share may not read the operator's settings");
+    let (st, _) = s.json_h("GET", "/api/storage", None, &viewer_hdr);
+    assert_eq!(st, 403, "a share may not read instance-wide storage");
+    let (st, _) = s.json_h("PATCH", "/api/settings", Some(obj(&[("theme", Value::from("light"))])), &viewer_hdr);
+    assert_eq!(st, 403);
+    let (st, owner_settings) = s.json_h("GET", "/api/settings", None, &owner_hdr);
+    assert_eq!(st, 200, "{:?}", owner_settings);
+    assert_eq!(owner_settings.str_of("theme"), Some("dark"), "the refused write left the setting alone");
+
     let (st, answer) = s.json_h(
         "POST",
         &format!("/api/notebooks/{}/chat", nb_a),
@@ -30053,6 +30715,138 @@ fn research_briefs_decompose_the_question_and_name_their_gaps() {
     assert_eq!(research.str_of("web_search"), Some("none"));
     assert_eq!(research.str_of("fast_research"), Some("unsupported: needs a search provider"));
     assert_eq!(research.str_of("deep_research"), Some("unsupported: needs a search provider and a multi-step web task"));
+}
+
+#[test]
+fn settings_persist_across_a_restart_and_storage_is_measured() {
+    let dir = tempdir("settings");
+    let s = Server::start(dir.clone());
+
+    // Defaults are documented, not accidental.
+    let (st, settings) = s.json("GET", "/api/settings", None);
+    assert_eq!(st, 200);
+    assert_eq!(settings.str_of("theme"), Some("dark"));
+    assert_eq!(settings.str_of("default_style"), Some("evidence"));
+    assert_eq!(settings.get("hide_archived"), Some(&Value::Bool(true)));
+
+    // A partial update changes exactly what it names.
+    let (st, updated) = s.json(
+        "PATCH",
+        "/api/settings",
+        Some(obj(&[
+            ("theme", Value::from("light")),
+            ("font_scale", Value::from(1.15)),
+            ("reduced_motion", Value::Bool(true)),
+            ("high_contrast", Value::Bool(true)),
+            ("default_length", Value::from("thorough")),
+            ("library_sort", Value::from("title")),
+            ("hide_archived", Value::Bool(false)),
+        ])),
+    );
+    assert_eq!(st, 200, "{:?}", updated);
+    assert_eq!(updated.str_of("theme"), Some("light"));
+    assert_eq!(updated.get("font_scale").and_then(|v| v.as_f64()), Some(1.15));
+    assert_eq!(updated.get("reduced_motion"), Some(&Value::Bool(true)));
+    assert_eq!(updated.get("high_contrast"), Some(&Value::Bool(true)));
+    assert_eq!(updated.str_of("default_length"), Some("thorough"));
+    assert_eq!(updated.str_of("library_sort"), Some("title"));
+    assert_eq!(updated.get("hide_archived"), Some(&Value::Bool(false)));
+    // The field the patch did not name is untouched.
+    assert_eq!(updated.str_of("default_style"), Some("evidence"));
+
+    // A bad value is named, refused, and does not poison the good ones in the same request.
+    let (st, err) = s.json(
+        "PATCH",
+        "/api/settings",
+        Some(obj(&[("theme", Value::from("neon")), ("font_scale", Value::from(1.2))])),
+    );
+    assert_eq!(st, 422, "{:?}", err);
+    assert_eq!(err.str_of("code"), Some("bad_setting"));
+    let rejected = err.get("rejected").and_then(|r| r.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(rejected.len(), 1);
+    assert!(rejected[0].as_str().unwrap_or("").contains("theme"));
+    assert_eq!(
+        err.get("settings").and_then(|s| s.str_of("theme")),
+        Some("light"),
+        "the refused request returns the settings that are actually stored"
+    );
+    let (_, after) = s.json("GET", "/api/settings", None);
+    assert_eq!(after.get("font_scale").and_then(|v| v.as_f64()), Some(1.2), "the good field applied");
+    assert_eq!(after.str_of("theme"), Some("light"));
+
+    // Storage is measured from the directory, so it moves when bytes are written.
+    let (st, empty_usage) = s.json("GET", "/api/storage", None);
+    assert_eq!(st, 200);
+    let empty_total = empty_usage.get("total_bytes").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    assert!(empty_total > 0.0, "db.json exists, so usage is not zero: {:?}", empty_usage);
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Sized"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Notes")),
+            ("text", Value::from("A sentence long enough to be indexed as a passage of its own.")),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let (_, usage) = s.json("GET", "/api/storage", None);
+    assert!(usage.get("total_bytes").and_then(|v| v.as_f64()).unwrap_or(0.0) > empty_total);
+    let records = usage.get("records").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(records.get("notebooks").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(records.get("sources").and_then(|v| v.as_f64()), Some(1.0));
+    assert!(records.get("chunks").and_then(|v| v.as_f64()).unwrap_or(0.0) >= 1.0);
+    assert!(usage.str_of("note").unwrap_or("").contains("measured"));
+
+    // Settings are part of the database, so a restart keeps them — and the backup carries them.
+    let s2 = Server::start(dir.clone());
+    let (_, persisted) = s2.json("GET", "/api/settings", None);
+    assert_eq!(persisted.str_of("theme"), Some("light"));
+    assert_eq!(persisted.str_of("library_sort"), Some("title"));
+    assert_eq!(persisted.get("high_contrast"), Some(&Value::Bool(true)));
+    let (st, backup) = s2.json("POST", "/api/backup", None);
+    assert_eq!(st, 201, "{:?}", backup);
+    assert!(backup.str_of("name").unwrap_or("").ends_with(".json"));
+    let (_, usage2) = s2.json("GET", "/api/storage", None);
+    assert!(
+        usage2.get("backup_count").and_then(|v| v.as_f64()).unwrap_or(0.0) >= 1.0,
+        "the backup is visible in the usage report: {:?}",
+        usage2
+    );
+
+    // Reset returns the documented defaults, and it is persisted like any other write.
+    let (st, reset) = s2.json("DELETE", "/api/settings", None);
+    assert_eq!(st, 200, "{:?}", reset);
+    assert_eq!(reset.str_of("theme"), Some("dark"));
+    assert_eq!(reset.str_of("library_sort"), Some("recent"));
+    assert_eq!(reset.get("font_scale").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(reset.get("hide_archived"), Some(&Value::Bool(true)));
+    let (_, after_reset) = s2.json("GET", "/api/settings", None);
+    assert_eq!(after_reset.str_of("theme"), Some("dark"));
+    assert_eq!(after_reset.get("reduced_motion"), Some(&Value::Bool(false)));
+}
+
+#[test]
+fn the_capability_page_names_what_settings_cannot_do() {
+    let dir = tempdir("caps-settings");
+    let s = Server::start(dir.clone());
+    let (st, caps) = s.json("GET", "/api/capabilities", None);
+    assert_eq!(st, 200);
+    let settings = caps.get("settings").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(settings.str_of("status"), Some("partial"));
+    let unsupported = settings.get("unsupported").cloned().unwrap_or(Value::Bool(false));
+    for key in ["interface_language", "model_selection", "server_side_fonts", "per_user_settings"] {
+        assert!(
+            unsupported.str_of(key).map(|v| !v.is_empty()).unwrap_or(false),
+            "capabilities must say why {} is not offered: {:?}",
+            key,
+            unsupported
+        );
+    }
+    let usage = caps.get("usage").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(usage.str_of("status"), Some("supported"));
 }
 ```
 
@@ -34196,7 +34990,7 @@ Last updated: 2026-11-01 (access control + share links, crash-resilient ingestio
 timed transcripts, discovery from seed pages, slide editing and artifact export, library
 search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export,
 RSS/Atom feeds, GitHub repositories, PPTX and PDF export, instruction-like source text,
-data-table artifacts, notebook-scoped research briefs).
+data-table artifacts, notebook-scoped research briefs, persisted settings + measured storage).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -34215,8 +35009,11 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **301 passing, 0 failing** (26 `bininspect` + 235 lib + 35 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **169 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **310 passing, 0 failing** (26 `bininspect` + 242 lib + 37 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **191 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Settings (§7.17) | `GET/PATCH/DELETE /api/settings` stores theme (dark/light/system), text size 90–140 %, reduced motion, high contrast, default answer style/length, library sort and hide-archived in `db.json`. They survive a restart and travel inside a backup; a database written before settings existed decodes to the documented defaults. A `PATCH` that names a bad value returns **422** listing the refused fields *and still applies the good ones*; the panel adopts the server's state and names the rest. Settings and usage are **owner-only** (`manage`): a share link gets 403 rather than repainting everyone else's UI | `settings` (7 unit tests) + e2e `settings_persist_across_a_restart_and_storage_is_measured`, Journey J + 22 UI assertions |
+| Appearance applied, not just stored | theme → `data-theme`, text size → `--font-scale` on the root font size, reduced motion → `html[data-motion="reduced"]` (animations and transitions collapse, the spinner stops), high contrast → `html[data-contrast="high"]` (stronger borders and muted text). The panel previews each change before saving | `apps/web/styles.css`, `applyAppearance`, UI smoke |
+| Storage / usage | `GET /api/storage` **measures** the data directory: `db.json`, retained `blobs/`, rolling `backups/`, plus notebook/source/passage/artifact/conversation counts and a `note` saying it is measured. `POST /api/backup` remains the way to write one | `settings::Usage`, `api::storage_usage` + e2e |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -34361,7 +35158,7 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 301 tests: 235 lib + 35 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 310 tests: 242 lib + 37 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -34369,10 +35166,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 169 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 191 assertions
 ```
 
-## Unit tests (188) — exact names from `cargo test --lib -- --list`
+## Unit tests (242) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -34473,7 +35270,7 @@ them, because it is unreachable.
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
 
-## End-to-end HTTP tests (15, real sockets)
+## End-to-end HTTP tests (37, real sockets)
 
 | Test | Proves |
 |---|---|
@@ -34485,9 +35282,11 @@ them, because it is unreachable.
 | `chat_style_and_length_are_effective_and_validated` | `settings` echoed; brief → 1 citation; detailed shows per-quote source + locator; concise and detailed cite the same passages; unknown style/length → 422 and nothing stored |
 | `chat_streams_frames_and_only_persists_when_delivery_completes` | NDJSON frames in order (`start` → `delta`* → `citations` → `done`); every delta is a substring of the final answer, in order; `conversation_id` on a second stream appends instead of starting a new conversation; **a stream the client hangs up on is not stored** (message count unchanged after the abort); an invalid style returns `422` without opening a stream |
 | `media_metadata_is_read_without_decoding_frames` | `sample.mp4` → mp4, ~6200 ms, avc1 320×240 @ 10 fps, `decoded_frames: 0`, `transcript: "not produced"`; Matroska bytes → `matroska` with **no** invented tracks; empty body 400; GET 404 |
+| `settings_persist_across_a_restart_and_storage_is_measured` | defaults documented (`dark`/`evidence`/`hide_archived`); a partial `PATCH` changes exactly what it names and leaves the rest; `theme: "neon"` → **422 `bad_setting`** listing one refused field while `font_scale` in the same request is still stored; the 422 body carries the settings that are actually stored; `GET /api/storage` is measured (bytes grow after a source is added, record counts match) and says so; a restarted server returns the saved settings; `POST /api/backup` shows up in `backup_count`; `DELETE /api/settings` restores the defaults and persists that |
+| `the_capability_page_names_what_settings_cannot_do` | `settings.status = "partial"` with a non-empty reason for interface language, model selection, server-side fonts, keyboard shortcuts and per-user settings; `usage.status = "supported"` |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
-## UI assertions (29, jsdom + live server)
+## UI assertions (191, jsdom + live server)
 
 Library rendering · engine badge from `/api/capabilities` · notebook creation via the
 form · three-pane workspace · paste-import · source list with passage counts ·
@@ -34768,6 +35567,19 @@ comparison used for every credential check.
 ### `export` (7)
 Markdown for flashcards/slides/report payloads, filename slugs, and the SVG path; PPTX/PDF are
 absent from the module on purpose.
+
+## Settings, appearance and storage (§7.17)
+
+| Layer | Tests | Proves |
+|---|---|---|
+| unit (`settings::tests`, 7) | theme/style/length/sort validation · `from_json` on `Null` and on a partial object → defaults · `apply` rejects one field and applies the rest · font scale rounded to 2 dp · `Usage::total_bytes` |
+| e2e (2) | see the two rows above — persistence across restart, measured usage, 422 contract, reset, capability honesty |
+| e2e (Journey J) | a viewer share gets **403** on `GET /api/settings`, `GET /api/storage` and `PATCH /api/settings`; the owner still reads `theme: dark` afterwards, so the refused write changed nothing |
+| UI (22) | header settings control · panel opens · theme repaints immediately · text size sets `--font-scale` and shows its percentage · reduced motion / high contrast set root attributes · defaults saved · storage panel shows measured bytes and says they are measured · the panel names what the build does not offer · save reports success · server holds the values · panel closes · library exposes an archived toggle · a new conversation starts from the saved default length |
+
+What is **not** tested here: a real browser rendering (jsdom has no layout, so the CSS
+rules are asserted as root attributes and variables, not as painted pixels), and
+high-contrast/reduced-motion on an operating system that requests them natively.
 
 ## Not covered (honest gaps)
 
@@ -35165,6 +35977,40 @@ Not implemented, and not claimed:
 * No budget or cancellation controls beyond `max_sub_questions` (capped at 6) and the request
   itself: a brief is a single synchronous call, so there is nothing to cancel mid-way. No
   intermediate progress state, no cross-notebook scope, no scheduled or follow-up research.
+
+## Settings, appearance and storage (§7.17)
+
+* Settings are **per data directory**, not per account or per share link. There is one operator
+  here: a share link cannot read or change them (`PATCH`/`DELETE /api/settings` and
+  `GET /api/storage` are `manage`, i.e. owner-only), and two people using the same server share
+  the same preferences. `caps.settings.unsupported.per_user_settings` says so.
+* **No interface language.** Nothing in the build is localised, so a language selector would be a
+  dead control that implies translation work that has not happened.
+* **No model selection.** Answers are extracted from the sources; no model runs, so there is no
+  model to pick. Provider configuration (`SET-01`) stores keys for a future model-backed engine and
+  reports them as unavailable in this build.
+* **No font picker for the PDF export.** The exporter uses the base-14 fonts and labels the
+  document that way; choosing a typeface would change nothing.
+* **No keyboard shortcut map.** Navigation is native focus order plus the browser's own
+  shortcuts. `caps.settings.unsupported.keyboard_shortcuts` says so.
+* Appearance is applied through root attributes and one CSS variable (`--font-scale` on the body
+  font size, `html[data-theme]`, `html[data-motion]`, `html[data-contrast]`). This was verified in
+  jsdom as attributes and computed settings, **not** in a real browser doing layout: no pixel
+  comparison exists, and no test covers an operating system that itself requests reduced motion
+  (the app only reacts to the stored preference).
+* "Storage used" is **measured**, not estimated: it stats `db.json`, the retained blobs and the
+  rolling backups, and counts notebook/source/passage/artifact/conversation records. It does not
+  break the number down per notebook, does not include files other applications put in that
+  directory, and does not predict growth.
+* Backups are written into the data directory. They are not uploaded anywhere and there is no
+  download endpoint for a backup file — the documented way to move one is to copy the directory.
+  There is no schedule, no retention policy beyond what `store::backup` already prunes, and no
+  restore-from-file command.
+* Deletion is per notebook and immediate (sources, notes, artifacts, conversations). There is no
+  undelete, no trash, and no per-source deletion audit trail.
+* `PATCH /api/settings` is deliberately not atomic: a request with one bad value stores the good
+  ones and returns 422 with the refused field names. A client that assumes "422 means nothing
+  changed" would misreport the state; the UI re-reads the settings from the error body.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -39496,7 +40342,10 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-22 | user-supplied timed transcript (`.vtt`/`.srt`) with timecode locators | documented (transcript import for a captioned video) | **partial (honest)** — the user supplies captions; Forge never downloads media or captions and has no frame analysis. Video/audio/image uploads as sources are refused with a reason | `ingest::transcript`, `ingest::unsupported_media` | 4 unit + e2e Journey E + 5 UI |
 | DISC-01 | discovery of further sources | documented (web search) | **partial (honest)** — `POST /api/discovery/crawl` lists the outbound links of seed pages the *user* chose, with anchor, host and provenance; no search engine is queried and the payload says `searched_engine: null` | `discovery.rs`, `api::crawl`, UI discovery panel | 3 unit + e2e Journey I + 6 UI |
 | SET-01 | provider config (write-only keys, 0600) | documented | done | `providers.rs` | e2e |
-| SET-02 | theme, language, accessibility settings | documented | partial (theme only) | `app.js` | UI smoke |
+| SET-02 | theme, accessibility settings | documented | **partial (honest)** — dark / light / follow-system theme, text size 90–140 %, reduced motion and high contrast applied through root attributes and CSS variables; **no interface language** (nothing is localised), no font picker for PDF export | `settings.rs`, `GET/PATCH/DELETE /api/settings`, `app.js` settings panel, `styles.css` | 7 unit + e2e + 12 UI |
+| SET-03 | defaults for new conversations and the library | documented (chat style, response length) | **done** — `default_style`/`default_length` seed a new conversation, `library_sort`/`hide_archived` seed the library; a browser-level choice already made still wins and the panel says so | `settings.rs`, `app.js` (`applyDefaults`) | e2e + 2 UI |
+| SET-04 | storage, usage and backup (§7.17) | documented (storage used, deletion) | **partial (honest)** — `GET /api/storage` reports *measured* bytes (db.json, retained blobs, rolling backups) and record counts; `POST /api/backup` writes a backup into the data directory; deletion is per notebook and immediate. No scheduled export, no cloud, no per-user usage | `settings::Usage`, `api::storage_usage` | e2e |
+| SET-05 | privacy, connector permissions, keyboard shortcuts | documented | **partial (honest)** — the data directory is the only outbound-free store (no telemetry, no analytics, no account); connector permissions are the share roles (`SHARE-01`); **there is no shortcut map** | `api.rs` capabilities `settings.unsupported`, `auth.rs` | e2e |
 | BIN-01 | APK / PE structural analysis | not in reference (Forge extra) | done | `bininspect` | 31 tests |
 ```
 
@@ -42231,6 +43080,59 @@ async function main() {
   check("sort offers recent, title, created and sources", ["recent", "title", "created", "sources"].every((v) => sortValues.includes(v)),
     sortValues.join(","));
 
+  // --- settings (7.17): appearance and defaults are applied, and stored on the server
+  check("header exposes a settings control", !!$("#settingsBtn"));
+  $("#settingsBtn").click();
+  await wait(400);
+  check("settings panel opens", !!$("#settingsPanel"));
+  check("panel offers theme, text size, motion and contrast",
+    !!$("#setTheme") && !!$("#setFontScale") && !!$("#setReducedMotion") && !!$("#setHighContrast"));
+  const rootEl = window.document.documentElement;
+  const fire = (sel, type) => {
+    const el = $(sel);
+    el.dispatchEvent(new window.Event(type, { bubbles: true }));
+  };
+  $("#setTheme").value = "light";
+  fire("#setTheme", "change");
+  await wait(50);
+  check("theme choice repaints the app immediately", rootEl.dataset.theme === "light", rootEl.dataset.theme);
+  $("#setFontScale").value = "1.2";
+  fire("#setFontScale", "input");
+  check("text size drives the root font scale",
+    rootEl.style.getPropertyValue("--font-scale") === "1.2", rootEl.style.getPropertyValue("--font-scale"));
+  check("text size is shown as a percentage", $("#setFontScaleValue").textContent === "120%", $("#setFontScaleValue").textContent);
+  $("#setReducedMotion").checked = true;
+  fire("#setReducedMotion", "change");
+  check("reduced motion sets a root attribute", rootEl.dataset.motion === "reduced", rootEl.dataset.motion);
+  $("#setHighContrast").checked = true;
+  fire("#setHighContrast", "change");
+  check("high contrast sets a root attribute", rootEl.dataset.contrast === "high", rootEl.dataset.contrast);
+  $("#setDefaultLength").value = "thorough";
+  fire("#setDefaultLength", "change");
+  $("#setLibrarySort").value = "title";
+  fire("#setLibrarySort", "change");
+  await wait(400);
+  check("storage panel measures real bytes", /(B|KB|MB)/.test($("#storageUsage")?.textContent || ""),
+    $("#storageUsage")?.textContent);
+  check("storage says the number is measured locally",
+    /measured from the data directory/.test($("#storageUsage")?.textContent || ""), $("#storageUsage")?.textContent);
+  $("#saveSettings").click();
+  await wait(600);
+  check("saving reports success", /Saved/.test($("#settingsStatus")?.textContent || ""), $("#settingsStatus")?.textContent);
+  const savedSettings = await (await window.fetch("/api/settings")).json();
+  check("theme persisted on the server", savedSettings.theme === "light", JSON.stringify(savedSettings));
+  check("text size persisted on the server", savedSettings.font_scale === 1.2, String(savedSettings.font_scale));
+  check("reduced motion persisted on the server", savedSettings.reduced_motion === true);
+  check("high contrast persisted on the server", savedSettings.high_contrast === true);
+  check("default length persisted on the server", savedSettings.default_length === "thorough", savedSettings.default_length);
+  check("panel says what the build does not offer",
+    /not offered: model selection/.test($("#settingsPanel")?.textContent || ""),
+    ($("#settingsPanel")?.textContent || "").slice(-400));
+  $("#settingsPanel").closest(".overlay").querySelector("header button").click();
+  await wait(200);
+  check("settings panel closes", !$("#settingsPanel"));
+  check("library offers an archived toggle", !!$("#archivedToggle"));
+
   // --- create a notebook through the form
   const form = $(".new-card form");
   form.querySelector('[name="title"]').value = "UI smoke notebook";
@@ -42338,6 +43240,8 @@ async function main() {
   // --- chat presentation controls are real (they change the answer)
   check("composer exposes a style control", !!$("#chatStyle") && !!$("#chatStyle").getAttribute("aria-label"));
   check("composer exposes a length control", !!$("#chatLength"));
+  check("a new conversation starts from the saved default length", $("#chatLength").value === "thorough",
+    $("#chatLength").value);
   const setLen = (v) => {
     const sel = $("#chatLength");
     sel.value = v;

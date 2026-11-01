@@ -363,3 +363,37 @@ Not implemented, and not claimed:
 * No budget or cancellation controls beyond `max_sub_questions` (capped at 6) and the request
   itself: a brief is a single synchronous call, so there is nothing to cancel mid-way. No
   intermediate progress state, no cross-notebook scope, no scheduled or follow-up research.
+
+## Settings, appearance and storage (§7.17)
+
+* Settings are **per data directory**, not per account or per share link. There is one operator
+  here: a share link cannot read or change them (`PATCH`/`DELETE /api/settings` and
+  `GET /api/storage` are `manage`, i.e. owner-only), and two people using the same server share
+  the same preferences. `caps.settings.unsupported.per_user_settings` says so.
+* **No interface language.** Nothing in the build is localised, so a language selector would be a
+  dead control that implies translation work that has not happened.
+* **No model selection.** Answers are extracted from the sources; no model runs, so there is no
+  model to pick. Provider configuration (`SET-01`) stores keys for a future model-backed engine and
+  reports them as unavailable in this build.
+* **No font picker for the PDF export.** The exporter uses the base-14 fonts and labels the
+  document that way; choosing a typeface would change nothing.
+* **No keyboard shortcut map.** Navigation is native focus order plus the browser's own
+  shortcuts. `caps.settings.unsupported.keyboard_shortcuts` says so.
+* Appearance is applied through root attributes and one CSS variable (`--font-scale` on the body
+  font size, `html[data-theme]`, `html[data-motion]`, `html[data-contrast]`). This was verified in
+  jsdom as attributes and computed settings, **not** in a real browser doing layout: no pixel
+  comparison exists, and no test covers an operating system that itself requests reduced motion
+  (the app only reacts to the stored preference).
+* "Storage used" is **measured**, not estimated: it stats `db.json`, the retained blobs and the
+  rolling backups, and counts notebook/source/passage/artifact/conversation records. It does not
+  break the number down per notebook, does not include files other applications put in that
+  directory, and does not predict growth.
+* Backups are written into the data directory. They are not uploaded anywhere and there is no
+  download endpoint for a backup file — the documented way to move one is to copy the directory.
+  There is no schedule, no retention policy beyond what `store::backup` already prunes, and no
+  restore-from-file command.
+* Deletion is per notebook and immediate (sources, notes, artifacts, conversations). There is no
+  undelete, no trash, and no per-source deletion audit trail.
+* `PATCH /api/settings` is deliberately not atomic: a request with one bad value stores the good
+  ones and returns 422 with the refused field names. A client that assumes "422 means nothing
+  changed" would misreport the state; the UI re-reads the settings from the error body.

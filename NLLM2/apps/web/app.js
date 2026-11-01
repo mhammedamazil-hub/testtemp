@@ -59,6 +59,8 @@ const api = {
       const err = new Error(msg);
       err.code = data && data.code;
       err.status = res.status;
+      err.data = data;                 // callers that need the structured refusal
+      err.rejected = (data && data.rejected) || [];
       if (res.status === 401) showTokenPrompt(msg);
       throw err;
     }
@@ -167,12 +169,16 @@ window.addEventListener("hashchange", route);
 // The library is a real list, not a wall of cards: it can be searched (title, description,
 // tag or the name of a source inside it), sorted, and each notebook carries the last time
 // something actually happened in it.
-const library = { q: "", sort: "recent" };
+const library = { q: "", sort: "recent", sortTouched: false };
 
 async function renderLibrary(app) {
   const params = new URLSearchParams();
   if (library.q) params.set("q", library.q);
   params.set("sort", library.sort);
+  // Archived notebooks are noise by default; the preference is stored on the server so it
+  // follows the operator, not the browser.
+  const hideArchived = prefs.value ? prefs.value.hide_archived !== false : false;
+  if (hideArchived) params.set("archived", "false");
   const data = await api.get("/notebooks" + (params.toString() ? `?${params}` : ""));
   state.notebooks = data.notebooks || [];
 
@@ -255,16 +261,29 @@ async function renderLibrary(app) {
   });
   const sort = h("select", {
     id: "librarySort", "aria-label": "Sort notebooks",
-    onchange: (e) => { library.sort = e.target.value; route(); },
+    onchange: (e) => { library.sort = e.target.value; library.sortTouched = true; route(); },
   }, [["recent", "recent activity"], ["title", "title"], ["created", "newest"], ["sources", "most sources"]]
     .map(([v, label]) => h("option", { value: v, selected: library.sort === v }, label)));
 
+  const archivedToggle = h("button", {
+    class: "ghost", id: "archivedToggle",
+    title: hideArchived ? "Archived notebooks are hidden" : "Archived notebooks are listed",
+    onclick: async () => {
+      try {
+        const saved = await saveSettings({ hide_archived: !hideArchived });
+        toast(saved.hide_archived ? "Archived notebooks hidden" : "Archived notebooks shown");
+        route();
+      } catch (e) { toast(e.message, "err"); }
+    },
+  }, hideArchived ? "Show archived" : "Hide archived");
+
   const toolbar = h("div", { class: "row-between", style: "margin:10px 0;gap:8px;flex-wrap:wrap" },
-    search, sort,
+    search, sort, archivedToggle,
+    h("button", { class: "ghost", id: "settingsBtnToolbar", title: "Appearance, defaults and storage", onclick: openSettings }, "⚙ Settings"),
     h("span", { class: "hint", id: "libraryCount" },
       library.q
         ? `${state.notebooks.length} matching${state.notebooks.length === 1 ? "" : "s"} of ${data.total ?? "?"}`
-        : `${state.notebooks.length} notebook${state.notebooks.length === 1 ? "" : "s"}`));
+        : `${state.notebooks.length} notebook${state.notebooks.length === 1 ? "" : "s"}${hideArchived ? " (archived hidden)" : ""}`));
 
   const body = library.q && !state.notebooks.length
     ? h("p", { class: "empty" }, `Nothing matches “${library.q}”. Search covers the title, description, tags and source titles.`)
@@ -1994,17 +2013,235 @@ async function showArtifact(id) {
   } catch (e) { toast(e.message, "err"); }
 }
 
-// ---------------------------------------------------------------- theme + boot
-document.getElementById("themeBtn").addEventListener("click", () => {
+// ---------------------------------------------------------------- settings
+// Preferences live on the server (db.json), so they survive a restart, follow the operator
+// rather than the browser profile, and travel inside a backup. A copy is cached in
+// localStorage purely to paint the right theme on the first frame after a reload.
+const prefs = { value: null };
+
+const THEMES = [["dark", "dark"], ["light", "light"], ["system", "follow the system"]];
+const STYLES = [["evidence", "evidence first"], ["concise", "concise"], ["detailed", "detailed"]];
+const LENGTHS = [["brief", "brief"], ["standard", "standard"], ["thorough", "thorough"]];
+const SORTS = [["recent", "recent activity"], ["title", "title"], ["created", "newest"], ["sources", "most sources"]];
+
+function applyAppearance(s) {
+  if (!s) return;
   const root = document.documentElement;
-  const next = root.dataset.theme === "light" ? "dark" : "light";
-  root.dataset.theme = next;
-  localStorage.setItem("forge.theme", next);
-});
-{
-  const saved = localStorage.getItem("forge.theme");
-  if (saved) document.documentElement.dataset.theme = saved;
+  if (s.theme === "system") delete root.dataset.theme;
+  else root.dataset.theme = s.theme;
+  const scale = Number(s.font_scale) || 1;
+  root.style.setProperty("--font-scale", String(scale));
+  root.dataset.motion = s.reduced_motion ? "reduced" : "full";
+  root.dataset.contrast = s.high_contrast ? "high" : "normal";
+  try {
+    localStorage.setItem("forge.appearance", JSON.stringify({
+      theme: s.theme, font_scale: scale,
+      reduced_motion: !!s.reduced_motion, high_contrast: !!s.high_contrast,
+    }));
+  } catch (e) { /* a full quota must not break the app */ }
 }
+
+/// Server defaults apply to a fresh browser; an explicit choice made here already wins.
+function applyDefaults(s) {
+  if (!s) return;
+  if (!localStorage.getItem("forge.style")) state.style = s.default_style || state.style;
+  if (!localStorage.getItem("forge.length")) state.length = s.default_length || state.length;
+  if (!library.sortTouched && s.library_sort) library.sort = s.library_sort;
+}
+
+async function loadSettings() {
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem("forge.appearance") || "null"); } catch (e) { cached = null; }
+  if (cached) applyAppearance(cached); // no flash of the wrong theme
+  try {
+    prefs.value = await api.get("/settings");
+  } catch (e) {
+    return; // the cached appearance stands; the panel will report the failure
+  }
+  applyAppearance(prefs.value);
+  applyDefaults(prefs.value);
+}
+
+/// One place that writes preferences. A 422 from the server is not a total failure: the
+/// fields it accepted are stored, so the UI adopts the server's answer and names the rest.
+async function saveSettings(patch) {
+  try {
+    const saved = await api.patch("/settings", patch);
+    prefs.value = saved;
+    applyAppearance(saved);
+    applyDefaults(saved);
+    return saved;
+  } catch (e) {
+    if (e.status === 422 && e.data && e.data.settings) {
+      prefs.value = e.data.settings;
+      applyAppearance(prefs.value);
+    }
+    throw e;
+  }
+}
+
+function fmtBytes(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+  return `${(v / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+async function openSettings() {
+  document.getElementById("settingsPanel")?.closest(".overlay")?.remove();
+  if (!prefs.value) {
+    try { prefs.value = await api.get("/settings"); } catch (e) { toast(e.message, "err"); return; }
+  }
+  const stored = prefs.value;
+  const draft = Object.assign({}, stored);
+
+  const select = (id, options, value, onchange) => h("select", { id, onchange },
+    options.map(([v, label]) => h("option", { value: v, selected: v === value }, label)));
+  const field = (label, control, hint) => h("div", { class: "note-item" },
+    h("label", { style: "font-weight:600;display:block;margin-bottom:4px" }, label),
+    control,
+    hint ? h("div", { class: "hint", style: "margin-top:4px" }, hint) : null);
+
+  const scaleOut = h("output", { id: "setFontScaleValue", style: "margin-left:8px" }, `${Math.round(draft.font_scale * 100)}%`);
+  const scale = h("input", {
+    type: "range", id: "setFontScale", min: "0.9", max: "1.4", step: "0.05",
+    value: String(draft.font_scale), "aria-label": "Text size",
+    oninput: (e) => {
+      draft.font_scale = Number(e.target.value);
+      scaleOut.textContent = `${Math.round(draft.font_scale * 100)}%`;
+      applyAppearance(draft); // preview now, persist on save
+    },
+  });
+
+  const theme = select("setTheme", THEMES, draft.theme, (e) => {
+    draft.theme = e.target.value; applyAppearance(draft);
+  });
+  const motion = h("input", { type: "checkbox", id: "setReducedMotion", checked: !!draft.reduced_motion,
+    onchange: (e) => { draft.reduced_motion = e.target.checked; applyAppearance(draft); },
+  });
+  const contrast = h("input", { type: "checkbox", id: "setHighContrast", checked: !!draft.high_contrast,
+    onchange: (e) => { draft.high_contrast = e.target.checked; applyAppearance(draft); },
+  });
+  const style = select("setDefaultStyle", STYLES, draft.default_style, (e) => { draft.default_style = e.target.value; });
+  const length = select("setDefaultLength", LENGTHS, draft.default_length, (e) => { draft.default_length = e.target.value; });
+  const sort = select("setLibrarySort", SORTS, draft.library_sort, (e) => { draft.library_sort = e.target.value; });
+  const hidden = h("input", { type: "checkbox", id: "setHideArchived", checked: !!draft.hide_archived,
+    onchange: (e) => { draft.hide_archived = e.target.checked; },
+  });
+
+  const errors = h("div", { class: "stack", id: "settingsErrors" });
+  const status = h("div", { class: "hint", id: "settingsStatus" }, "Preferences are stored with your data on this machine.");
+  const usage = h("div", { class: "stack", id: "storageUsage" }, h("p", { class: "empty" }, "measuring…"));
+
+  const paintUsage = (u) => usage.replaceChildren(
+    kvTable([
+      ["total", fmtBytes(u.total_bytes)],
+      ["database (db.json)", fmtBytes(u.database_bytes)],
+      ["source blobs", `${fmtBytes(u.blob_bytes)} in ${u.blob_count} file(s)`],
+      ["backups", `${fmtBytes(u.backup_bytes)} in ${u.backup_count} file(s)`],
+      ["records", `${u.records.notebooks} notebooks · ${u.records.sources} sources · ${u.records.chunks} passages · ${u.records.artifacts} artifacts · ${u.records.conversations} conversations`],
+    ]),
+    h("p", { class: "hint" }, u.note || ""));
+
+  const refreshUsage = async () => {
+    try { paintUsage(await api.get("/storage")); }
+    catch (e) { usage.replaceChildren(h("p", { class: "empty" }, e.message)); }
+  };
+  refreshUsage();
+
+  const save = h("button", { class: "primary", id: "saveSettings", onclick: async () => {
+    save.disabled = true;
+    errors.replaceChildren();
+    try {
+      const saved = await saveSettings(draft);
+      Object.assign(draft, saved);
+      status.textContent = "Saved.";
+      route();
+    } catch (e) {
+      const rejected = e.rejected || [];
+      if (rejected.length) {
+        errors.replaceChildren(h("div", { class: "note-item" },
+          h("strong", {}, "Not saved:"),
+          ...rejected.map((r) => h("div", { class: "hint" }, r)),
+          h("div", { class: "hint" }, "Every other field was saved.")));
+        status.textContent = "Some fields were refused; the panel now shows what is stored.";
+      } else {
+        errors.replaceChildren(h("p", { class: "empty" }, e.message));
+      }
+    } finally { save.disabled = false; }
+  } }, "Save preferences");
+
+  const reset = h("button", { class: "ghost", id: "resetSettings", onclick: async () => {
+    try {
+      const saved = await api.del("/settings");
+      prefs.value = saved;
+      Object.assign(draft, saved);
+      applyAppearance(saved);
+      applyDefaults(saved);
+      status.textContent = "Restored the documented defaults.";
+      overlay.remove();
+      await openSettings();
+      route();
+    } catch (e) { toast(e.message, "err"); }
+  } }, "Reset to defaults");
+
+  const backup = h("button", { class: "ghost", id: "backupNow", onclick: async () => {
+    try {
+      const r = await api.post("/backup", {});
+      status.textContent = `Backup written: ${r.name} (${fmtBytes(r.bytes)}).`;
+      refreshUsage();
+    } catch (e) { toast(e.message, "err"); }
+  } }, "Create a backup now");
+
+  const caps = state.caps || {};
+  const gaps = caps.settings && caps.settings.unsupported ? caps.settings.unsupported : {};
+  const unsupported = Object.entries(gaps).map(([k, v]) => h("div", { class: "hint" },
+    `not offered: ${k.replace(/_/g, " ")} — ${v}`));
+
+  const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    h("div", { class: "viewer", id: "settingsPanel" },
+      h("header", {},
+        h("div", { style: "flex:1" },
+          h("div", { style: "font-weight:600" }, "Settings"),
+          h("div", { class: "hint" }, "appearance, new-conversation defaults, library behaviour and measured storage")),
+        h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+      h("div", { class: "content stack" },
+        h("h2", { style: "font-size:15px;margin:0" }, "Appearance"),
+        field("Theme", theme, "“follow the system” uses your operating system's light/dark preference."),
+        field("Text size", h("div", { class: "row", style: "gap:8px" }, scale, scaleOut),
+          "Between 90% and 140%. Every pane scales; nothing is hidden or reflowed away."),
+        field("Reduce motion", motion, "Turns off the spinner and transition animations."),
+        field("High contrast", contrast, "Strengthens borders and muted text without leaving the theme."),
+        h("h2", { style: "font-size:15px;margin:12px 0 0" }, "Defaults for new conversations"),
+        field("Answer style", style, "How a grounded answer is laid out. It never changes which passages are cited."),
+        field("Response length", length, "How many passages an answer may cite."),
+        h("h2", { style: "font-size:15px;margin:12px 0 0" }, "Library"),
+        field("Sort notebooks by", sort),
+        field("Hide archived notebooks", hidden),
+        h("div", { class: "row", style: "gap:8px;flex-wrap:wrap" }, save, reset),
+        errors, status,
+        h("h2", { style: "font-size:15px;margin:12px 0 0" }, "Storage and usage"),
+        usage,
+        h("div", { class: "row", style: "gap:8px;flex-wrap:wrap" },
+          h("button", { class: "ghost", onclick: refreshUsage }, "Re-measure"),
+          backup,
+          h("a", { class: "badge", href: "#/capabilities", onclick: () => overlay.remove() }, "capabilities")),
+        h("p", { class: "hint" },
+          "Deleting a notebook deletes its sources, notes, artifacts and conversations from the database. Backups are written to the server's data directory and are never uploaded; copy that directory if you want to keep them elsewhere."),
+        unsupported.length ? h("div", { class: "note-item" }, h("strong", {}, "What this build does not offer"), ...unsupported) : null)));
+  document.body.append(overlay);
+}
+
+// ---------------------------------------------------------------- theme + boot
+document.getElementById("themeBtn").addEventListener("click", async () => {
+  const current = (prefs.value && prefs.value.theme) || document.documentElement.dataset.theme || "system";
+  const next = current === "light" ? "dark" : "light";
+  applyAppearance(Object.assign({ font_scale: 1, reduced_motion: false, high_contrast: false }, prefs.value || {}, { theme: next }));
+  try {
+    prefs.value = await saveSettings({ theme: next });
+  } catch (e) { toast(`Theme applied for this session only: ${e.message}`, "err"); }
+});
+document.getElementById("settingsBtn").addEventListener("click", openSettings);
 
 async function boot() {
   try {
@@ -2027,6 +2264,7 @@ async function boot() {
     document.getElementById("engineBadge").textContent = "engine: unknown";
     document.getElementById("engineBadge").classList.add("err");
   }
+  await loadSettings();
   await route();
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});

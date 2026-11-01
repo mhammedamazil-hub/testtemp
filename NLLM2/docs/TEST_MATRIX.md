@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 301 tests: 235 lib + 35 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 310 tests: 242 lib + 37 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 169 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 191 assertions
 ```
 
-## Unit tests (188) — exact names from `cargo test --lib -- --list`
+## Unit tests (242) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -117,7 +117,7 @@ them, because it is unreachable.
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
 
-## End-to-end HTTP tests (15, real sockets)
+## End-to-end HTTP tests (37, real sockets)
 
 | Test | Proves |
 |---|---|
@@ -129,9 +129,11 @@ them, because it is unreachable.
 | `chat_style_and_length_are_effective_and_validated` | `settings` echoed; brief → 1 citation; detailed shows per-quote source + locator; concise and detailed cite the same passages; unknown style/length → 422 and nothing stored |
 | `chat_streams_frames_and_only_persists_when_delivery_completes` | NDJSON frames in order (`start` → `delta`* → `citations` → `done`); every delta is a substring of the final answer, in order; `conversation_id` on a second stream appends instead of starting a new conversation; **a stream the client hangs up on is not stored** (message count unchanged after the abort); an invalid style returns `422` without opening a stream |
 | `media_metadata_is_read_without_decoding_frames` | `sample.mp4` → mp4, ~6200 ms, avc1 320×240 @ 10 fps, `decoded_frames: 0`, `transcript: "not produced"`; Matroska bytes → `matroska` with **no** invented tracks; empty body 400; GET 404 |
+| `settings_persist_across_a_restart_and_storage_is_measured` | defaults documented (`dark`/`evidence`/`hide_archived`); a partial `PATCH` changes exactly what it names and leaves the rest; `theme: "neon"` → **422 `bad_setting`** listing one refused field while `font_scale` in the same request is still stored; the 422 body carries the settings that are actually stored; `GET /api/storage` is measured (bytes grow after a source is added, record counts match) and says so; a restarted server returns the saved settings; `POST /api/backup` shows up in `backup_count`; `DELETE /api/settings` restores the defaults and persists that |
+| `the_capability_page_names_what_settings_cannot_do` | `settings.status = "partial"` with a non-empty reason for interface language, model selection, server-side fonts, keyboard shortcuts and per-user settings; `usage.status = "supported"` |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
-## UI assertions (29, jsdom + live server)
+## UI assertions (191, jsdom + live server)
 
 Library rendering · engine badge from `/api/capabilities` · notebook creation via the
 form · three-pane workspace · paste-import · source list with passage counts ·
@@ -412,6 +414,19 @@ comparison used for every credential check.
 ### `export` (7)
 Markdown for flashcards/slides/report payloads, filename slugs, and the SVG path; PPTX/PDF are
 absent from the module on purpose.
+
+## Settings, appearance and storage (§7.17)
+
+| Layer | Tests | Proves |
+|---|---|---|
+| unit (`settings::tests`, 7) | theme/style/length/sort validation · `from_json` on `Null` and on a partial object → defaults · `apply` rejects one field and applies the rest · font scale rounded to 2 dp · `Usage::total_bytes` |
+| e2e (2) | see the two rows above — persistence across restart, measured usage, 422 contract, reset, capability honesty |
+| e2e (Journey J) | a viewer share gets **403** on `GET /api/settings`, `GET /api/storage` and `PATCH /api/settings`; the owner still reads `theme: dark` afterwards, so the refused write changed nothing |
+| UI (22) | header settings control · panel opens · theme repaints immediately · text size sets `--font-scale` and shows its percentage · reduced motion / high contrast set root attributes · defaults saved · storage panel shows measured bytes and says they are measured · the panel names what the build does not offer · save reports success · server holds the values · panel closes · library exposes an archived toggle · a new conversation starts from the saved default length |
+
+What is **not** tested here: a real browser rendering (jsdom has no layout, so the CSS
+rules are asserted as root attributes and variables, not as painted pixels), and
+high-contrast/reduced-motion on an operating system that requests them natively.
 
 ## Not covered (honest gaps)
 

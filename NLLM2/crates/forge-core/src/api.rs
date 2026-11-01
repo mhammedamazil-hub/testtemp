@@ -293,6 +293,9 @@ impl Api {
     /// The coarse verb a route needs: read, write, or manage (owner only).
     fn route_action(method: &str, segs: &[&str]) -> &'static str {
         match (method, segs) {
+            // Storage is instance-wide (every notebook's bytes), so it is owner-only — matched
+            // before the read catch-all below.
+            ("GET", ["api", "storage"]) => "manage",
             ("GET", _) | ("HEAD", _) => "read",
             ("POST", ["api", "notebooks"]) => "manage",
             ("POST", ["api", "notebooks", _, "chat"]) => "read",
@@ -310,6 +313,7 @@ impl Api {
             ("POST", ["api", "notebooklm", ..]) => "manage",
             ("POST", ["api", "media", "inspect"]) => "manage",
             ("POST", ["api", "auth", ..]) => "manage",
+            ("PATCH", ["api", "settings"]) | ("DELETE", ["api", "settings"]) => "manage",
             _ => "write",
         }
     }
@@ -371,6 +375,10 @@ impl Api {
 
         let result = match (req.method.as_str(), segs.as_slice()) {
             ("GET", ["api", "health"]) => Ok(self.health()),
+            ("GET", ["api", "settings"]) => Ok(ok(self.store.read(|db| db.settings.to_json()))),
+            ("PATCH", ["api", "settings"]) => self.update_settings(req),
+            ("DELETE", ["api", "settings"]) => self.reset_settings(),
+            ("GET", ["api", "storage"]) => Ok(ok(self.storage_usage())),
             ("GET", ["api", "capabilities"]) => Ok(ok(self.capabilities())),
             ("GET", ["api", "notebooks"]) => Ok(ok(self.list_notebooks(&identity, req))),
             ("POST", ["api", "notebooks"]) => self.create_notebook(req),
@@ -478,6 +486,27 @@ impl Api {
                 "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
                 "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
                 "export_note" => "the PPTX is a written-by-hand OPC package and the PDF a written-by-hand page tree, verified by reading both back with Forge's own readers and (one-off, outside the build) python-pptx and pypdf",
+            },
+            "settings" => obj! {
+                "status" => "partial",
+                "endpoint" => "GET/PATCH /api/settings, GET /api/storage",
+                "persisted" => Value::Arr(vec![
+                    Value::from("theme"), Value::from("font_scale"), Value::from("reduced_motion"),
+                    Value::from("high_contrast"), Value::from("default_style"), Value::from("default_length"),
+                    Value::from("library_sort"), Value::from("hide_archived"),
+                ]),
+                "unsupported" => obj! {
+                    "interface_language" => "no localisation exists in this build, so there is no language selector to offer",
+                    "model_selection" => "no model runs here: answers are extracted, so choosing a model would be a dead control. Providers can be configured for a future model-backed engine, and their keys are stored 0600",
+                    "server_side_fonts" => "the PDF export uses the base-14 fonts and says so; there is no font picker",
+                    "per_user_settings" => "settings are per data directory (one operator), not per share link",
+                    "keyboard_shortcuts" => "there is no shortcut map; the UI relies on native focus order and browser defaults",
+                },
+            },
+            "usage" => obj! {
+                "status" => "supported",
+                "endpoint" => "GET /api/storage",
+                "note" => "measured bytes: db.json, retained blobs and rolling backups, plus record counts",
             },
             "research" => obj! {
                 "status" => "notebook_scoped_only",
@@ -1297,6 +1326,80 @@ impl Api {
             "chunk_count" => chunk_count as u64,
             "attempts" => (attempts + 1) as u64,
         }))
+    }
+
+    /// `PATCH /api/settings` — partial update, with every rejected field named.
+    fn update_settings(&self, req: &Request) -> Result<Response, Response> {
+        let patch = parse_body(req)?;
+        let (settings, rejected) = self
+            .store
+            .write(|db| {
+                let rejected = db.settings.apply(&patch);
+                (db.settings.clone(), rejected)
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        if !rejected.is_empty() {
+            // 422 with the current settings attached: the client can re-render the truth without
+            // guessing which of its fields survived.
+            return Err(Response::json(
+                422,
+                &obj! {
+                    "error" => rejected.join("; "),
+                    "code" => "bad_setting",
+                    "status" => 422u64,
+                    "rejected" => Value::Arr(rejected.iter().map(|r| Value::from(r.as_str())).collect()),
+                    "settings" => settings.to_json(),
+                },
+            ));
+        }
+        Ok(ok(settings.to_json()))
+    }
+
+    /// `DELETE /api/settings` — back to the documented defaults.
+    fn reset_settings(&self) -> Result<Response, Response> {
+        let settings = self
+            .store
+            .write(|db| {
+                db.settings = crate::settings::Settings::default();
+                db.settings.clone()
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        Ok(ok(settings.to_json()))
+    }
+
+    /// `GET /api/storage` — measured usage of the data directory, not an estimate.
+    fn storage_usage(&self) -> Value {
+        let dir = self.store.dir.clone();
+        let size_of = |path: &std::path::Path| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let read_dir = |name: &str| {
+            std::fs::read_dir(dir.join(name))
+                .map(|entries| entries.flatten().collect::<Vec<_>>())
+                .unwrap_or_default()
+        };
+        let blobs = read_dir("blobs");
+        let backups = read_dir("backups");
+        let counts = self.store.read(|db| {
+            (
+                db.notebooks.len() as u64,
+                db.sources.len() as u64,
+                db.chunks.len() as u64,
+                db.artifacts.len() as u64,
+                db.conversations.len() as u64,
+            )
+        });
+        crate::settings::Usage {
+            database_bytes: size_of(&self.store.path()),
+            blob_bytes: blobs.iter().map(|e| e.metadata().map(|m| m.len()).unwrap_or(0)).sum(),
+            blob_count: blobs.len() as u64,
+            backup_bytes: backups.iter().map(|e| e.metadata().map(|m| m.len()).unwrap_or(0)).sum(),
+            backup_count: backups.len() as u64,
+            notebook_count: counts.0,
+            source_count: counts.1,
+            chunk_count: counts.2,
+            artifact_count: counts.3,
+            conversation_count: counts.4,
+        }
+        .to_json()
     }
 
     /// `POST /api/notebooks/:id/research`

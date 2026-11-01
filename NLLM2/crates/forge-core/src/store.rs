@@ -28,6 +28,8 @@ pub struct Db {
     pub jobs: Vec<Job>,
     /// Share links. Only token hashes are stored (see `auth.rs`).
     pub shares: Vec<crate::auth::ShareGrant>,
+    /// User preferences. Stored here so a backup carries them and a restart keeps them.
+    pub settings: crate::settings::Settings,
 }
 
 /// `Clone` is cheap and shares the same in-memory database (`Arc<Mutex<Db>>`). It exists so a
@@ -184,6 +186,7 @@ fn encode_db(db: &Db) -> Value {
     m.insert("tables".into(), Value::Arr(db.tables.iter().map(table_json).collect()));
     m.insert("jobs".into(), Value::Arr(db.jobs.iter().map(job_json).collect()));
     m.insert("shares".into(), Value::Arr(db.shares.iter().map(share_json).collect()));
+    m.insert("settings".into(), db.settings.to_json());
     Value::Obj(m)
 }
 
@@ -200,6 +203,11 @@ fn decode_db(text: &str) -> Option<Db> {
         tables: arr("tables").iter().filter_map(table_from).collect(),
         jobs: arr("jobs").iter().map(job_from).collect(),
         shares: arr("shares").iter().map(share_from).collect(),
+        // A database written before settings existed decodes to the documented defaults.
+        settings: v
+            .get("settings")
+            .map(crate::settings::Settings::from_json)
+            .unwrap_or_default(),
     })
 }
 

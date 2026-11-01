@@ -2298,6 +2298,18 @@ fn journey_j_share_links_are_scoped_by_role_and_revocable() {
     let (st, _) = s.json_h("POST", &format!("/api/notebooks/{}/chat", nb_b), Some(obj(&[("question", Value::from("when"))])), &viewer_hdr);
     assert_eq!(st, 403);
 
+    // Settings and storage are instance-wide, so a share grant — even an editor's — cannot
+    // read or rewrite them. Otherwise one recipient could repaint every other operator's UI.
+    let (st, _) = s.json_h("GET", "/api/settings", None, &viewer_hdr);
+    assert_eq!(st, 403, "a share may not read the operator's settings");
+    let (st, _) = s.json_h("GET", "/api/storage", None, &viewer_hdr);
+    assert_eq!(st, 403, "a share may not read instance-wide storage");
+    let (st, _) = s.json_h("PATCH", "/api/settings", Some(obj(&[("theme", Value::from("light"))])), &viewer_hdr);
+    assert_eq!(st, 403);
+    let (st, owner_settings) = s.json_h("GET", "/api/settings", None, &owner_hdr);
+    assert_eq!(st, 200, "{:?}", owner_settings);
+    assert_eq!(owner_settings.str_of("theme"), Some("dark"), "the refused write left the setting alone");
+
     let (st, answer) = s.json_h(
         "POST",
         &format!("/api/notebooks/{}/chat", nb_a),
@@ -3605,4 +3617,136 @@ fn research_briefs_decompose_the_question_and_name_their_gaps() {
     assert_eq!(research.str_of("web_search"), Some("none"));
     assert_eq!(research.str_of("fast_research"), Some("unsupported: needs a search provider"));
     assert_eq!(research.str_of("deep_research"), Some("unsupported: needs a search provider and a multi-step web task"));
+}
+
+#[test]
+fn settings_persist_across_a_restart_and_storage_is_measured() {
+    let dir = tempdir("settings");
+    let s = Server::start(dir.clone());
+
+    // Defaults are documented, not accidental.
+    let (st, settings) = s.json("GET", "/api/settings", None);
+    assert_eq!(st, 200);
+    assert_eq!(settings.str_of("theme"), Some("dark"));
+    assert_eq!(settings.str_of("default_style"), Some("evidence"));
+    assert_eq!(settings.get("hide_archived"), Some(&Value::Bool(true)));
+
+    // A partial update changes exactly what it names.
+    let (st, updated) = s.json(
+        "PATCH",
+        "/api/settings",
+        Some(obj(&[
+            ("theme", Value::from("light")),
+            ("font_scale", Value::from(1.15)),
+            ("reduced_motion", Value::Bool(true)),
+            ("high_contrast", Value::Bool(true)),
+            ("default_length", Value::from("thorough")),
+            ("library_sort", Value::from("title")),
+            ("hide_archived", Value::Bool(false)),
+        ])),
+    );
+    assert_eq!(st, 200, "{:?}", updated);
+    assert_eq!(updated.str_of("theme"), Some("light"));
+    assert_eq!(updated.get("font_scale").and_then(|v| v.as_f64()), Some(1.15));
+    assert_eq!(updated.get("reduced_motion"), Some(&Value::Bool(true)));
+    assert_eq!(updated.get("high_contrast"), Some(&Value::Bool(true)));
+    assert_eq!(updated.str_of("default_length"), Some("thorough"));
+    assert_eq!(updated.str_of("library_sort"), Some("title"));
+    assert_eq!(updated.get("hide_archived"), Some(&Value::Bool(false)));
+    // The field the patch did not name is untouched.
+    assert_eq!(updated.str_of("default_style"), Some("evidence"));
+
+    // A bad value is named, refused, and does not poison the good ones in the same request.
+    let (st, err) = s.json(
+        "PATCH",
+        "/api/settings",
+        Some(obj(&[("theme", Value::from("neon")), ("font_scale", Value::from(1.2))])),
+    );
+    assert_eq!(st, 422, "{:?}", err);
+    assert_eq!(err.str_of("code"), Some("bad_setting"));
+    let rejected = err.get("rejected").and_then(|r| r.as_arr()).cloned().unwrap_or_default();
+    assert_eq!(rejected.len(), 1);
+    assert!(rejected[0].as_str().unwrap_or("").contains("theme"));
+    assert_eq!(
+        err.get("settings").and_then(|s| s.str_of("theme")),
+        Some("light"),
+        "the refused request returns the settings that are actually stored"
+    );
+    let (_, after) = s.json("GET", "/api/settings", None);
+    assert_eq!(after.get("font_scale").and_then(|v| v.as_f64()), Some(1.2), "the good field applied");
+    assert_eq!(after.str_of("theme"), Some("light"));
+
+    // Storage is measured from the directory, so it moves when bytes are written.
+    let (st, empty_usage) = s.json("GET", "/api/storage", None);
+    assert_eq!(st, 200);
+    let empty_total = empty_usage.get("total_bytes").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    assert!(empty_total > 0.0, "db.json exists, so usage is not zero: {:?}", empty_usage);
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Sized"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Notes")),
+            ("text", Value::from("A sentence long enough to be indexed as a passage of its own.")),
+        ])),
+    );
+    assert_eq!(st, 201);
+    let (_, usage) = s.json("GET", "/api/storage", None);
+    assert!(usage.get("total_bytes").and_then(|v| v.as_f64()).unwrap_or(0.0) > empty_total);
+    let records = usage.get("records").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(records.get("notebooks").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(records.get("sources").and_then(|v| v.as_f64()), Some(1.0));
+    assert!(records.get("chunks").and_then(|v| v.as_f64()).unwrap_or(0.0) >= 1.0);
+    assert!(usage.str_of("note").unwrap_or("").contains("measured"));
+
+    // Settings are part of the database, so a restart keeps them — and the backup carries them.
+    let s2 = Server::start(dir.clone());
+    let (_, persisted) = s2.json("GET", "/api/settings", None);
+    assert_eq!(persisted.str_of("theme"), Some("light"));
+    assert_eq!(persisted.str_of("library_sort"), Some("title"));
+    assert_eq!(persisted.get("high_contrast"), Some(&Value::Bool(true)));
+    let (st, backup) = s2.json("POST", "/api/backup", None);
+    assert_eq!(st, 201, "{:?}", backup);
+    assert!(backup.str_of("name").unwrap_or("").ends_with(".json"));
+    let (_, usage2) = s2.json("GET", "/api/storage", None);
+    assert!(
+        usage2.get("backup_count").and_then(|v| v.as_f64()).unwrap_or(0.0) >= 1.0,
+        "the backup is visible in the usage report: {:?}",
+        usage2
+    );
+
+    // Reset returns the documented defaults, and it is persisted like any other write.
+    let (st, reset) = s2.json("DELETE", "/api/settings", None);
+    assert_eq!(st, 200, "{:?}", reset);
+    assert_eq!(reset.str_of("theme"), Some("dark"));
+    assert_eq!(reset.str_of("library_sort"), Some("recent"));
+    assert_eq!(reset.get("font_scale").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(reset.get("hide_archived"), Some(&Value::Bool(true)));
+    let (_, after_reset) = s2.json("GET", "/api/settings", None);
+    assert_eq!(after_reset.str_of("theme"), Some("dark"));
+    assert_eq!(after_reset.get("reduced_motion"), Some(&Value::Bool(false)));
+}
+
+#[test]
+fn the_capability_page_names_what_settings_cannot_do() {
+    let dir = tempdir("caps-settings");
+    let s = Server::start(dir.clone());
+    let (st, caps) = s.json("GET", "/api/capabilities", None);
+    assert_eq!(st, 200);
+    let settings = caps.get("settings").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(settings.str_of("status"), Some("partial"));
+    let unsupported = settings.get("unsupported").cloned().unwrap_or(Value::Bool(false));
+    for key in ["interface_language", "model_selection", "server_side_fonts", "per_user_settings"] {
+        assert!(
+            unsupported.str_of(key).map(|v| !v.is_empty()).unwrap_or(false),
+            "capabilities must say why {} is not offered: {:?}",
+            key,
+            unsupported
+        );
+    }
+    let usage = caps.get("usage").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(usage.str_of("status"), Some("supported"));
 }

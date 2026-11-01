@@ -30,11 +30,39 @@ html[data-theme="light"] {
   --accent: #a85f13; --accent-soft: #fdf1e2;
 }
 
+/* Settings (7.17): every appearance preference is a CSS variable or a root attribute, so the
+   whole app honours it without per-view special cases. */
+html { --font-scale: 1; }
+html[data-contrast="high"] {
+  --line: #566371;
+  --muted: #c8d2dc;
+  --faint: #a9b6c2;
+}
+html[data-contrast="high"][data-theme="light"] {
+  --line: #6b7784;
+  --muted: #33404d;
+  --faint: #4a5764;
+}
+@media (prefers-color-scheme: light) {
+  html[data-contrast="high"]:not([data-theme="dark"]) {
+    --line: #6b7784; --muted: #33404d; --faint: #4a5764;
+  }
+}
+/* Reduced motion keeps the layout identical and drops the movement, including the spinner. */
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+  scroll-behavior: auto !important;
+}
+
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
-  font-family: var(--sans); font-size: 15px; line-height: 1.55;
+  font-family: var(--sans); font-size: calc(15px * var(--font-scale, 1)); line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--accent); }

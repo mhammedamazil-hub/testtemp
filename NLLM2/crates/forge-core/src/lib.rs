@@ -27,6 +27,7 @@ pub mod render;
 pub mod research;
 pub mod retrieve;
 pub mod security;
+pub mod settings;
 pub mod store;
 pub mod tables;
 pub mod untrusted;

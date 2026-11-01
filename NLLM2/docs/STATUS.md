@@ -4,7 +4,7 @@ Last updated: 2026-11-01 (access control + share links, crash-resilient ingestio
 timed transcripts, discovery from seed pages, slide editing and artifact export, library
 search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export,
 RSS/Atom feeds, GitHub repositories, PPTX and PDF export, instruction-like source text,
-data-table artifacts, notebook-scoped research briefs).
+data-table artifacts, notebook-scoped research briefs, persisted settings + measured storage).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -23,8 +23,11 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **301 passing, 0 failing** (26 `bininspect` + 235 lib + 35 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **169 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **310 passing, 0 failing** (26 `bininspect` + 242 lib + 37 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **191 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Settings (§7.17) | `GET/PATCH/DELETE /api/settings` stores theme (dark/light/system), text size 90–140 %, reduced motion, high contrast, default answer style/length, library sort and hide-archived in `db.json`. They survive a restart and travel inside a backup; a database written before settings existed decodes to the documented defaults. A `PATCH` that names a bad value returns **422** listing the refused fields *and still applies the good ones*; the panel adopts the server's state and names the rest. Settings and usage are **owner-only** (`manage`): a share link gets 403 rather than repainting everyone else's UI | `settings` (7 unit tests) + e2e `settings_persist_across_a_restart_and_storage_is_measured`, Journey J + 22 UI assertions |
+| Appearance applied, not just stored | theme → `data-theme`, text size → `--font-scale` on the root font size, reduced motion → `html[data-motion="reduced"]` (animations and transitions collapse, the spinner stops), high contrast → `html[data-contrast="high"]` (stronger borders and muted text). The panel previews each change before saving | `apps/web/styles.css`, `applyAppearance`, UI smoke |
+| Storage / usage | `GET /api/storage` **measures** the data directory: `db.json`, retained `blobs/`, rolling `backups/`, plus notebook/source/passage/artifact/conversation counts and a `note` saying it is measured. `POST /api/backup` remains the way to write one | `settings::Usage`, `api::storage_usage` + e2e |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
