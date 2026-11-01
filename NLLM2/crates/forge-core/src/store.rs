@@ -532,6 +532,9 @@ fn artifact_json(a: &Artifact) -> Value {
     m.insert("stale".into(), Value::Bool(a.stale));
     m.insert("payload".into(), a.payload.clone());
     m.insert("version".into(), Value::from(a.version as f64));
+    m.insert("topic".into(), Value::from(a.topic.as_str()));
+    m.insert("difficulty".into(), Value::from(a.difficulty.as_str()));
+    m.insert("audience".into(), Value::from(a.audience.as_str()));
     m.insert("updated_at".into(), Value::from(a.updated_at.as_str()));
     m.insert(
         "reviews".into(),
@@ -562,6 +565,9 @@ fn artifact_from(v: &Value) -> Artifact {
             .unwrap_or_default(),
         version: v.get("version").and_then(|x| x.as_f64()).unwrap_or(1.0) as u32,
         updated_at: s(v, "updated_at"),
+        topic: s(v, "topic"),
+        difficulty: s(v, "difficulty"),
+        audience: s(v, "audience"),
     }
 }
 

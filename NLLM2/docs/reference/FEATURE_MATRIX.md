@@ -39,7 +39,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | CHAT-02 | exact citations + quote preview | documented | done | `Citation` | lib + UI |
 | CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |
 | CHAT-04 | source selection scopes chat | documented | done | `app.js` + api | UI |
-| CHAT-05 | conversation persistence / history | documented | done | `store.rs` | e2e |
+| CHAT-05 | conversation persistence / history | documented | done — plus `GET /api/conversations/:id/export` (md/json) with the evidence each answer used | `store.rs`, `export::conversation_markdown` | e2e + 3 UI |
 | CHAT-06 | streaming + stop | documented | **done** — real chunked delivery (`Transfer-Encoding: chunked`) of NDJSON frames, rendered progressively; Stop aborts and the turn is **not** persisted. Not token-by-token: the extractive answer is computed before the first frame and the protocol says so | `http::StreamReply`, `api::chat_stream`, `app.js` | 2 unit + 1 e2e + 7 UI |
 | CHAT-07 | style / length / custom instructions | documented | **partial** — style (evidence/concise/detailed) and length (brief/standard/thorough) are real and validated over the extractive engine; custom instructions are stored and echoed but cannot steer a model that is not reachable | `grounded.rs`, `api::chat`, UI selects | 4 unit + e2e + 8 UI |
 | CHAT-08 | **table answers** (aggregation over source cells) | documented ("table answers" in the answer modes; Data Tables journey I) | **partial** — sum/average/min/max/count over an existing grid, optional group-by; no schema inference, no charts | `tables::try_answer`, `api::chat` | 22 unit + e2e + UI |
@@ -49,7 +49,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | ART-01 | summary / report / study guide / FAQ | documented | done | `artifacts.rs` | lib |
 | ART-02 | mind map | documented | done | `artifacts.rs` | lib + UI |
 | ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |
-| ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** | `Artifact.stale` | e2e |
+| ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** — staleness is set on refresh, and `POST /api/artifacts/:id/regenerate` re-runs the stored parameters against the current text, clearing the flag and the review marks (and reporting how many) | `Artifact.stale`, `api::regenerate_artifact` | e2e + 3 UI |
 | ART-05 | audio / video overviews | documented | blocked | — | no TTS/ASR or renderer |
 | ART-07 | slides deck: generate, edit, reorder, delete/restore, version, export | documented | **partial** — quotation deck with per-bullet citations, audience setting, versioned slide ops, Markdown/JSON/SVG export; **no PPTX/PDF renderer** (501 `format_unsupported` rather than a fake file) | `artifacts::slides`, `api::update_artifact`, `export.rs` | 7 export unit + e2e Journey H + 6 UI |
 | ART-08 | difficulty / audience as generation parameters | documented (flashcards difficulty) | **done** — difficulty changes cards (easy drops cloze, hard puts cloze first) and is recorded on the artifact; audience changes bullets per slide | `artifacts::Difficulty`, `slides` | lib + e2e F/H + 4 UI |

@@ -8,7 +8,7 @@
 //! Every export keeps the citations, because an exported answer without its evidence is a
 //! claim without support.
 
-use crate::domain::{Artifact, Source};
+use crate::domain::{Artifact, Conversation, Source};
 use crate::json::Value;
 
 /// Filename-safe slug for downloads.
@@ -218,6 +218,55 @@ fn walk(v: &Value, depth: usize) -> String {
 }
 
 /// A standalone SVG of a concept map, so it can be opened without Forge.
+/// A conversation as Markdown: what was asked, what Forge answered, and the exact evidence each
+/// answer used. Nothing is regenerated or summarised on the way out — the export is the record.
+pub fn conversation_markdown(conv: &Conversation, notebook_title: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# {}\n\n", conv.title));
+    out.push_str(&format!(
+        "_Notebook: {} · conversation {} · started {} · last message {}_\n\n",
+        notebook_title,
+        conv.id,
+        conv.created_at,
+        conv.updated_at
+    ));
+    out.push_str(
+        "_Every answer below is quoted from the notebook's sources; citations name the source and \
+         the exact location. Forge does not add outside knowledge in grounded mode._\n\n---\n\n",
+    );
+    for m in &conv.messages {
+        if m.role == "user" {
+            out.push_str(&format!("### You\n\n{}\n\n", m.text.trim()));
+            continue;
+        }
+        out.push_str("### Forge\n\n");
+        if m.abstained {
+            out.push_str("_Abstained: the sources do not support an answer to this question._\n\n");
+        }
+        out.push_str(&format!("{}\n\n", m.text.trim()));
+        if !m.citations.is_empty() {
+            out.push_str("**Evidence**\n\n");
+            for c in &m.citations {
+                out.push_str(&format!(
+                    "- [{}] {} · {} — “{}”\n",
+                    c.citation_id.trim_start_matches('c'),
+                    c.source_title,
+                    c.locator.human(),
+                    c.quote.trim()
+                ));
+            }
+            out.push('\n');
+        }
+        if !m.note.trim().is_empty() {
+            out.push_str(&format!("_{}_\n\n", m.note.trim()));
+        }
+        if m.grounded && m.citations.is_empty() && !m.abstained {
+            out.push_str("_No citation was attached to this answer._\n\n");
+        }
+    }
+    out
+}
+
 pub fn mindmap_svg(art: &Artifact) -> Option<String> {
     let nodes = art.payload.get("nodes")?.as_arr()?;
     let edges = art.payload.get("edges").and_then(|e| e.as_arr()).cloned().unwrap_or_default();

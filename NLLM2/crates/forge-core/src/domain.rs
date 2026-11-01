@@ -487,6 +487,11 @@ pub struct Artifact {
     pub version: u32,
     /// When it was last edited (empty when it never was).
     pub updated_at: String,
+    /// The parameters it was generated with, kept so a regeneration is faithful instead of a
+    /// guess: the topic, the flashcard difficulty and the slide audience.
+    pub topic: String,
+    pub difficulty: String,
+    pub audience: String,
 }
 
 impl Default for Artifact {
@@ -503,6 +508,9 @@ impl Default for Artifact {
             reviews: BTreeMap::new(),
             version: 1,
             updated_at: String::new(),
+            topic: String::new(),
+            difficulty: String::new(),
+            audience: String::new(),
         }
     }
 }

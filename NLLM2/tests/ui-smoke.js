@@ -279,6 +279,21 @@ async function main() {
     /does not choose between them/.test(conflictMsg.querySelector(".conflicts")?.textContent || ""));
 
 
+  // --- the transcript exports with its citations
+  check("the chat exposes a transcript export once a conversation exists", !!$("#exportChat"),
+    $(".messages")?.textContent?.slice(0, 120));
+  $("#exportChat").click();
+  await wait(700);
+  const transcript = $(".export-body")?.textContent || "";
+  check("the transcript export shows the questions and the evidence",
+    /### You/.test(transcript) && /### Forge/.test(transcript) && /\*\*Evidence\*\*/.test(transcript),
+    transcript.slice(0, 200));
+  check("the transcript export keeps the citations", /Calvin cycle|glucose|carbon dioxide/i.test(transcript),
+    transcript.slice(0, 300));
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+
+
   // --- study tools
   byText(".tabs button", "Study").click();
   await wait(100);
@@ -323,6 +338,22 @@ async function main() {
     /1 known/.test($(".overlay #reviewSummary")?.textContent || "") &&
       $$(".overlay .flashcard .badge").some((b) => /known/.test(b.textContent)),
     $(".overlay #reviewSummary")?.textContent);
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+  // --- regeneration keeps the parameters and says what it clears
+  window.showArtifact(cardArt.id);
+  await wait(600);
+  const regenBtn = [...$$(".viewer header button")].find((b) => /regenerate/i.test(b.textContent));
+  check("an artifact can be regenerated from its own parameters", !!regenBtn,
+    $$(".viewer header button").map((b) => b.textContent).join(","));
+  regenBtn.click();
+  await wait(1200);
+  const regenArt = await (await fetch(`${BASE}/api/artifacts/${cardArt.id}`)).json();
+  check("regenerating bumps the version and keeps the difficulty",
+    regenArt.version > cardArt.version && regenArt.difficulty === "hard",
+    `version=${regenArt.version} difficulty=${regenArt.difficulty}`);
+  check("regenerating clears the review marks rather than carrying them onto new cards",
+    Object.keys(regenArt.reviews || {}).length === 0, JSON.stringify(regenArt.reviews));
   $$(".overlay").forEach((o) => o.remove());
   await wait(150);
 

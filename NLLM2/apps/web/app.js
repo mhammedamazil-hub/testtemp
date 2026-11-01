@@ -881,10 +881,26 @@ function lengthHint(length) {
   return "cites up to 2 passages";
 }
 
+/// The transcript control appears as soon as there is a conversation to export. It is added to
+/// the live message list rather than baked into the first render, because the conversation id
+/// only exists after the first answer lands.
+function ensureChatExport(scroll = document.getElementById("messages")) {
+  if (!scroll || !state.conversationId) return;
+  if (scroll.querySelector("#exportChat")) return;
+  scroll.prepend(h("div", { class: "row-between", style: "gap:8px;margin-bottom:8px" },
+    h("span", { class: "hint" }, "conversation"),
+    h("button", {
+      class: "ghost", id: "exportChat", title: "Download this conversation with its citations",
+      onclick: () => downloadConversation(state.conversationId),
+    }, "Export transcript")));
+}
+
 function renderChat(pane, onlyComposer = false) {
   const nb = state.nb;
   if (!pane) return;
   const scroll = h("div", { class: "messages", id: "messages" });
+
+  ensureChatExport(scroll);
 
   for (const m of state.messages) scroll.append(messageEl(m));
 
@@ -952,6 +968,19 @@ function renderChat(pane, onlyComposer = false) {
       });
       if (!doneMsg) throw new Error("the stream ended without a final frame");
       state.conversationId = doneMsg.conversation_id || state.conversationId;
+      if (!state.conversationId) {
+        // The stream deliberately does not announce a conversation id: it only exists once the
+        // delivery completed and the turn was stored. Now that it has, ask which conversation
+        // received it — the newest one in this notebook.
+        try {
+          const convs = await api.get(`/notebooks/${nb.id}/conversations`);
+          const newest = (convs.conversations || [])
+            .slice()
+            .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))[0];
+          if (newest) state.conversationId = newest.id;
+        } catch { /* no conversation recorded: the export control simply stays hidden */ }
+      }
+      ensureChatExport();
       state.messages.push({ role: "user", text: q }, doneMsg);
       pending.replaceWith(messageEl(doneMsg));
     } catch (e) {
@@ -1458,6 +1487,35 @@ function renderSlides(payload, art) {
   return deck;
 }
 
+/// Same credential handling as an artifact export; the transcript goes out exactly as stored.
+async function downloadConversation(id) {
+  if (!id) return;
+  try {
+    const res = await fetch(`/api/conversations/${id}/export?format=md`, { headers: authHeaders() });
+    if (!res.ok) {
+      let data = null;
+      try { data = await res.json(); } catch { /* non-JSON refusal */ }
+      throw new Error((data && (data.error || data.message)) || `HTTP ${res.status}`);
+    }
+    const text = await res.text();
+    const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+      h("div", { class: "viewer" },
+        h("header", {},
+          h("div", { style: "flex:1" },
+            h("div", { style: "font-weight:600" }, "Conversation export"),
+            h("div", { class: "hint" }, "the stored transcript, with the evidence each answer used")),
+          h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+        h("div", { class: "content" }, h("pre", { class: "export-body", style: "white-space:pre-wrap;font-size:12px" }, text))));
+    document.body.append(overlay);
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: "text/markdown" }));
+      const a = h("a", { href: url, download: `forge-chat-${id}.md` });
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { /* downloads can be blocked; the preview is still the export */ }
+  } catch (e) { toast(e.message, "err"); }
+}
+
 /// Fetch an export with the same credentials as every other call, then show the exact bytes
 /// in the page. The download is a convenience; the preview is what makes the export auditable
 /// where the browser blocks downloads.
@@ -1706,6 +1764,24 @@ async function showArtifact(id) {
           h("div", { style: "flex:1" }, h("div", { style: "font-weight:600" }, a.title),
             h("div", { class: "hint" }, `${a.kind} · v${a.version || 1} · ${fmtDate(a.updated_at || a.created_at)}`),
             a.stale ? h("div", { class: "hint", style: "color:var(--warn)" }, "A source changed after this artifact was generated — regenerate to refresh it.") : null),
+          h("button", {
+            class: a.stale ? "primary" : "ghost",
+            title: "Re-run the generator with the parameters this artifact was created with",
+            onclick: async (e) => {
+              const btn = e.target;
+              btn.disabled = true; btn.textContent = "Regenerating…";
+              try {
+                const r = await api.post(`/artifacts/${a.id}/regenerate`, {});
+                toast(`Regenerated v${r.version}${r.reviews_dropped ? ` · ${r.reviews_dropped} review mark(s) cleared` : ""}`);
+                overlay.remove();
+                await showArtifact(a.id);
+                if (state.nb) await openNotebook(document.getElementById("app"), state.nb.id);
+              } catch (err) {
+                toast(err.message, "err");
+                btn.disabled = false; btn.textContent = "regenerate";
+              }
+            },
+          }, a.stale ? "Regenerate (stale)" : "regenerate"),
           h("button", { class: "ghost", title: "Export Markdown", onclick: () => downloadArtifact(a.id, "md") }, "md"),
           h("button", { class: "ghost", title: "Export JSON", onclick: () => downloadArtifact(a.id, "json") }, "json"),
           a.kind === "mindmap" ? h("button", { class: "ghost", title: "Export SVG", onclick: () => downloadArtifact(a.id, "svg") }, "svg") : null,

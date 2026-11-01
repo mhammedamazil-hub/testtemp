@@ -256,6 +256,7 @@ impl Api {
             ("POST", ["api", "notebooks", _, "sources", ..]) => "write",
             ("POST", ["api", "notebooks", _, "shares"]) => "manage",
             ("POST", ["api", "notebooks", _, "duplicate"]) => "manage",
+            ("POST", ["api", "artifacts", _, "regenerate"]) => "write",
             ("DELETE", ["api", "notebooks", ..]) => "manage",
             ("PATCH", ["api", "notebooks", ..]) => "manage",
             ("DELETE", ["api", "shares", ..]) => "manage",
@@ -348,7 +349,9 @@ impl Api {
             ("POST", ["api", "notebooks", id, "artifacts"]) => self.create_artifact(id, req),
             ("PATCH", ["api", "artifacts", aid]) => self.update_artifact(aid, req),
             ("POST", ["api", "artifacts", aid, "review"]) => self.review_card(aid, req),
+            ("GET", ["api", "conversations", cid, "export"]) => Ok(self.export_conversation(cid, req)),
             ("GET", ["api", "artifacts", aid, "export"]) => Ok(self.export_artifact(aid, req)),
+            ("POST", ["api", "artifacts", aid, "regenerate"]) => self.regenerate_artifact(aid),
             ("GET", ["api", "notebooks", id, "artifacts"]) => Ok(ok(self.list_artifacts(id))),
             ("GET", ["api", "artifacts", aid]) => Ok(self.get_artifact(aid)),
             ("GET", ["api", "sources", sid]) => Ok(self.get_source(sid)),
@@ -422,6 +425,15 @@ impl Api {
                 "status" => "partial",
                 "endpoint" => "/api/discovery/crawl",
                 "note" => "reads the outbound links of pages you supply and offers them, with provenance, as candidates to import. No search engine is queried and no result list is invented, so 'search the web' remains unsupported",
+            },
+            "artifact_lifecycle" => obj! {
+                "status" => "supported",
+                "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
+                "export" => "Markdown and JSON always; SVG for concept maps only; PPTX/PDF return 501 format_unsupported",
+            },
+            "conversations" => obj! {
+                "status" => "supported",
+                "export" => "GET /api/conversations/:id/export?format=md|json — the transcript with its citations, unchanged",
             },
             "media" => obj! {
                 "status" => "partial",
@@ -1454,6 +1466,38 @@ impl Api {
         }))
     }
 
+    /// `GET /api/conversations/:id/export?format=md`
+    ///
+    /// The record of a conversation, citations included. Markdown only: a transcript is text, and
+    /// inventing a PDF/DOCX writer for it would repeat the artifact-export mistake.
+    fn export_conversation(&self, cid: &str, req: &Request) -> Response {
+        let format = req.query_get("format").unwrap_or("md").to_ascii_lowercase();
+        if format != "md" && format != "markdown" && format != "json" {
+            return err(422, "bad_format", "this export is available as md or json");
+        }
+        let found = self.store.read(|db| {
+            db.conversations
+                .iter()
+                .find(|c| c.id == cid)
+                .map(|c| (c.clone(), db.notebooks.iter().find(|n| n.id == c.notebook_id).map(|n| n.title.clone()).unwrap_or_default()))
+        });
+        let Some((conv, notebook_title)) = found else {
+            return err(404, "not_found", "conversation not found");
+        };
+        let base = format!("forge-chat-{}-{}", crate::export::slug(&conv.title), &conv.id[conv.id.len().saturating_sub(6)..]);
+        if format == "json" {
+            return Response::json(200, &conv_json(&conv)).with_header(
+                "Content-Disposition",
+                &format!("attachment; filename=\"{}.json\"", base),
+            );
+        }
+        let body = crate::export::conversation_markdown(&conv, &notebook_title);
+        Response::new(200, "text/markdown; charset=utf-8", body.into_bytes()).with_header(
+            "Content-Disposition",
+            &format!("attachment; filename=\"{}.md\"", base),
+        )
+    }
+
     fn list_jobs(&self, nb: &str) -> Value {
         self.store.read(|db| {
             obj! {
@@ -2340,6 +2384,9 @@ impl Api {
             source_ids: sources.iter().map(|s| s.id.clone()).collect(),
             payload,
             stale: false,
+            topic: topic.clone(),
+            difficulty: difficulty.as_str().to_string(),
+            audience: audience.to_string(),
             ..Artifact::default()
         };
         let id = art.id.clone();
@@ -2355,6 +2402,80 @@ impl Api {
             "difficulty" => difficulty.as_str(),
             "payload" => payload_out,
         }))
+    }
+
+    /// `POST /api/artifacts/:id/regenerate`
+    ///
+    /// Re-runs the generator with the parameters the artifact was created with (stored on it),
+    /// against the current text of the same sources. The artifact keeps its id, gains a version,
+    /// and loses its review marks — because `card-3` of the old deck is not `card-3` of the new
+    /// one, and carrying a "known" mark across that boundary would invent a fact about the user.
+    fn regenerate_artifact(&self, aid: &str) -> Result<Response, Response> {
+        let (kind, topic, difficulty_s, audience, source_ids) = self
+            .store
+            .read(|db| match db.artifacts.iter().find(|a| a.id == aid) {
+                None => None,
+                Some(a) => Some((
+                    a.kind.clone(),
+                    a.topic.clone(),
+                    a.difficulty.clone(),
+                    a.audience.clone(),
+                    a.source_ids.clone(),
+                )),
+            })
+            .ok_or_else(|| err(404, "not_found", "artifact not found"))?;
+        let difficulty = artifacts::Difficulty::parse(&difficulty_s)
+            .ok_or_else(|| err(409, "not_regenerable", "this artifact has no recorded difficulty; generate it again from the notebook"))?;
+        let audience = if audience.is_empty() { "general".to_string() } else { audience };
+
+        let (chunks, sources) = self.store.read(|db| {
+            let sources: Vec<Source> = db
+                .sources
+                .iter()
+                .filter(|s| source_ids.contains(&s.id) && s.status == "ready")
+                .cloned()
+                .collect();
+            let chunks: Vec<Chunk> = db
+                .chunks
+                .iter()
+                .filter(|c| source_ids.contains(&c.source_id))
+                .cloned()
+                .collect();
+            (chunks, sources)
+        });
+        if chunks.is_empty() {
+            return Err(err(409, "no_sources", "none of the sources this artifact used are still ready"));
+        }
+        let (title, payload) =
+            artifacts::generate_full(&kind, &chunks, &sources, &topic, difficulty, &audience)
+                .map_err(|e| err(422, "bad_kind", &e))?;
+        let out = self
+            .store
+            .write(|db| {
+                let Some(art) = db.artifacts.iter_mut().find(|a| a.id == aid) else {
+                    return Err(err(404, "not_found", "artifact not found"));
+                };
+                let dropped = art.reviews.len() as u64;
+                art.reviews.clear();
+                art.title = title.clone();
+                art.payload = payload.clone();
+                art.stale = false;
+                art.version += 1;
+                art.updated_at = now_iso();
+                art.source_ids = sources.iter().map(|s| s.id.clone()).collect();
+                Ok(ok(obj! {
+                    "id" => aid,
+                    "kind" => art.kind.as_str(),
+                    "title" => art.title.as_str(),
+                    "version" => art.version as u64,
+                    "stale" => false,
+                    "reviews_dropped" => dropped,
+                    "note" => "regenerated from the current text of the same sources; card review marks were cleared because the cards changed",
+                    "payload" => art.payload.clone(),
+                }))
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?;
+        out
     }
 
     fn list_artifacts(&self, nb: &str) -> Value {
@@ -2758,6 +2879,9 @@ impl Api {
                         .unwrap_or_default(),
                     version: 1,
                     updated_at: String::new(),
+                    topic: a.str_of("topic").unwrap_or("").to_string(),
+                    difficulty: a.str_of("difficulty").unwrap_or("").to_string(),
+                    audience: a.str_of("audience").unwrap_or("").to_string(),
                 });
             }
         }
@@ -3196,6 +3320,9 @@ fn artifact_json(a: &Artifact) -> Value {
         "created_at" => a.created_at.as_str(),
         "source_ids" => json_str_list(&a.source_ids),
         "stale" => a.stale,
+        "topic" => a.topic.as_str(),
+        "difficulty" => a.difficulty.as_str(),
+        "audience" => a.audience.as_str(),
         "payload" => a.payload.clone(),
         "version" => a.version as u64,
         "updated_at" => a.updated_at.as_str(),

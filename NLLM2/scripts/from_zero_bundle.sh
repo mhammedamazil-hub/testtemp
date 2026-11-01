@@ -15,9 +15,11 @@ OUT="docs/FROM_ZERO_BUNDLE.md"
   echo "verbatim. Rebuild: copy each fenced block to its stated path, then run"
   echo "\`cargo test --offline\`."
   echo
-  echo "Binary fixtures (\`*.apk\`, \`*.exe\`, \`*.dex\`) are omitted because they are not text."
+  echo "Binary fixtures (\`*.apk\`, \`*.exe\`, \`*.dex\`, \`*.pdf\`, \`*.docx\`, \`*.xlsx\`, \`*.pptx\`, \`*.epub\`, \`*.mp4\`) are omitted because they are not text."
   echo "They are rebuilt from the generators in \`tests/fixtures/\` (also included below):"
   echo "  python3 tests/fixtures/make_apk.py && python3 tests/fixtures/make_pe.py"
+  echo "  python3 tests/fixtures/make_pdfs.py && python3 tests/fixtures/make_ooxml.py"
+  echo "  python3 tests/fixtures/make_epub.py && python3 tests/fixtures/make_media.py"
   echo
   echo "Regenerate this file with \`bash scripts/from_zero_bundle.sh\` after changes."
   echo
@@ -28,7 +30,7 @@ while IFS= read -r f; do
     ./target/*|./data/*|./docs/FROM_ZERO_BUNDLE.md) continue ;;
   esac
   case "$f" in
-    *.pdf|*.docx|*.pptx|*.xlsx|*.png|*.jpg|*.apk|*.exe|*.dex|*.so|*.dll) continue ;;
+    *.pdf|*.docx|*.pptx|*.xlsx|*.epub|*.png|*.jpg|*.apk|*.exe|*.dex|*.so|*.dll|*.mp4) continue ;;
     ./tests/fixtures/apk/*) continue ;;
   esac
   echo "## \`${f#./}\`" >> "$OUT"
