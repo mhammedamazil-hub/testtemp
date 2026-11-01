@@ -141,6 +141,8 @@ struct ChatTurn {
     sources_considered: usize,
     chunks_considered: usize,
     tables_considered: usize,
+    /// Instruction-like sentences that were passed over while choosing quotations (§11).
+    untrusted: Vec<crate::untrusted::Hit>,
 }
 
 /// Append a turn to its conversation, creating the conversation when required. Pure with
@@ -204,6 +206,12 @@ fn chat_json(turn: &ChatTurn, conversation_id: &str, persisted: bool) -> Value {
             }).collect()),
         }).collect()),
         "computed" => turn.engine == "table",
+        "untrusted" => Value::Arr(turn.untrusted.iter().map(|h| obj! {
+            "rule" => h.rule,
+            "text" => h.text.as_str(),
+            "offset" => h.offset as u64,
+            "note" => "instruction-like text found in a source: treated as data, not followed, and not quoted in this answer",
+        }).collect()),
         "note" => turn.assistant_msg.note.clone(),
         "notebook_instructions" => turn.instructions.clone(),
         "persisted" => persisted,
@@ -2023,6 +2031,24 @@ impl Api {
         for (k, v) in &extra_meta {
             source.meta.insert(k.clone(), v.clone());
         }
+        // §11: a source can contain text written to be read as an instruction. Count it at
+        // ingest time so the source row says so before anyone asks a question, and so the count
+        // is a stored fact rather than something recomputed (and perhaps lost) later.
+        let mut instruction_hits = 0usize;
+        for b in &parsed.blocks {
+            instruction_hits += crate::untrusted::scan(&b.text).len();
+        }
+        source.meta.insert("instruction_like_spans".to_string(), instruction_hits.to_string());
+        if instruction_hits > 0 {
+            source.warnings.push(format!(
+                "{} passage{} in this source read{} as an instruction addressed to an assistant. \
+                 Forge treats source text as data: it will not follow them, and it will not quote \
+                 them as evidence unless you ask what the document says about instructions",
+                instruction_hits,
+                if instruction_hits == 1 { "" } else { "s" },
+                if instruction_hits == 1 { "s" } else { "" }
+            ));
+        }
         let chunks: Vec<Chunk> = parsed
             .blocks
             .into_iter()
@@ -2290,6 +2316,7 @@ impl Api {
             sources_considered: sources.len(),
             chunks_considered: chunks.len(),
             tables_considered: tables.len(),
+            untrusted: answer.untrusted.clone(),
         })
     }
 

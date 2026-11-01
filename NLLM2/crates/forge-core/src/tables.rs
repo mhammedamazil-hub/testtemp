@@ -1084,6 +1084,8 @@ pub fn try_answer(question: &str, tables: &[Table], sources: &[crate::domain::So
             citations: Vec::new(),
             abstained: true,
             engine: "table".into(),
+            untrusted: Vec::new(),
+            untrusted_abstained: false,
             coverage: 0,
         });
     }
@@ -1145,6 +1147,8 @@ fn compute(
             citations: Vec::new(),
             abstained: true,
             engine: "table".into(),
+            untrusted: Vec::new(),
+            untrusted_abstained: false,
             coverage: 0,
         };
     }
@@ -1163,6 +1167,8 @@ fn compute(
             citations: Vec::new(),
             abstained: true,
             engine: "table".into(),
+            untrusted: Vec::new(),
+            untrusted_abstained: false,
             coverage: 0,
         };
     }
@@ -1195,6 +1201,8 @@ fn compute(
                 abstained: true,
                 engine: "table".into(),
                 coverage: 0,
+                untrusted: Vec::new(),
+                untrusted_abstained: false,
             };
         }
         let mut lines = Vec::new();
@@ -1306,6 +1314,8 @@ fn compute(
         abstained: false,
         engine: "table".into(),
         coverage: 1,
+        untrusted: Vec::new(),
+        untrusted_abstained: false,
     }
 }
 

@@ -990,6 +990,7 @@ function renderChat(pane, onlyComposer = false) {
               abstained: ev.abstained, coverage: ev.coverage, engine: ev.engine,
               computed: ev.computed === true, problems: ev.citation_problems,
               settings: ev.settings, streamed: true, conflicts: ev.conflicts,
+              untrusted: ev.untrusted,
             };
           }
         },
@@ -1113,13 +1114,25 @@ function messageEl(m) {
               h("span", { class: "hint" }, ` — ${k.source_title} · ${k.locator_label}`))))),
       h("p", { class: "hint" }, "Forge does not choose between them; open both passages and decide."));
   }
+  // §11: source text that reads as an instruction is shown as its own labelled block. It is not
+  // part of the answer, and it is not hidden either — the reader can open the passage.
+  let untrustedBlock = null;
+  if ((m.untrusted || []).length) {
+    untrustedBlock = h("div", { class: "conflicts", role: "group", "aria-label": "Instruction-like text in a source" },
+      h("div", { class: "conflicts-title" }, "Instruction-like text in a source"),
+      ...(m.untrusted || []).map((u) =>
+        h("div", { class: "conflict" },
+          h("div", { class: "hint" }, `rule: ${u.rule}`),
+          h("div", { class: "claim" }, h("span", { class: "quote" }, `“${u.text}”`)))),
+      h("p", { class: "hint" }, "Forge treats source text as data: this was not followed and not quoted as evidence. Open the source to read it in place."));
+  }
   const meta = h("div", { class: "row-between", style: "margin-top:8px" },
     h("span", { class: "hint" },
       m.computed ? "computed from table cells · " : "",
       m.engine ? `engine: ${m.engine} · coverage ${Math.round((m.coverage || 0) * 100)}%` : "",
       m.settings ? ` · ${m.settings.style}/${m.settings.length}` : ""),
     (m.problems || []).length ? h("span", { class: "badge warn" }, "citation check: " + m.problems.join("; ")) : null);
-  return h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), body, conflictBlock, cites, meta);
+  return h("div", { class: "msg assistant" }, h("div", { class: "who" }, "Forge"), body, conflictBlock, untrustedBlock, cites, meta);
 }
 
 // ---------------------------------------------------------------- side panel

@@ -309,3 +309,22 @@ Honest limits:
   dependencies of the build or the test suite.
 * PNG export is refused with `501 format_unsupported`: there is no rasteriser, and a PNG that was
   really a renamed SVG would be a false file.
+
+## Instruction-like source text (§11)
+
+What is implemented: a small, explicit rule list (override instructions, role reassignment,
+prompt exfiltration, "don't tell the user", credential requests) is scanned at ingest and at
+answer time. Hits are counted on the source row, reported per answer with rule/text/offset, and
+never quoted as evidence — unless the user's question is *about* instructions, in which case
+quoting them is the honest answer.
+
+What this is **not**:
+
+* Not a classifier and not a sanitiser. Paraphrased persuasion ("the reader should conclude that
+  the window is thirty years") passes through untouched. Forge's defence is architectural — it
+  quotes and cites instead of obeying, and a quoted line is visibly quoted — not statistical.
+* A false positive makes Forge skip a real sentence, so the rule list is deliberately narrow:
+  plain prose that merely contains the word "ignore" or "instruction" is not flagged (tests pin
+  both directions).
+* Table answers (`engine: table`) never quote prose, so they carry no instruction hits; the
+  numbers they print are computed from cells and are checked against the grid.

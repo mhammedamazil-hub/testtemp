@@ -431,6 +431,8 @@ mod tests {
             }],
             abstained: false,
             engine: "extractive".into(),
+            untrusted: Vec::new(),
+            untrusted_abstained: false,
             coverage: 1,
         };
         let found = find("what is the default retention window", &chunks, &sources);
@@ -457,6 +459,8 @@ mod tests {
             abstained: true,
             engine: "extractive".into(),
             coverage: 0,
+            untrusted: Vec::new(),
+            untrusted_abstained: false,
         };
         let found = find("what is the default retention window", &chunks, &sources);
         assert_eq!(attach(&mut answer, &found), 0);

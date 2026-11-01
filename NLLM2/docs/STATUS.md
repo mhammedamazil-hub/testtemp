@@ -3,7 +3,7 @@
 Last updated: 2026-11-01 (access control + share links, crash-resilient ingestion with retry,
 timed transcripts, discovery from seed pages, slide editing and artifact export, library
 search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export,
-RSS/Atom feeds, GitHub repositories, PPTX and PDF export).
+RSS/Atom feeds, GitHub repositories, PPTX and PDF export, instruction-like source text).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -22,8 +22,8 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **277 passing, 0 failing** (26 `bininspect` + 214 lib + 32 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **154 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **283 passing, 0 failing** (26 `bininspect` + 219 lib + 33 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **157 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -47,6 +47,7 @@ untested it says so.
 | GitHub repositories | `POST /api/notebooks/:id/sources/github` reads a **public** repo's README and issues through `api.github.com` with no token: issues are cited by number and title (`issue 12 · Retry budget…`), pull requests are skipped and counted, and a 403/429 is reported with GitHub's own message instead of being retried. The collected JSON envelope is retained, so a retry re-indexes the same collection | `github` (8 tests) + e2e `github_repositories_are_read_as_readme_and_numbered_issues`; live: `BurntSushi/ripgrep` → 21.6 KB README, 1 issue, 4 PRs skipped |
 | PPTX export | `GET /api/artifacts/:id/export?format=pptx` writes a real Office Open XML package by hand (stored-entry ZIP with CRC-32, content types, package rels, presentation, slide master, blank layout, theme, one part per slide). Bullets carry their citation label; the footer carries the deck title and version. A non-deck artifact is `409 format_unavailable` rather than a mislabelled file | `render::pptx` (5 tests) + e2e `slide_decks_export_as_a_real_pptx_and_every_artifact_exports_as_a_real_pdf` + journey H + 3 UI assertions |
 | PDF export | `format=pdf` works for **every** artifact: title block, one section per slide/row, citation labels inline, sources named (not just ids), real xref table, `page n of m` footer. Text is encoded one byte per character for WinAnsi, so a `·` is `0xB7` and not `Â·`; characters outside Latin-1 become `?` and the footer says so | `render::pdf` (4 tests) + journey G/H + 2 UI assertions |
+| Instruction-like source text (§11) | source text is data, never an order. Ingestion counts sentences that read as instructions to an assistant (`ignore all previous instructions`, role reassignment, prompt exfiltration, "don't tell the user", credential requests), stores `instruction_like_spans` and warns on the source row. The answer path **skips** such a sentence when choosing what to quote, reports every hit (rule + text + offset) in `untrusted`, and adds a note saying what was left out. If nothing quotable remains it abstains **saying the passages were instructions**. A question *about* instructions is exempt: then quoting them is the answer | `untrusted` (5 tests) + e2e `instruction_like_source_text_is_reported_and_not_followed` + 4 UI assertions |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |

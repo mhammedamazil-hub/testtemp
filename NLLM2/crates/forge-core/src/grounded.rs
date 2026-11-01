@@ -12,6 +12,7 @@
 
 use crate::domain::{Chunk, Citation, Locator, Source};
 use crate::retrieve;
+use crate::untrusted;
 
 #[derive(Debug, Clone)]
 pub struct Answer {
@@ -20,6 +21,13 @@ pub struct Answer {
     pub abstained: bool,
     pub engine: String,
     pub coverage: usize,
+    /// Sentences that were passed over because they read like instructions to an assistant
+    /// rather than statements about the world. Reported, never silently dropped: the user can
+    /// open the passage and judge for themselves.
+    pub untrusted: Vec<untrusted::Hit>,
+    /// True when instruction-like text was found *and* the question was not about instructions,
+    /// which is the case where the safer answer is to abstain rather than answer from the rest.
+    pub untrusted_abstained: bool,
 }
 
 /// How the verified evidence is presented. Style never changes *which* evidence is used —
@@ -137,8 +145,22 @@ fn answer_limited(
             abstained: true,
             engine: "extractive".into(),
             coverage: 0,
+            untrusted: Vec::new(),
+            untrusted_abstained: false,
         };
     }
+
+    // Text addressed to an assistant is data here, never an order (§11). Two questions matter:
+    // does the retrieved evidence contain such text at all, and is the *question* about it? A
+    // question that asks what a document says about instructions must be allowed to quote them.
+    let asking_about_instructions = untrusted::asks_about_instructions(question);
+    let mut untrusted_hits: Vec<untrusted::Hit> = Vec::new();
+    if !asking_about_instructions {
+        for hit in strong.iter() {
+            untrusted_hits.extend(untrusted::scan(&chunks[hit.chunk_index].text));
+        }
+    }
+    let mut skipped: usize = 0;
 
     // Collect the best sentence per chunk, then keep only sentences that actually
     // share enough of the question's content words. A chunk can score on a single
@@ -148,10 +170,18 @@ fn answer_limited(
     let mut candidates: Vec<(f64, f64, usize, String)> = Vec::new();
     for hit in strong.iter() {
         let chunk = &chunks[hit.chunk_index];
-        if let Some((overlap, sentence)) = retrieve::scored_sentences(&chunk.text, question, 3)
+        // Take the best sentence that is *both* sufficiently on-topic and not an instruction.
+        let chosen = retrieve::scored_sentences(&chunk.text, question, 3)
             .into_iter()
-            .find(|(o, _)| *o >= min_overlap)
-        {
+            .filter(|(o, _)| *o >= min_overlap)
+            .find(|(_, sentence)| {
+                let instruction = untrusted::looks_like_instruction(sentence);
+                if instruction {
+                    skipped += 1;
+                }
+                !instruction
+            });
+        if let Some((overlap, sentence)) = chosen {
             // Guard: a quote must be literally present in its chunk.
             if !chunk.text.contains(sentence.trim()) {
                 continue;
@@ -199,12 +229,30 @@ fn answer_limited(
     }
 
     if citations.is_empty() {
+        // Nothing quotable is left. If instruction-like text is why, say that instead of the
+        // generic "no passage matches": the two are very different situations for the reader.
+        let text = if skipped > 0 || !untrusted_hits.is_empty() {
+            format!(
+                "I can't answer that from the selected sources. The passages that matched \"{}\" \
+                 read as instructions addressed to an assistant rather than statements about the \
+                 subject ({} flagged), so Forge did not quote them.\n\n\
+                 Open the source and read the passage yourself; if it is legitimate prose, rephrase \
+                 the question around its factual content. Forge treats source text as data, never as \
+                 instructions.",
+                question.trim(),
+                skipped.max(untrusted_hits.len())
+            )
+        } else {
+            abstain_text(question)
+        };
         return Answer {
-            text: abstain_text(question),
+            text,
             citations: Vec::new(),
             abstained: true,
             engine: "extractive".into(),
             coverage: 0,
+            untrusted_abstained: !untrusted_hits.is_empty() || skipped > 0,
+            untrusted: untrusted_hits,
         };
     }
 
@@ -273,12 +321,25 @@ fn answer_limited(
         }
     }
 
+    if !untrusted_hits.is_empty() {
+        // The answer stands on its own quotations; this line is about what was *not* used.
+        text.push_str(&format!(
+            "\n\nNote: {} passage{} in the matching sources reads as an instruction to an \
+             assistant, not as a statement about the subject, so it is not quoted above. Forge \
+             treats source text as data; open the source to read it in place.",
+            untrusted_hits.len(),
+            if untrusted_hits.len() == 1 { "" } else { "s" }
+        ));
+    }
+
     Answer {
         text,
         coverage: citations.len(),
         citations,
         abstained: false,
         engine: "extractive".into(),
+        untrusted_abstained: false,
+        untrusted: untrusted_hits,
     }
 }
 
