@@ -5,6 +5,7 @@
 
 pub mod api;
 pub mod artifacts;
+pub mod datatable;
 pub mod domain;
 pub mod grounded;
 pub mod guide;

@@ -1406,6 +1406,28 @@ function renderArtifact(payload, art = null) {
         h("button", { class: "cite", onclick: () => openViewer(q.citation.source_id, q.citation.chunk_id) },
           `[${q.citation.n}] ${q.citation.locator_label}`)));
     }
+  } else if (payload.kind === "data_table") {
+    box.append(h("div", { class: "hint" },
+      `${payload.row_count} row(s) read from ${payload.source_title} · sheet ${payload.sheet}` +
+      `${payload.truncated ? " · truncated at the row limit" : ""}`));
+    if (payload.filter && payload.filter.column) {
+      box.append(h("div", { class: "hint" },
+        `filter: ${payload.filter.column} ${payload.filter.op} ${payload.filter.value} · ${payload.filtered_out} row(s) excluded`));
+    }
+    const table = h("table", { class: "grid-table" });
+    const head = h("tr", {});
+    for (const c of payload.columns || []) head.append(h("th", { title: `column ${c.letter}` }, c.name));
+    table.append(h("thead", {}, head));
+    const body = h("tbody", {});
+    for (const row of payload.rows || []) {
+      const tr = h("tr", { title: `read from ${row.ref}` });
+      for (const c of row.cells || []) tr.append(h("td", { title: `cell ${c.ref}` }, c.value === "" ? h("span", { class: "hint" }, "(empty)") : c.value));
+      body.append(tr);
+    }
+    table.append(body);
+    box.append(table);
+    box.append(h("p", { class: "hint" },
+      "Every value was copied from one cell — hover a cell to see its reference. This is a projection of a stored grid, not a table inferred from prose."));
   } else if (payload.kind === "mindmap") {
     box.append(renderMindmap(payload));
   } else if (payload.kind === "slides") {
@@ -1862,6 +1884,7 @@ async function showArtifact(id) {
           a.kind === "mindmap" ? h("button", { class: "ghost", title: "Export SVG", onclick: () => downloadArtifact(a.id, "svg") }, "svg") : null,
           a.kind === "slides" ? h("button", { class: "ghost", title: "Export PowerPoint (.pptx)", onclick: () => downloadArtifact(a.id, "pptx") }, "pptx") : null,
           h("button", { class: "ghost", title: "Export PDF", onclick: () => downloadArtifact(a.id, "pdf") }, "pdf"),
+          a.kind === "data_table" ? h("button", { class: "ghost", title: "Export CSV of the projected grid", onclick: () => downloadArtifact(a.id, "csv") }, "csv") : null,
           h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
         h("div", { class: "content" }, renderArtifact(a.payload, a))));
     document.body.append(overlay);

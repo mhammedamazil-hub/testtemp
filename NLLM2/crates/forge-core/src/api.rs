@@ -2586,6 +2586,68 @@ impl Api {
         };
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
 
+        // A data table is a projection of a grid that is already stored, so it is generated from
+        // the tables rather than from chunk text — and it says so in its payload.
+        if kind == "data_table" {
+            let spec = crate::datatable::Spec {
+                table_id: body.str_of("table_id").unwrap_or("").to_string(),
+                columns: parse_str_list(body.get("columns")),
+                filter_column: body.str_of("filter_column").unwrap_or("").to_string(),
+                filter_op: body.str_of("filter_op").unwrap_or("").to_string(),
+                filter_value: body.str_of("filter_value").unwrap_or("").to_string(),
+                limit: body.get("limit").and_then(|v| v.as_f64()).unwrap_or(0.0) as usize,
+                title: body.str_of("title").unwrap_or("").to_string(),
+            };
+            let (tables, sources) = self.store.read(|db| {
+                let tables: Vec<crate::tables::Table> = db
+                    .tables
+                    .iter()
+                    .filter(|t| t.notebook_id == nb)
+                    .filter(|t| spec.table_id.is_empty() || t.id == spec.table_id)
+                    .cloned()
+                    .collect();
+                let sources: Vec<Source> = db
+                    .sources
+                    .iter()
+                    .filter(|s| s.notebook_id == nb && s.status == "ready")
+                    .cloned()
+                    .collect();
+                (tables, sources)
+            });
+            let (title, payload) =
+                crate::datatable::build(&spec, &tables, &sources).map_err(|e| err(422, "bad_table", &e))?;
+            let table_source: Vec<String> = payload
+                .get("source_id")
+                .and_then(|v| v.as_str())
+                .map(|id| vec![id.to_string()])
+                .unwrap_or_default();
+            let art = Artifact {
+                id: new_id("art"),
+                notebook_id: nb.to_string(),
+                kind: kind.clone(),
+                title: title.clone(),
+                created_at: now_iso(),
+                source_ids: table_source,
+                payload: payload.clone(),
+                stale: false,
+                topic: topic.clone(),
+                difficulty: difficulty.as_str().to_string(),
+                audience: audience.to_string(),
+                ..Artifact::default()
+            };
+            let id_out = art.id.clone();
+            self.store
+                .write(|db| db.artifacts.push(art))
+                .map_err(|e| err(500, "storage", &e.to_string()))?;
+            return Ok(created(obj! {
+                "id" => id_out,
+                "kind" => kind,
+                "title" => title,
+                "difficulty" => difficulty.as_str(),
+                "payload" => payload,
+            }));
+        }
+
         let (chunks, sources) = self.store.read(|db| {
             let sources: Vec<Source> = db
                 .sources
@@ -2661,6 +2723,76 @@ impl Api {
         let difficulty = artifacts::Difficulty::parse(&difficulty_s)
             .ok_or_else(|| err(409, "not_regenerable", "this artifact has no recorded difficulty; generate it again from the notebook"))?;
         let audience = if audience.is_empty() { "general".to_string() } else { audience };
+
+        // A data table regenerates from its stored spec against the current grid.
+        let spec_payload = self.store.read(|db| {
+            db.artifacts.iter().find(|a| a.id == aid).map(|a| a.payload.clone())
+        });
+        if kind == "data_table" {
+            let payload = spec_payload.ok_or_else(|| err(404, "not_found", "artifact not found"))?;
+            let spec = crate::datatable::Spec {
+                table_id: payload.str_of("table_id").unwrap_or("").to_string(),
+                columns: payload
+                    .get("columns")
+                    .and_then(|c| c.as_arr())
+                    .map(|list| list.iter().filter_map(|c| c.str_of("name").map(|s| s.to_string())).collect())
+                    .unwrap_or_default(),
+                filter_column: payload
+                    .get("filter")
+                    .and_then(|f| f.str_of("column"))
+                    .unwrap_or("")
+                    .to_string(),
+                filter_op: payload.get("filter").and_then(|f| f.str_of("op")).unwrap_or("").to_string(),
+                filter_value: payload
+                    .get("filter")
+                    .and_then(|f| f.str_of("value"))
+                    .unwrap_or("")
+                    .to_string(),
+                limit: payload.get("limit").and_then(|v| v.as_f64()).unwrap_or(0.0) as usize,
+                title: String::new(),
+            };
+            let (tables, sources) = self.store.read(|db| {
+                let tables: Vec<crate::tables::Table> =
+                    db.tables.iter().filter(|t| t.id == spec.table_id).cloned().collect();
+                let sources: Vec<Source> = db
+                    .sources
+                    .iter()
+                    .filter(|s| source_ids.contains(&s.id) && s.status == "ready")
+                    .cloned()
+                    .collect();
+                (tables, sources)
+            });
+            if tables.is_empty() {
+                return Err(err(409, "no_sources", "the grid this table was built from is gone"));
+            }
+            let (title, rebuilt) =
+                crate::datatable::build(&spec, &tables, &sources).map_err(|e| err(409, "not_regenerable", &e))?;
+            return self
+                .store
+                .write(|db| {
+                    let Some(art) = db.artifacts.iter_mut().find(|a| a.id == aid) else {
+                        return Err(err(404, "not_found", "artifact not found"));
+                    };
+                    let dropped = art.reviews.len() as u64;
+                    art.reviews.clear();
+                    art.title = title.clone();
+                    art.payload = rebuilt.clone();
+                    art.stale = false;
+                    art.version += 1;
+                    art.updated_at = now_iso();
+                    Ok(ok(obj! {
+                        "id" => aid,
+                        "kind" => "data_table",
+                        "title" => art.title.as_str(),
+                        "version" => art.version as u64,
+                        "stale" => false,
+                        "reviews_dropped" => dropped,
+                        "note" => "rebuilt from the same grid and filter; the rows are re-read, not remembered",
+                        "payload" => art.payload.clone(),
+                    }))
+                })
+                .map_err(|e| err(500, "storage", &e.to_string()))?;
+        }
 
         let (chunks, sources) = self.store.read(|db| {
             let sources: Vec<Source> = db
@@ -2954,6 +3086,23 @@ impl Api {
                         "PPTX export exists for slide decks only; this artifact is not a deck",
                     ),
                 },
+                "csv" => {
+                    // A projection of a grid exports as a grid: header row, then the projected
+                    // values, RFC 4180 quoted. Only for data tables, because a CSV of a deck's
+                    // quotations would pretend that prose is tabular data.
+                    if art.kind != "data_table" {
+                        return err(
+                            409,
+                            "format_unavailable",
+                            "CSV export exists for data-table artifacts only; export Markdown (format=md) for the rest",
+                        );
+                    }
+                    let body = crate::datatable::to_csv(&art.payload);
+                    Response::new(200, "text/csv; charset=utf-8", body.into_bytes()).with_header(
+                        "Content-Disposition",
+                        &format!("attachment; filename=\"{}.csv\"", base),
+                    )
+                }
                 "pdf" => {
                     let bytes = crate::render::pdf(art, &sources);
                     Response::new(200, "application/pdf", bytes)

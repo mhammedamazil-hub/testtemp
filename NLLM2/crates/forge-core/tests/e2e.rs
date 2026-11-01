@@ -3367,3 +3367,136 @@ fn instruction_like_source_text_is_reported_and_not_followed() {
         "the quoted sentence is really in the source"
     );
 }
+
+#[test]
+fn data_table_artifacts_project_a_real_grid_with_per_cell_evidence() {
+    let dir = tempdir("data-table");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Tables"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    // A real CSV source, so the grid comes from the ingestion pipeline rather than a fixture.
+    let csv = "Region,Revenue,Notes\nNorth,1250,\"steady, with a comma\"\nSouth,980,\nNorth,3100,promo\n";
+    let (st, _) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/sources/upload?filename=sales.csv", nb_id),
+        Some(csv.as_bytes()),
+        "text/csv",
+    );
+    assert_eq!(st, 201);
+    let (_, sources) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let src = &sources.get("sources").unwrap().as_arr().unwrap()[0];
+    let src_id = src.str_of("id").unwrap().to_string();
+    let (st, tables) = s.json("GET", &format!("/api/sources/{}/tables", src_id), None);
+    assert_eq!(st, 200);
+    let table = &tables.get("tables").and_then(|t| t.as_arr()).unwrap()[0];
+    let table_id = table.str_of("id").unwrap().to_string();
+
+    // A projection: two columns, filtered to the North region.
+    let (st, art) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[
+            ("kind", Value::from("data_table")),
+            ("table_id", Value::from(table_id.as_str())),
+            ("columns", Value::Arr(vec![Value::from("Revenue"), Value::from("Region")])),
+            ("filter_column", Value::from("Region")),
+            ("filter_op", Value::from("eq")),
+            ("filter_value", Value::from("North")),
+            ("title", Value::from("North revenue")),
+        ])),
+    );
+    assert_eq!(st, 201, "{:?}", art);
+    assert_eq!(art.str_of("title"), Some("North revenue"));
+    let payload = art.get("payload").cloned().unwrap();
+    assert_eq!(payload.str_of("kind"), Some("data_table"));
+    assert_eq!(payload.str_of("sheet"), Some("sales"), "the sheet name is the file stem");
+    assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(2.0));
+    assert_eq!(payload.get("rows_read").and_then(|v| v.as_f64()), Some(3.0));
+    assert_eq!(payload.get("filtered_out").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(payload.get("empty_cells").and_then(|v| v.as_f64()), Some(0.0));
+    // Columns keep the sheet's own order, not the order they were asked for.
+    let names: Vec<String> = payload
+        .get("columns")
+        .and_then(|c| c.as_arr())
+        .unwrap()
+        .iter()
+        .map(|c| c.str_of("name").unwrap().to_string())
+        .collect();
+    assert_eq!(names, vec!["Region", "Revenue"]);
+    // Every value carries the A1 reference it came from.
+    let row = &payload.get("rows").and_then(|r| r.as_arr()).unwrap()[0];
+    assert_eq!(row.str_of("ref"), Some("A2:B2"));
+    let cells = row.get("cells").and_then(|c| c.as_arr()).unwrap();
+    assert_eq!(cells[0].str_of("value"), Some("North"));
+    assert_eq!(cells[0].str_of("ref"), Some("A2"));
+    assert_eq!(cells[1].str_of("ref"), Some("B2"));
+    // The artifact records the source it projects.
+    assert_eq!(art.get("payload").and_then(|p| p.str_of("source_id")), Some(src_id.as_str()));
+
+    let art_id = art.str_of("id").unwrap().to_string();
+
+    // CSV export: a real grid, RFC 4180, with only the projected columns.
+    let (st, headers, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=csv", art_id));
+    assert_eq!(st, 200);
+    assert!(headers.to_ascii_lowercase().contains("text/csv"), "{}", headers);
+    let csv_out = String::from_utf8(body).expect("csv is utf-8");
+    assert_eq!(csv_out, "Region,Revenue\r\nNorth,1250\r\nNorth,3100\r\n");
+    // A deck cannot be exported as a table.
+    let (st, _, _) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=pdf", art_id));
+    assert_eq!(st, 200, "a data table still prints");
+
+    // Markdown keeps the grid and lists where each value came from.
+    let (st, md) = s.raw("GET", &format!("/api/artifacts/{}/export?format=md", art_id), None, "text/plain");
+    assert_eq!(st, 200);
+    assert!(md.contains("| Region | Revenue |"), "{}", md);
+    assert!(md.contains("A2:B2") && md.contains("B2"), "cell references are exported: {}", md);
+
+    // Regeneration re-reads the same grid and filter, and bumps the version.
+    let (st, again) = s.json("POST", &format!("/api/artifacts/{}/regenerate", art_id), None);
+    assert_eq!(st, 200, "{:?}", again);
+    assert_eq!(again.get("version").and_then(|v| v.as_f64()), Some(2.0));
+    assert_eq!(again.get("payload").and_then(|p| p.get("row_count")).and_then(|v| v.as_f64()), Some(2.0));
+
+    // Bad requests are explained, not guessed at.
+    let mk = |body: Value| {
+        s.json(
+            "POST",
+            &format!("/api/notebooks/{}/artifacts", nb_id),
+            Some(body),
+        )
+    };
+    let (st, err) = mk(obj(&[("kind", Value::from("data_table"))]));
+    assert_eq!(st, 422, "{:?}", err);
+    assert_eq!(err.str_of("code"), Some("bad_table"));
+    let (st, err) = mk(obj(&[
+        ("kind", Value::from("data_table")),
+        ("table_id", Value::from(table_id.as_str())),
+        ("columns", Value::Arr(vec![Value::from("Profit")])),
+    ]));
+    assert_eq!(st, 422);
+    assert!(err.str_of("error").unwrap_or("").contains("no column \"Profit\""), "{:?}", err);
+    let (st, err) = mk(obj(&[
+        ("kind", Value::from("data_table")),
+        ("table_id", Value::from(table_id.as_str())),
+        ("filter_column", Value::from("Region")),
+        ("filter_op", Value::from("eq")),
+        ("filter_value", Value::from("Mars")),
+    ]));
+    assert_eq!(st, 422);
+    assert!(err.str_of("error").unwrap_or("").contains("projection is empty"), "{:?}", err);
+
+    // An artifact that is not a data table refuses CSV rather than exporting prose as a grid.
+    let (st, cards) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("flashcards"))])),
+    );
+    assert_eq!(st, 201, "{:?}", cards);
+    let card_id = cards.str_of("id").unwrap().to_string();
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=csv", card_id), None);
+    assert_eq!(st, 409, "{:?}", body);
+    assert_eq!(body.str_of("code"), Some("format_unavailable"));
+}

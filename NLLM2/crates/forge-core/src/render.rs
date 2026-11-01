@@ -501,6 +501,46 @@ fn document_lines(art: &Artifact, sources: &[Source]) -> Vec<Line> {
         lines.push(Line { text: String::new(), style: Style::Body });
     };
 
+    if art.payload.get("kind").and_then(|k| k.as_str()) == Some("data_table") {
+        let columns: Vec<String> = art
+            .payload
+            .get("columns")
+            .and_then(|c| c.as_arr())
+            .map(|list| list.iter().map(|c| c.str_of("name").unwrap_or("").to_string()).collect())
+            .unwrap_or_default();
+        let rows = art.payload.get("rows").and_then(|r| r.as_arr()).cloned().unwrap_or_default();
+        for row in &rows {
+            let cells: Vec<String> = row
+                .get("cells")
+                .and_then(|c| c.as_arr())
+                .map(|list| list.iter().map(|c| c.str_of("value").unwrap_or("").to_string()).collect())
+                .unwrap_or_default();
+            let mut body: Vec<String> = Vec::new();
+            for (i, value) in cells.iter().enumerate() {
+                let name = columns.get(i).cloned().unwrap_or_else(|| format!("column {}", i + 1));
+                body.push(format!("{}: {}", name, if value.is_empty() { "(empty)" } else { value }));
+            }
+            body.push(format!("read from {}", row.str_of("ref").unwrap_or("")));
+            push_section(
+                &format!("row {}", row.get("number").and_then(|n| n.as_f64()).unwrap_or(0.0) as u64),
+                &body,
+                &mut lines,
+            );
+        }
+        if !art.source_ids.is_empty() {
+            lines.push(Line { text: "Sources".to_string(), style: Style::Heading });
+            for id in &art.source_ids {
+                let labelled = sources
+                    .iter()
+                    .find(|s| &s.id == id)
+                    .map(|s| format!("{} ({})", s.title, s.kind))
+                    .unwrap_or_else(|| id.clone());
+                lines.push(Line { text: format!("- {}", labelled), style: Style::Small });
+            }
+        }
+        return lines;
+    }
+
     match art.payload.get("slides").and_then(|s| s.as_arr()) {
         Some(slides) => {
             for (i, slide) in slides.iter().enumerate() {

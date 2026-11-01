@@ -45,7 +45,7 @@ pub fn to_markdown(art: &Artifact, sources: &[Source]) -> String {
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", art.title));
     out.push_str(&format!(
-        "_{} artifact · Forge · version {} · {} source(s) · exported Markdown (no PPTX/PDF renderer in this build)_\n\n",
+        "_{} artifact · Forge · version {} · {} source(s) · exported Markdown; PowerPoint and PDF are available through format=pptx / format=pdf_\n\n",
         art.kind,
         art.version,
         art.source_ids.len()
@@ -56,6 +56,66 @@ pub fn to_markdown(art: &Artifact, sources: &[Source]) -> String {
 
     let p = &art.payload;
     match art.kind.as_str() {
+        "data_table" => {
+            // A grid stays a grid: a Markdown table, then the cell references it was read from
+            // so the numbers can be checked against the sheet rather than trusted.
+            let columns: Vec<String> = p
+                .get("columns")
+                .and_then(|c| c.as_arr())
+                .map(|list| list.iter().map(|c| c.str_of("name").unwrap_or("").to_string()).collect())
+                .unwrap_or_default();
+            let rows = p.get("rows").and_then(|r| r.as_arr()).cloned().unwrap_or_default();
+            out.push_str(&format!(
+                "Sheet **{}** of {} · {} row(s) of {} read{} · exported CSV is `format=csv`\n\n",
+                p.str_of("sheet").unwrap_or(""),
+                p.str_of("source_title").unwrap_or("unknown source"),
+                rows.len(),
+                p.get("rows_read").and_then(|v| v.as_f64()).unwrap_or(0.0) as u64,
+                if p.get("truncated") == Some(&Value::Bool(true)) { " (truncated)" } else { "" }
+            ));
+            if let Some(f) = p.get("filter") {
+                if f.str_of("column").is_some() {
+                    out.push_str(&format!(
+                        "Filter: `{} {} {}`.\n\n",
+                        f.str_of("column").unwrap_or(""),
+                        f.str_of("op").unwrap_or(""),
+                        f.str_of("value").unwrap_or("")
+                    ));
+                }
+            }
+            out.push_str(&format!("| {} |\n", columns.join(" | ")));
+            out.push_str(&format!(
+                "| {} |\n",
+                columns.iter().map(|_| "---").collect::<Vec<_>>().join(" | ")
+            ));
+            for row in &rows {
+                let cells: Vec<String> = row
+                    .get("cells")
+                    .and_then(|c| c.as_arr())
+                    .map(|list| {
+                        list.iter()
+                            .map(|c| c.str_of("value").unwrap_or("").replace('|', "\\|"))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                out.push_str(&format!("| {} |\n", cells.join(" | ")));
+            }
+            out.push('\n');
+            out.push_str("Every value above was copied from one cell. Where it came from:\n\n");
+            for row in &rows {
+                let refs: Vec<String> = row
+                    .get("cells")
+                    .and_then(|c| c.as_arr())
+                    .map(|list| list.iter().filter_map(|c| c.str_of("ref")).map(|r| r.to_string()).collect())
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "- {} — {}\n",
+                    row.str_of("ref").unwrap_or(""),
+                    refs.join(", ")
+                ));
+            }
+            out.push('\n');
+        }
         "slides" => {
             let slides = p.get("slides").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
             out.push_str(&format!(

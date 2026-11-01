@@ -328,3 +328,21 @@ What this is **not**:
   both directions).
 * Table answers (`engine: table`) never quote prose, so they carry no instruction hits; the
   numbers they print are computed from cells and are checked against the grid.
+
+## Data-table artifacts (ART-06)
+
+Implemented: a projection of a grid that is already stored (XLSX sheet or CSV), with column
+selection, one filter, a row limit, per-cell A1 references in the payload, and CSV/Markdown/PDF
+export. Every projected row keeps the sheet's original row number.
+
+Not implemented, and not claimed:
+
+* **No table is inferred from prose.** A paragraph does not become a table; the artifact always
+  names the stored grid it projects (`table_id`, sheet, source).
+* One filter only, no joins, no pivots, no computed columns, no aggregation inside the artifact
+  (aggregation over a grid is the table-answer path in chat, which is separate and cited per cell).
+* No charts, no conditional formatting, and no editing of the projection after creation: change
+  the spec by creating another artifact. The stored grid itself is never modified.
+* The CSV export contains only the projected columns and values. Provenance (cell references)
+  lives in the Markdown and JSON exports, because a CSV with provenance rows would no longer be a
+  CSV that other tools can read.

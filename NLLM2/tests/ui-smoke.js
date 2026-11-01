@@ -528,6 +528,48 @@ async function main() {
   byText(".viewer header button", "✕").click();
   await wait(200);
 
+  // --- a data table artifact projects that grid, cell references included
+  const salesSrc = (await (await fetch(`${BASE}/api/notebooks/${nbId}/sources`)).json()).sources
+    .find((src) => /sales\.xlsx/i.test(src.title));
+  const gridTables = await (await fetch(`${BASE}/api/sources/${salesSrc.id}/tables`)).json();
+  const salesTable = (gridTables.tables || []).find((t) => !t.hidden) || (gridTables.tables || [])[0];
+  const salesColumns = (salesTable?.columns || []).slice(0, 2);
+  const bareTable = await (await fetch(`${BASE}/api/notebooks/${nbId}/artifacts`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "data_table" }),
+  })).json();
+  check("a data table artifact without a table id is refused with a reason",
+    bareTable.code === "bad_table" && /table_id/.test(bareTable.error || ""), JSON.stringify(bareTable).slice(0, 160));
+  const tableArt = await (await fetch(`${BASE}/api/notebooks/${nbId}/artifacts`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "data_table", table_id: salesTable.id, columns: salesColumns, title: "Revenue grid" }),
+  })).json();
+  check("a data table artifact projects a real sheet", tableArt.payload?.row_count > 0,
+    JSON.stringify(tableArt).slice(0, 200));
+  window.showArtifact(tableArt.id);
+  await wait(700);
+  const tableOverlay = lastOverlay() || $$(".overlay").pop();
+  const headText = tableOverlay?.querySelector("thead")?.textContent || "";
+  check("the grid renders as a table with the projected columns",
+    !!tableOverlay?.querySelector("table.grid-table") && salesColumns.every((c) => headText.includes(c)),
+    headText);
+  check("grid cells expose the cell they came from",
+    !!tableOverlay?.querySelector('td[title^="cell A2"]') &&
+      !!tableOverlay?.querySelector('td[title^="cell B2"]'),
+    [...(tableOverlay?.querySelectorAll("td[title]") || [])].slice(0, 4).map((c) => c.getAttribute("title")).join(","));
+  check("the artifact says it projects a stored grid rather than inferring one",
+    /projection of a stored grid/.test(tableOverlay?.textContent || ""), tableOverlay?.textContent?.slice(0, 300));
+  const csvBtn = [...(tableOverlay?.querySelectorAll("header button") || [])].find((b) => b.textContent.trim() === "csv");
+  check("a data table offers a CSV export", !!csvBtn,
+    [...(tableOverlay?.querySelectorAll("header button") || [])].map((b) => b.textContent).join(","));
+  csvBtn.click();
+  await wait(800);
+  check("the CSV export shows the projected grid, not prose",
+    $(".export-body")?.textContent?.split("\n")[0]?.trim() === salesColumns.join(","),
+    $(".export-body")?.textContent?.slice(0, 160));
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+
   // --- URL import is a real control, not a prompt() box
   check("add-from-URL control exists", !!window.document.querySelector("#addUrlBtn"));
   check("URL input is labelled for assistive tech",

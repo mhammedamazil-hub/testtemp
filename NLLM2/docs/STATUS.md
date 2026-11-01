@@ -3,7 +3,8 @@
 Last updated: 2026-11-01 (access control + share links, crash-resilient ingestion with retry,
 timed transcripts, discovery from seed pages, slide editing and artifact export, library
 search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export,
-RSS/Atom feeds, GitHub repositories, PPTX and PDF export, instruction-like source text).
+RSS/Atom feeds, GitHub repositories, PPTX and PDF export, instruction-like source text,
+data-table artifacts).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -22,8 +23,8 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **283 passing, 0 failing** (26 `bininspect` + 219 lib + 33 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **157 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **293 passing, 0 failing** (26 `bininspect` + 228 lib + 34 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **164 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -48,6 +49,7 @@ untested it says so.
 | PPTX export | `GET /api/artifacts/:id/export?format=pptx` writes a real Office Open XML package by hand (stored-entry ZIP with CRC-32, content types, package rels, presentation, slide master, blank layout, theme, one part per slide). Bullets carry their citation label; the footer carries the deck title and version. A non-deck artifact is `409 format_unavailable` rather than a mislabelled file | `render::pptx` (5 tests) + e2e `slide_decks_export_as_a_real_pptx_and_every_artifact_exports_as_a_real_pdf` + journey H + 3 UI assertions |
 | PDF export | `format=pdf` works for **every** artifact: title block, one section per slide/row, citation labels inline, sources named (not just ids), real xref table, `page n of m` footer. Text is encoded one byte per character for WinAnsi, so a `·` is `0xB7` and not `Â·`; characters outside Latin-1 become `?` and the footer says so | `render::pdf` (4 tests) + journey G/H + 2 UI assertions |
 | Instruction-like source text (§11) | source text is data, never an order. Ingestion counts sentences that read as instructions to an assistant (`ignore all previous instructions`, role reassignment, prompt exfiltration, "don't tell the user", credential requests), stores `instruction_like_spans` and warns on the source row. The answer path **skips** such a sentence when choosing what to quote, reports every hit (rule + text + offset) in `untrusted`, and adds a note saying what was left out. If nothing quotable remains it abstains **saying the passages were instructions**. A question *about* instructions is exempt: then quoting them is the answer | `untrusted` (5 tests) + e2e `instruction_like_source_text_is_reported_and_not_followed` + 4 UI assertions |
+| Data-table artifact (ART-06) | `kind: "data_table"` projects a **stored grid**: pick `table_id`, optionally `columns`, a filter (`eq`/`contains`/`gt`/`lt`/`is_empty`/`not_empty`) and a row limit. Every value carries the **A1 reference** it came from; row numbers are the sheet's own; empty cells are counted, not filled; a filter that excludes everything is refused with the counts; regeneration re-reads the same grid and filter. `format=csv` exports the projection as RFC 4180; `md`/`pdf` print it with its references. Charts and prose→table inference are **not** implemented and not claimed | `datatable` (9 tests) + e2e `data_table_artifacts_project_a_real_grid_with_per_cell_evidence` + 7 UI assertions |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
