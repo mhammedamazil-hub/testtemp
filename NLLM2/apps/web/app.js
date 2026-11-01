@@ -517,6 +517,7 @@ function renderSources(pane) {
     h("label", { for: "fileInput", class: "sr-only" }, "Upload a file"),
     h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, EPUB, MD, TXT, HTML, CSV, VTT, SRT)"),
     h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"),
+    h("button", { class: "ghost", id: "addGithubBtn", onclick: () => promptGithub() }, "Add GitHub repo…"),
     h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover links…"));
 
   const urlRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
@@ -535,13 +536,40 @@ function renderSources(pane) {
     }
   } }, "Fetch page");
   urlRow.append(
-    h("p", { class: "hint" }, "Forge fetches the page itself, keeps its title and canonical URL, and indexes the readable text. Duplicate URLs are refused."),
+    h("p", { class: "hint" }, "Forge fetches the page itself, keeps its title and canonical URL, and indexes the readable text. RSS/Atom feeds are read as dated items. Duplicate URLs are refused."),
     urlInput, urlGo);
   importBox.append(urlRow);
+
+  // GitHub: no token exists in this build, so the note says what that costs (public repos only,
+  // anonymous rate limits) instead of implying a connection the app does not have.
+  const ghRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
+  const ghInput = h("input", { type: "text", id: "githubInput", placeholder: "owner/repo or https://github.com/owner/repo", "aria-label": "GitHub repository" });
+  const ghGo = h("button", { class: "primary", onclick: async () => {
+    const repo = ghInput.value.trim();
+    if (!repo) return;
+    ghGo.disabled = true; ghGo.textContent = "Reading…";
+    try {
+      const r = await api.post(`/notebooks/${nb.id}/sources/github`, { repo });
+      toast(`Imported “${r.title}” (${r.chunk_count} passages)`);
+      await openNotebook(document.getElementById("app"), nb.id);
+    } catch (e) {
+      toast(e.message, "err");
+      ghGo.disabled = false; ghGo.textContent = "Read repository";
+    }
+  } }, "Read repository");
+  ghRow.append(
+    h("p", { class: "hint" }, "README and issues from a public repository, read through GitHub’s public API with no token: public repositories only, anonymous rate limits apply, and issues are cited by number."),
+    ghInput, ghGo);
+  importBox.append(ghRow);
 
   function promptUrl() {
     urlRow.hidden = false;
     urlInput.focus();
+  }
+
+  function promptGithub() {
+    ghRow.hidden = false;
+    ghInput.focus();
   }
 
   importBox.append(uploadRow);

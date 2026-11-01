@@ -257,3 +257,34 @@ Honest limits:
   per-page progress, because parsing is one synchronous pass.
 * **Retry of a URL source re-fetches.** If the page changed since the failure, the retried source
   is the new page, and the content hash changes. That is recorded on the source, not on the job.
+
+## Feeds (RSS / Atom)
+
+* Read: RSS 2.0, Atom 1.0, RSS 1.0 (RDF), plus `content:encoded` / `<summary>` / `<description>`
+  bodies. One block per entry, in the feed's own order, with the publisher's date and author
+  when the feed states them.
+* **Not read:** enclosures (a podcast feed's audio is not transcribed and not stored), full-text
+  pagination of `atom:link rel="next"`, feed autodiscovery from an HTML page's
+  `<link rel="alternate">`, and any credential-protected feed. A feed that lists more than 200
+  items is truncated with a warning.
+* An entry with **no date** is indexed without one. The fetch time is never substituted: a
+  citation that claims a publication date the feed did not state would be fabricated evidence.
+* Item order is the feed's order, not a re-sort by date — re-sorting would renumber `item 1`
+  between fetches and break previously cited positions.
+
+## GitHub repositories
+
+* Public repositories only: Forge holds **no token**, so a private repository answers 404 and
+  the error says so. The anonymous rate limit is whatever GitHub reports; a 403/429 is surfaced
+  with GitHub's message (`github_rate_limited`) rather than retried in a loop.
+* Read: the README at the default branch and one page of issues (default 30, hard cap 100).
+  **Not read:** code, file trees, releases, wikis, discussions, review comments, or any further
+  page of issues. Pull requests that appear in the issue list are skipped and counted.
+* The stored bytes are a JSON envelope of what was collected, so a retry re-indexes that
+  collection instead of silently fetching a newer one. A repository that changed in between is
+  not detected — refresh it to collect again.
+* Live check (2026-11-01, this sandbox): `GET api.github.com/repos/rust-lang/rust/readme` → 200;
+  `BurntSushi/ripgrep` ingested as 172 chunks (21.6 KB README + 1 issue, 4 PRs skipped). The
+  reported rate limit on this egress IP was 5650/hour, which is **not** the anonymous limit — a
+  different egress may see 60/hour and hit `github_rate_limited` quickly. Forge reports what it
+  receives; it does not assume a limit.

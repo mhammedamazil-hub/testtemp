@@ -116,3 +116,23 @@ Consequence for §14 Journey J: the roles, the refusal a viewer gets, revocation
 now implemented and tested (`journey_j_…`). What is *not* reimplemented is the account model
 behind them (email invites, groups, per-user identity); the link is the identity. That gap is in
 `UNKNOWN_AND_LIMITATIONS.md`.
+
+---
+
+## 2026-11-01 — feeds and GitHub are reachable: measured, not assumed
+
+Two source kinds were previously listed as "planned because the host is reachable". This entry
+records what the reachability actually is, because it changed how the features were built.
+
+| What | Result | Label |
+|---|---|---|
+| `api.github.com` from the sandbox | `GET /repos/rust-lang/rust/readme` → **200**; `GET /rate_limit` → `core: {limit: 5650, remaining: 5649}` on this egress IP | `LIVE_OBSERVED` |
+| Anonymous limit | GitHub documents 60 requests/hour for unauthenticated callers; 5650 observed here means this egress is not a bare anonymous client. Forge therefore **reports the limit it is given** (429/403 + GitHub's message) instead of hard-coding either number | `LIVE_OBSERVED` + `INFERRED` |
+| GitHub ingestion, live | `BurntSushi/ripgrep` → 172 chunks: 21,599-byte README plus 1 issue, 4 pull requests skipped and counted | `LIVE_OBSERVED` |
+| Atom feed, live | `https://github.com/BurntSushi/ripgrep/releases.atom` → `kind: feed`, `flavour: atom`, 10 items, e.g. `item 1 · ignore-0.4.34` with `2026-10-27T18:31:25Z · BurntSushi · <release url>` | `LIVE_OBSERVED` |
+| Feed body shape | That feed's `<content type="html">` carries **escaped** HTML (`&lt;p&gt;…&lt;/p&gt;`). Decoding before stripping tags put literal `<p>` into the evidence text, and stripping before decoding deleted real `<` characters. The parser now strips **known** tags only, at both stages, so `x <y>` survives and `<p>` does not | `CODE_CORROBORATED` (found by the live run, fixed, regression-tested) |
+| `github.blog/feed/` | `curl: (35) OpenSSL SSL_connect: SSL_ERROR_SYSCALL` — blocked by this sandbox's egress allowlist | `BLOCKED` — that is a sandbox fact, **not** evidence the feed is unavailable |
+
+Consequence: RSS/Atom and GitHub moved from "planned" to implemented source kinds with their own
+locator kinds (`item`, `issue`), and `UNKNOWN_AND_LIMITATIONS.md` states exactly which parts of a
+feed and of a repository are *not* read.

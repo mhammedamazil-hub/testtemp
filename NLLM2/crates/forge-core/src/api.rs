@@ -10,6 +10,7 @@ use crate::discovery;
 use crate::ingest::text;
 use crate::domain::*;
 use crate::fetch::{self, FetchedMeta};
+use crate::github;
 use crate::grounded;
 use crate::hashes;
 use crate::http::{percent_decode, Reply, Request, Response, StreamReply};
@@ -68,6 +69,41 @@ fn finish_job(db: &mut Db, job_id: &str, status: &str, error: &str) {
         job.status = status.to_string();
         job.error = error.to_string();
         job.finished_at = now_iso();
+    }
+}
+
+/// Map a fetch failure onto an HTTP answer that names the repository and the cause.
+fn github_fetch_error(e: &fetch::FetchError, repo: &github::Repo) -> Response {
+    let status = match e {
+        fetch::FetchError::Rejected(_) => 422,
+        fetch::FetchError::NoTransport(_) => 501,
+        fetch::FetchError::Limit(_) => 413,
+        fetch::FetchError::Failed(_) => 502,
+    };
+    err(status, e.code(), &format!("{}: {}", repo.full(), e.message()))
+}
+
+/// GitHub answers 403/429 for the anonymous rate limit and 404 for anything a caller without
+/// credentials may not see. Both are reported with GitHub's own message.
+fn github_status_error(status: u16, body: &[u8], repo: &github::Repo) -> Response {
+    let text = String::from_utf8_lossy(body);
+    let message = crate::json::parse(&text)
+        .ok()
+        .and_then(|v| v.str_of("message").map(|m| m.to_string()))
+        .unwrap_or_else(|| text.chars().take(200).collect::<String>());
+    match status {
+        404 => err(
+            404,
+            "repo_not_found",
+            &format!("{} is not visible to an anonymous caller (GitHub 404): {}", repo.full(), message),
+        ),
+        403 | 429 => err(
+            429,
+            "github_rate_limited",
+            &format!("GitHub refused the request ({}): {}. Wait, or add the repository again later — Forge holds no token", status, message),
+        ),
+        401 => err(502, "github_auth", &format!("GitHub requires credentials Forge does not have: {}", message)),
+        other => err(502, "github_error", &format!("GitHub answered {} for {}: {}", other, repo.full(), message)),
     }
 }
 
@@ -337,6 +373,7 @@ impl Api {
             ("POST", ["api", "notebooks", id, "sources", "text"]) => self.add_text_source(id, req),
             ("POST", ["api", "notebooks", id, "sources", "upload"]) => self.add_upload_source(id, req),
             ("POST", ["api", "notebooks", id, "sources", "url"]) => self.add_url_source(id, req),
+            ("POST", ["api", "notebooks", id, "sources", "github"]) => self.add_github_source(id, req),
             ("GET", ["api", "notebooks", id, "chunks"]) => Ok(ok(self.list_chunks(id))),
             ("POST", ["api", "notebooks", id, "chat"]) => self.chat(id, req),
             ("GET", ["api", "notebooks", id, "conversations"]) => Ok(ok(self.list_conversations(id))),
@@ -460,6 +497,17 @@ impl Api {
                 "youtube" => obj!{ "status" => "unsupported", "reason" => "needs a transcript extractor (yt-dlp) and an ASR pipeline; neither is installed" },
                 "audio_transcript" => obj!{ "status" => "unsupported", "reason" => "no ASR engine installed (see docs/RESEARCH_BLOCKERS.md)" },
                 "docx" => obj!{ "status" => "supported", "locator" => "paragraph", "note" => "WordprocessingML text; images ignored" },
+                "github" => obj!{
+                    "status" => "supported",
+                    "locator" => "issue",
+                    "note" => "public repositories only: README plus issues, read through api.github.com with no token and the anonymous rate limit, so a 429 is reported with GitHub's own message rather than retried. Pull requests are skipped; code, releases and wikis are not read",
+                },
+                "feed" => obj!{
+                    "status" => "supported",
+                    "locator" => "item",
+                    "formats" => "RSS 2.0, Atom 1.0, RSS 1.0 (RDF), fetched by URL",
+                    "note" => "one citable block per entry with the publisher's own date, position and title (\"item 3 · Churn fell\"); an entry with no date is indexed without one rather than stamped with the fetch time",
+                },
                 "epub" => obj!{ "status" => "supported", "locator" => "section", "note" => "chapters read in the package spine order, not filename order; the chapter title and its position are part of the locator; images counted, not read" },
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
@@ -1622,6 +1670,19 @@ impl Api {
 
         let kind = fetched.ingest_kind();
         let title = self.derive_title(&fetched, kind, parsed.host.as_str());
+        let mut meta = BTreeMap::new();
+        if kind == "feed" {
+            // Record what the feed said about itself. The item count is what was indexed, not
+            // what the feed claims: a truncated or skipped entry would make the claim false.
+            if let Ok(feed) = ingest::feed::parse(&fetched.body) {
+                meta.insert("feed_flavour".to_string(), feed.flavour.clone());
+                meta.insert("feed_title".to_string(), feed.title.clone());
+                if !feed.link.is_empty() {
+                    meta.insert("feed_link".to_string(), feed.link.clone());
+                }
+                meta.insert("feed_items".to_string(), feed.items.len().to_string());
+            }
+        }
         self.ingest_source(
             Some(FetchedMeta {
                 canonical_url: fetched.canonical_url.clone(),
@@ -1630,7 +1691,7 @@ impl Api {
                 content_type: fetched.media_type(),
                 redirects: fetched.redirects.len(),
             }),
-            BTreeMap::new(),
+            meta,
             nb,
             &title,
             kind,
@@ -1639,8 +1700,153 @@ impl Api {
         )
     }
 
+    /// Read a public GitHub repository's README and/or issues as one source.
+    ///
+    /// The collection is retained as bytes (a small JSON envelope) so `retry` re-indexes what
+    /// was actually collected. No token exists in this build, so this is the anonymous public
+    /// API: rate limits are real and are reported rather than retried.
+    fn add_github_source(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let repo = github::Repo::parse(body.str_of("repo").unwrap_or(""))
+            .map_err(|e| err(422, "bad_repo", &e))?;
+
+        let mut include_readme = true;
+        let mut include_issues = true;
+        if let Some(Value::Arr(list)) = body.get("include") {
+            let mut wanted: Vec<String> = Vec::new();
+            for v in list {
+                let name = v.as_str().unwrap_or("").trim().to_ascii_lowercase();
+                if name.is_empty() {
+                    continue;
+                }
+                if name != "readme" && name != "issues" {
+                    return Err(err(422, "bad_include", "include accepts \"readme\" and \"issues\""));
+                }
+                wanted.push(name);
+            }
+            if !wanted.is_empty() {
+                include_readme = wanted.iter().any(|w| w == "readme");
+                include_issues = wanted.iter().any(|w| w == "issues");
+            }
+        }
+        let limit = body
+            .get("limit")
+            .and_then(|v| v.as_f64())
+            .map(|n| n as usize)
+            .unwrap_or(github::ISSUE_DEFAULT)
+            .clamp(1, github::ISSUE_MAX);
+
+        if self
+            .store
+            .read(|db| db.notebooks.iter().any(|n| n.id == nb))
+            != true
+        {
+            return Err(err(404, "not_found", "notebook not found"));
+        }
+
+        let canonical = format!("https://github.com/{}", repo.full());
+        if let Some(existing) = self.store.read(|db| {
+            db.sources
+                .iter()
+                .find(|s| s.notebook_id == nb && s.canonical_url == canonical)
+                .map(|s| (s.id.clone(), s.title.clone()))
+        }) {
+            return Err(err_dup(&existing.0, &existing.1, &canonical));
+        }
+
+        let mut collection = github::Collection {
+            repo: repo.full(),
+            api_base: github::api_base(),
+            ..Default::default()
+        };
+        let mut warnings: Vec<String> = Vec::new();
+
+        // Issues first: a 404 here means the repository itself is not visible to an anonymous
+        // caller, which is the one failure worth refusing outright.
+        if include_issues {
+            let url = github::issues_url(&repo, limit);
+            let page = fetch::fetch_api(&url, fetch::GITHUB_JSON_ACCEPT)
+                .map_err(|e| github_fetch_error(&e, &repo))?;
+            if page.status != 200 {
+                return Err(github_status_error(page.status, &page.body, &repo));
+            }
+            let text = String::from_utf8_lossy(&page.body);
+            let issues = github::parse_issues(&text).map_err(|e| err(502, "github_bad_payload", &e))?;
+            collection.skipped_pull_requests = issues.iter().filter(|i| i.pull_request).count();
+            collection.issues = issues.into_iter().filter(|i| !i.pull_request).collect();
+            if collection.issues.len() >= limit {
+                warnings.push(format!(
+                    "the issue list was capped at {} item(s); older issues were not read",
+                    limit
+                ));
+            }
+        }
+
+        if include_readme {
+            let url = github::readme_url(&repo);
+            match fetch::fetch_api(&url, "application/vnd.github.raw") {
+                Ok(page) if page.status == 200 => {
+                    collection.readme = String::from_utf8_lossy(&page.body).to_string();
+                }
+                Ok(page) if page.status == 404 => {
+                    warnings.push("no README is published at the default branch".to_string());
+                }
+                Ok(page) => return Err(github_status_error(page.status, &page.body, &repo)),
+                Err(e) => return Err(github_fetch_error(&e, &repo)),
+            }
+        }
+
+        let title = github::title_for(&collection, include_readme, include_issues);
+        let bytes = collection.to_bytes();
+        let mut meta = BTreeMap::new();
+        meta.insert("repo".to_string(), repo.full());
+        meta.insert("api_base".to_string(), collection.api_base.clone());
+        meta.insert("issues_indexed".to_string(), collection.issues.len().to_string());
+        meta.insert("pull_requests_skipped".to_string(), collection.skipped_pull_requests.to_string());
+        meta.insert("readme_bytes".to_string(), collection.readme.len().to_string());
+        meta.insert("include".to_string(), match (include_readme, include_issues) {
+            (true, true) => "readme,issues".to_string(),
+            (true, false) => "readme".to_string(),
+            (false, true) => "issues".to_string(),
+            (false, false) => "none".to_string(),
+        });
+
+        let response = self.ingest_source(
+            Some(FetchedMeta {
+                canonical_url: canonical,
+                fetched_at: now_iso(),
+                status: 200,
+                content_type: "application/json".to_string(),
+                redirects: 0,
+            }),
+            meta,
+            nb,
+            &title,
+            "github",
+            "github",
+            &bytes,
+        )?;
+        // The endpoint's own warnings (cap, missing README) belong with the source's, but the
+        // source is already stored; append them so the UI shows one honest list.
+        if !warnings.is_empty() {
+            let _ = self.store.write(|db| {
+                if let Some(src) = db.sources.iter_mut().find(|s| s.title == title && s.notebook_id == nb) {
+                    src.warnings.extend(warnings.clone());
+                }
+            });
+        }
+        Ok(response)
+    }
+
     /// Title for a fetched source: page title, then meta description, then the host.
     fn derive_title(&self, fetched: &fetch::Fetched, kind: &str, host: &str) -> String {
+        if kind == "feed" {
+            if let Ok(feed) = ingest::feed::parse(&fetched.body) {
+                if !feed.title.is_empty() {
+                    return clip(&feed.title, 120);
+                }
+            }
+        }
         if kind == "html" {
             let raw = ingest::decode_text(&fetched.body);
             if let Some(t) = ingest::text::html_title(&raw) {
@@ -1732,7 +1938,7 @@ impl Api {
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
         // Keep the bytes so `retry` can re-ingest without asking the user to upload again.
-        if origin == "upload" || origin == "paste" || origin == "note" {
+        if matches!(origin, "upload" | "paste" | "note" | "github") {
             let _ = self.store.save_blob(&source_id, bytes);
         }
 

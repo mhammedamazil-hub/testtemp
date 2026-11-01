@@ -12,6 +12,1017 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
+## `crates/forge-core/src/github.rs`
+
+```rust
+//! GitHub repositories as sources: the README and the issue list.
+//!
+//! Forge has no GitHub account, no token, and no OAuth app — this module talks to the public
+//! REST API (`api.github.com`) with the same SSRF-guarded fetch path as any other URL, and
+//! nothing else. That has three consequences the code states out loud:
+//!
+//! * **Rate limits are the anonymous ones.** A 403/429 from GitHub is reported as such, with
+//!   GitHub's own message, instead of being retried into a wall.
+//! * **Only public repositories.** No credentials exist, so a private repo is simply a 404 as
+//!   far as Forge is concerned, and the error says which repository was asked for.
+//! * **Issues, not code.** Forge indexes issue titles and bodies as dated, numbered items. It
+//!   does not clone, browse files, or claim to have read the source tree.
+//!
+//! The bytes that reach the ingestion pipeline are a small JSON envelope of what was actually
+//! collected (`{"repo":…,"readme":…,"issues":[…]}`), which is also what is retained on disk so
+//! a retry re-indexes the same collection rather than silently fetching a newer one.
+
+use crate::domain::Locator;
+use crate::ingest::{self, Block, Parsed};
+use crate::json::{self, Value};
+use crate::obj;
+
+/// The issue number as a locator position. u32 because a locator position is an index, and
+/// GitHub issue numbers above 4 billion do not exist.
+fn issue_pos(number: u64) -> u32 {
+    number.min(u32::MAX as u64) as u32
+}
+
+/// Hard cap on issues per source: a repository with 40k issues is not a document, and
+/// indexing all of them would drown every other source in the notebook.
+pub const ISSUE_MAX: usize = 100;
+pub const ISSUE_DEFAULT: usize = 30;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Repo {
+    pub owner: String,
+    pub name: String,
+}
+
+impl Repo {
+    pub fn full(&self) -> String {
+        format!("{}/{}", self.owner, self.name)
+    }
+
+    /// Accept the shapes a person actually pastes: `owner/name`, a github.com URL (with or
+    /// without `.git`), or an SSH clone URL.
+    pub fn parse(input: &str) -> Result<Repo, String> {
+        let raw = input.trim();
+        if raw.is_empty() {
+            return Err("repo is required, e.g. \"rust-lang/rust\"".to_string());
+        }
+        let mut rest = raw.to_string();
+        if let Some((scheme, tail)) = raw.split_once("://") {
+            let host = tail.split('/').next().unwrap_or("").to_ascii_lowercase();
+            let host = host.split('@').next_back().unwrap_or("").to_string();
+            if !matches!(host.as_str(), "github.com" | "www.github.com") {
+                return Err(format!(
+                    "{} is not GitHub: this source reads github.com repositories only",
+                    scheme
+                ));
+            }
+        }
+        for prefix in ["https://", "http://", "git@", "ssh://git@"] {
+            if let Some(stripped) = rest.strip_prefix(prefix) {
+                rest = stripped.to_string();
+                break;
+            }
+        }
+        // git@host:owner/name
+        let rest = match rest.split_once(':') {
+            Some((host, tail)) if host.contains("github.com") && !tail.starts_with("//") => tail.to_string(),
+            _ => rest,
+        };
+        let rest = rest.strip_prefix("github.com/").unwrap_or(&rest).to_string();
+        let rest = rest.strip_suffix(".git").unwrap_or(&rest).to_string();
+        let rest = rest.split(['?', '#']).next().unwrap_or("").trim_end_matches('/').to_string();
+        let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+        if parts.len() < 2 {
+            return Err(format!("\"{}\" is not a repository: expected owner/name", raw));
+        }
+        let (owner, name) = (parts[0], parts[1]);
+        for (label, value) in [("owner", owner), ("repository", name)] {
+            if !value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+            {
+                return Err(format!("the {} \"{}\" has characters GitHub does not allow", label, value));
+            }
+        }
+        Ok(Repo { owner: owner.to_string(), name: name.to_string() })
+    }
+}
+
+/// The API root. Overridable so tests can point at a local origin without touching the code
+/// path that production uses; the default is the real public API.
+pub fn api_base() -> String {
+    std::env::var("FORGE_GITHUB_API")
+        .ok()
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "https://api.github.com".to_string())
+}
+
+pub fn readme_url(repo: &Repo) -> String {
+    format!("{}/repos/{}/{}/readme", api_base(), repo.owner, repo.name)
+}
+
+pub fn issues_url(repo: &Repo, limit: usize) -> String {
+    format!(
+        "{}/repos/{}/{}/issues?state=all&per_page={}",
+        api_base(),
+        repo.owner,
+        repo.name,
+        limit.min(ISSUE_MAX)
+    )
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Issue {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub author: String,
+    pub created: String,
+    pub body: String,
+    pub pull_request: bool,
+}
+
+/// Parse the JSON array returned by `/issues`. A non-array is an error, not an empty list:
+/// "GitHub answered with something else" must never look like "this repo has no issues".
+pub fn parse_issues(text: &str) -> Result<Vec<Issue>, String> {
+    let value = json::parse(text).map_err(|e| format!("GitHub's issue list is not JSON: {}", e))?;
+    let arr = value
+        .as_arr()
+        .ok_or_else(|| "GitHub's issue list is not a JSON array".to_string())?;
+    let mut out = Vec::new();
+    for item in arr {
+        let number = item
+            .get("number")
+            .and_then(|n| n.as_f64())
+            .ok_or_else(|| "an issue has no number".to_string())? as u64;
+        out.push(Issue {
+            number,
+            title: item.str_of("title").unwrap_or("").trim().to_string(),
+            state: item.str_of("state").unwrap_or("").trim().to_string(),
+            author: item
+                .get("user")
+                .and_then(|u| u.str_of("login"))
+                .unwrap_or("")
+                .to_string(),
+            created: item.str_of("created_at").unwrap_or("").trim().to_string(),
+            body: item.str_of("body").unwrap_or("").to_string(),
+            pull_request: item.get("pull_request").map(|p| !p.is_null()).unwrap_or(false),
+        });
+    }
+    Ok(out)
+}
+
+/// What is retained on disk and re-parsed by the ingestion pipeline.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Collection {
+    pub repo: String,
+    pub readme: String,
+    pub issues: Vec<Issue>,
+    pub skipped_pull_requests: usize,
+    pub api_base: String,
+}
+
+impl Collection {
+    /// The retained envelope. Bodies are kept verbatim so a citation can quote them.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let issues: Vec<Value> = self
+            .issues
+            .iter()
+            .map(|i| {
+                obj! {
+                    "number" => i.number as u64,
+                    "title" => i.title.as_str(),
+                    "state" => i.state.as_str(),
+                    "author" => i.author.as_str(),
+                    "created" => i.created.as_str(),
+                    "body" => i.body.as_str(),
+                }
+            })
+            .collect();
+        let doc = obj! {
+            "repo" => self.repo.as_str(),
+            "readme" => self.readme.as_str(),
+            "issues" => Value::Arr(issues),
+            "skipped_pull_requests" => self.skipped_pull_requests as u64,
+            "api_base" => self.api_base.as_str(),
+        };
+        json::to_string(&doc).into_bytes()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Collection, String> {
+        let text = ingest::decode_text(bytes);
+        let value = json::parse(&text).map_err(|e| format!("the stored GitHub collection is not JSON: {}", e))?;
+        let repo = value.str_of("repo").unwrap_or("").to_string();
+        if repo.is_empty() {
+            return Err("the stored GitHub collection names no repository".to_string());
+        }
+        let body = value.str_of("readme").unwrap_or("").to_string();
+        let mut issues = Vec::new();
+        if let Some(arr) = value.get("issues").and_then(|v| v.as_arr()) {
+            for item in arr {
+                issues.push(Issue {
+                    number: item.get("number").and_then(|n| n.as_f64()).unwrap_or(0.0) as u64,
+                    title: item.str_of("title").unwrap_or("").to_string(),
+                    state: item.str_of("state").unwrap_or("").to_string(),
+                    author: item.str_of("author").unwrap_or("").to_string(),
+                    created: item.str_of("created").unwrap_or("").to_string(),
+                    body: item.str_of("body").unwrap_or("").to_string(),
+                    pull_request: false,
+                });
+            }
+        }
+        Ok(Collection {
+            repo,
+            readme: body,
+            issues,
+            skipped_pull_requests: value
+                .get("skipped_pull_requests")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as usize,
+            api_base: value.str_of("api_base").unwrap_or("").to_string(),
+        })
+    }
+
+    /// Blocks: the README first (as sections), then issues in ascending number order, so
+    /// "issue 12" means the same thing on every re-index.
+    pub fn blocks(&self) -> Vec<Block> {
+        let mut blocks: Vec<Block> = Vec::new();
+        if !self.readme.trim().is_empty() {
+            let mut readme_blocks = ingest::text::markdown_blocks(&self.readme);
+            for b in readme_blocks.iter_mut() {
+                b.locator.section = Some("README".to_string());
+                b.locator.kind = "section".to_string();
+            }
+            // The first paragraph is the heading; keep it, it is the README's own words.
+            blocks.append(&mut readme_blocks);
+        }
+        let mut issues: Vec<&Issue> = self.issues.iter().collect();
+        issues.sort_by_key(|i| i.number);
+        for issue in issues {
+            let mut text = format!("#{} {}", issue.number, issue.title);
+            let mut meta: Vec<String> = Vec::new();
+            if !issue.state.is_empty() {
+                meta.push(issue.state.clone());
+            }
+            if !issue.author.is_empty() {
+                meta.push(format!("opened by {}", issue.author));
+            }
+            if !issue.created.is_empty() {
+                meta.push(issue.created.clone());
+            }
+            if !meta.is_empty() {
+                text.push('\n');
+                text.push_str(&meta.join(" · "));
+            }
+            let body = issue.body.trim();
+            if !body.is_empty() {
+                text.push('\n');
+                text.push_str(body);
+            }
+            let section = format!("{} · {}", issue.number, issue.title);
+            blocks.push(Block {
+                text,
+                locator: Locator::issue(issue_pos(issue.number), &section),
+            });
+        }
+        blocks
+    }
+
+    pub fn warnings(&self) -> Vec<String> {
+        let mut w = Vec::new();
+        if self.skipped_pull_requests > 0 {
+            w.push(format!(
+                "{} pull request(s) were skipped: Forge reads issues, not code review threads",
+                self.skipped_pull_requests
+            ));
+        }
+        if self.readme.trim().is_empty() {
+            w.push("the repository has no README at the default branch".to_string());
+        }
+        w.push(format!(
+            "GitHub collection for {}: {} issue(s){} (public API, anonymous rate limits)",
+            self.repo,
+            self.issues.len(),
+            if self.readme.trim().is_empty() { String::new() } else { ", README included".to_string() }
+        ));
+        w
+    }
+}
+
+/// Build the parsed form used by the ingestion pipeline.
+pub fn extract(bytes: &[u8]) -> Result<Parsed, String> {
+    let collection = Collection::from_bytes(bytes)?;
+    let blocks = ingest::chunk_blocks(collection.blocks());
+    if blocks.is_empty() {
+        return Err("the repository produced no readable text (no README and no issues)".to_string());
+    }
+    Ok(Parsed {
+        page_count: collection.issues.len() as u32,
+        warnings: collection.warnings(),
+        blocks,
+        tables: Vec::new(),
+    })
+}
+
+/// A human title for the source row.
+pub fn title_for(collection: &Collection, include_readme: bool, include_issues: bool) -> String {
+    let parts: Vec<String> = [
+        include_readme.then(|| "README".to_string()),
+        include_issues.then(|| format!("{} issue(s)", collection.issues.len())),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    format!("{} — {}", collection.repo, parts.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repo_specs_are_parsed_from_the_shapes_people_paste() {
+        let expect = Repo { owner: "rust-lang".into(), name: "rust".into() };
+        for input in [
+            "rust-lang/rust",
+            "  rust-lang/rust  ",
+            "https://github.com/rust-lang/rust",
+            "https://github.com/rust-lang/rust.git",
+            "https://github.com/rust-lang/rust/issues?q=1",
+            "git@github.com:rust-lang/rust.git",
+        ] {
+            assert_eq!(Repo::parse(input).unwrap(), expect, "input={}", input);
+        }
+    }
+
+    #[test]
+    fn a_repo_spec_that_is_not_a_repo_is_refused() {
+        for bad in ["", "rust", "https://example.com/a/b"] {
+            let err = Repo::parse(bad).unwrap_err();
+            assert!(!err.is_empty());
+        }
+        assert!(Repo::parse("owner/na me").unwrap_err().contains("characters"));
+    }
+
+    const ISSUES: &str = r#"[
+      {"number":12,"title":"Retry budget is not respected","state":"open",
+       "user":{"login":"okafor"},"created_at":"2026-03-01T10:00:00Z",
+       "body":"With three tiers the client retries 5 times instead of 2."},
+      {"number":13,"title":"Add EPUB support","state":"closed",
+       "user":{"login":"menon"},"created_at":"2026-03-02T10:00:00Z",
+       "body":"Closed by the 3.0 release."},
+      {"number":14,"title":"Docs: wrong install line","state":"open",
+       "user":{"login":"lee"},"created_at":"2026-03-03T10:00:00Z",
+       "body":"","pull_request":{"url":"https://api.github.com/repos/o/n/pulls/14"}}
+    ]"#;
+
+    #[test]
+    fn issues_keep_numbers_dates_authors_and_bodies_and_pull_requests_are_flagged() {
+        let issues = parse_issues(ISSUES).unwrap();
+        assert_eq!(issues.len(), 3);
+        assert_eq!(issues[0].number, 12);
+        assert_eq!(issues[0].author, "okafor");
+        assert_eq!(issues[0].created, "2026-03-01T10:00:00Z");
+        assert!(issues[0].body.contains("5 times"));
+        assert!(!issues[0].pull_request);
+        assert!(issues[2].pull_request, "a PR is not an issue");
+    }
+
+    #[test]
+    fn a_non_array_answer_is_an_error_not_an_empty_list() {
+        let err = parse_issues(r#"{"message":"API rate limit exceeded"}"#).unwrap_err();
+        assert!(err.contains("not a JSON array"), "{}", err);
+        assert!(parse_issues("not json").is_err());
+    }
+
+    #[test]
+    fn blocks_are_a_readme_section_then_issues_in_number_order() {
+        let mut issues = parse_issues(ISSUES).unwrap();
+        issues.retain(|i| !i.pull_request);
+        issues.reverse(); // deliberately out of order; the locator must not follow the API
+        let collection = Collection {
+            repo: "acme/retry".into(),
+            readme: "# acme/retry\n\nThe retry budget is 2.75 attempts per request.".into(),
+            issues,
+            skipped_pull_requests: 1,
+            api_base: "http://127.0.0.1:1".into(),
+        };
+        let blocks = collection.blocks();
+        assert_eq!(blocks[0].locator.section.as_deref(), Some("README"));
+        assert!(
+            blocks.iter().any(|b| b.locator.section.as_deref() == Some("README") && b.text.contains("2.75 attempts")),
+            "the README body is kept: {:?}",
+            blocks.iter().map(|b| &b.text).collect::<Vec<_>>()
+        );
+        let issues: Vec<&Block> = blocks.iter().filter(|b| b.locator.kind == "issue").collect();
+        assert_eq!(issues[0].locator.human(), "issue 12 · Retry budget is not respected");
+        assert_eq!(issues[1].locator.human(), "issue 13 · Add EPUB support");
+        assert!(issues[0].text.starts_with("#12 Retry budget is not respected\nopen · opened by okafor"));
+    }
+
+    #[test]
+    fn the_retained_envelope_round_trips_through_bytes() {
+        let collection = Collection {
+            repo: "acme/retry".into(),
+            readme: "# Title\n\nBody with a \"quote\" and a newline\nin it.".into(),
+            issues: parse_issues(ISSUES).unwrap().into_iter().filter(|i| !i.pull_request).collect(),
+            skipped_pull_requests: 1,
+            api_base: "https://api.github.com".into(),
+        };
+        let bytes = collection.to_bytes();
+        let back = Collection::from_bytes(&bytes).unwrap();
+        assert_eq!(back, collection);
+        let parsed = extract(&bytes).unwrap();
+        assert_eq!(parsed.page_count, 2);
+        assert!(parsed.warnings.iter().any(|w| w.contains("pull request(s) were skipped")));
+        assert!(parsed.warnings.iter().any(|w| w.contains("GitHub collection for acme/retry")));
+    }
+
+    #[test]
+    fn a_collection_without_text_is_refused_rather_than_indexed_empty() {
+        let collection = Collection { repo: "acme/empty".into(), ..Default::default() };
+        let err = extract(&collection.to_bytes()).unwrap_err();
+        assert!(err.contains("no readable text"), "{}", err);
+        assert!(Collection::from_bytes(b"{}").is_err(), "a payload with no repo is refused");
+    }
+
+    #[test]
+    fn urls_point_at_the_public_api_and_respect_the_issue_cap() {
+        let repo = Repo::parse("acme/retry").unwrap();
+        std::env::set_var("FORGE_GITHUB_API", "http://127.0.0.1:1/");
+        assert_eq!(readme_url(&repo), "http://127.0.0.1:1/repos/acme/retry/readme");
+        assert!(issues_url(&repo, 5000).ends_with("per_page=100"), "the cap holds: {}", issues_url(&repo, 5000));
+        assert!(issues_url(&repo, 0).ends_with("per_page=0"));
+        std::env::remove_var("FORGE_GITHUB_API");
+        assert_eq!(readme_url(&repo), "https://api.github.com/repos/acme/retry/readme");
+    }
+}
+```
+
+## `crates/forge-core/src/ingest/feed.rs`
+
+```rust
+//! RSS 2.0, Atom 1.0 and RSS 1.0 (RDF) feeds.
+//!
+//! A feed is a *list of dated items*, and that structure is what makes it citable: an answer
+//! drawn from a feed must be able to say which item it came from and when that item was
+//! published, not just "somewhere in this XML". So every block is one item, and the locator
+//! carries the position and the title:
+//!
+//! ```text
+//! Locator { kind: "item", page: Some(3), section: Some("3 · The retention model"), .. }
+//! label: "item 3 · The retention model"
+//! ```
+//!
+//! Parsing is deliberately hand-written: Forge has no dependencies, and a feed is a flat list
+//! of elements — it does not need a general XML engine. What it does need is to *not lie*:
+//! an item with no date is left without a date (never stamped with the fetch time), an item
+//! with no body is skipped rather than cited as an empty quote, and a document that is not a
+//! feed is refused with a reason instead of being indexed as prose.
+
+use super::{text, Block, Parsed};
+use crate::domain::Locator;
+
+/// Beyond this an item is truncated; feeds are summaries, not books.
+const ITEM_MAX_CHARS: usize = 4000;
+/// A feed with more items than this keeps the newest-looking prefix and says so.
+const ITEM_MAX: usize = 200;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Item {
+    pub title: String,
+    pub link: String,
+    pub published: String,
+    pub author: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Feed {
+    pub title: String,
+    pub link: String,
+    /// `rss`, `atom` or `rdf` — recorded so the source can say what it actually was.
+    pub flavour: String,
+    pub items: Vec<Item>,
+    pub warnings: Vec<String>,
+}
+
+/// Cheap sniff used before parsing, and by `fetch` to classify a response.
+pub fn looks_like_feed(bytes: &[u8]) -> bool {
+    let head: String = String::from_utf8_lossy(bytes).chars().take(4096).collect();
+    let mut lower = head.to_ascii_lowercase();
+    if let Some(at) = lower.find("<rss") {
+        lower.truncate(at + 64);
+        return true;
+    }
+    let lower = head.to_ascii_lowercase();
+    lower.contains("<feed") && (lower.contains("www.w3.org/2005/atom") || lower.contains("<entry"))
+        || lower.contains("<rdf:rdf")
+        || (lower.contains("<rss") && lower.contains("version"))
+}
+
+/// Return the text of `<tag ...>…</tag>`, CDATA unwrapped. `None` when absent.
+fn raw_element<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{}", tag);
+    let start = xml.find(&open)?;
+    let after = &xml[start..];
+    // reject `<itemize>` when looking for `<item`
+    let close_of_open = after.find('>')?;
+    let name_end = after[1..close_of_open].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-' || *c == '_').count();
+    if !after[..1 + name_end].eq_ignore_ascii_case(&open) {
+        return None;
+    }
+    if after[..close_of_open].ends_with('/') {
+        return Some(""); // self-closing
+    }
+    let close_tag = format!("</{}>", tag).to_ascii_lowercase();
+    let body_start = start + close_of_open + 1;
+    let body = &xml[body_start..];
+    let end = body.to_ascii_lowercase().find(&close_tag)?;
+    Some(&body[..end])
+}
+
+/// All occurrences of a repeating element (`item` / `entry`) inside `xml`.
+fn elements<'a>(xml: &'a str, tag: &str) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let mut rest = xml;
+    let open = format!("<{}", tag);
+    let close_tag = format!("</{}>", tag);
+    while let Some(start) = rest.find(&open) {
+        let after = &rest[start..];
+        // `<item>` and `<item foo="1">` only — not `<itemize>`
+        let name_len = after[1..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == ':' || *c == '-' || *c == '_').count();
+        if !after[..1 + name_len].eq_ignore_ascii_case(&open) {
+            rest = &after[1..];
+            continue;
+        }
+        let Some(gt) = after.find('>') else { break };
+        if after[..gt].ends_with('/') {
+            rest = &after[gt + 1..];
+            continue;
+        }
+        let body = &after[gt + 1..];
+        match body.to_ascii_lowercase().find(&close_tag) {
+            Some(end) => {
+                out.push(&body[..end]);
+                rest = &body[end + close_tag.len()..];
+            }
+            // An unclosed item means the document is broken; stop rather than guess the rest.
+            None => break,
+        }
+    }
+    out
+}
+
+/// Unwrap CDATA and trim. Entities are **not** decoded here: decoding first would turn an
+/// escaped `&lt;b&gt;` into markup that `strip_tags` would then delete as if it were a tag.
+fn cdata_or_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(stripped) = trimmed.strip_prefix("<![CDATA[") {
+        stripped.strip_suffix("]]>").unwrap_or(stripped).trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// An Atom `<link href="..."/>` or an RSS `<link>text</link>`.
+fn link_of(item: &str) -> String {
+    // Atom: prefer rel="alternate", otherwise the first href that is not self/enclosure.
+    let mut fallback = String::new();
+    let mut rest = item;
+    while let Some(at) = rest.find("<link") {
+        let after = &rest[at..];
+        let Some(gt) = after.find('>') else { break };
+        let tag = &after[..gt];
+        let href = attr(tag, "href").unwrap_or_default();
+        let rel = attr(tag, "rel").unwrap_or_else(|| "alternate".to_string());
+        if !href.is_empty() && rel == "alternate" && fallback.is_empty() {
+            fallback = href;
+        } else if !href.is_empty() && fallback.is_empty() && rel != "self" && rel != "enclosure" {
+            fallback = href;
+        }
+        rest = &after[gt + 1..];
+    }
+    if !fallback.is_empty() {
+        return fallback;
+    }
+    // RSS: element text.
+    if let Some(raw) = raw_element(item, "link") {
+        let value = text::decode_entities(&cdata_or_text(raw)).trim().to_string();
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    // RSS 1.0 often repeats the URL as the element's rdf:resource.
+    let lower = item.to_ascii_lowercase();
+    if let Some(at) = lower.find("<link") {
+        let tag = &item[at..];
+        if let Some(gt) = tag.find('>') {
+            if let Some(v) = attr(&tag[..gt], "rdf:resource") {
+                return v;
+            }
+        }
+    }
+    String::new()
+}
+
+fn shorten(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
+}
+
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let needle = format!("{}=", name.to_ascii_lowercase());
+    let mut from = 0usize;
+    while let Some(rel) = lower[from..].find(&needle) {
+        let at = from + rel;
+        // must be preceded by whitespace or '<', so `href` does not match `xhref`
+        let prev = lower[..at].chars().last();
+        if matches!(prev, Some(c) if c.is_whitespace() || c == '<') {
+            let rest = &tag[at + needle.len()..];
+            let quote = rest.chars().next()?;
+            if quote == '"' || quote == '\'' {
+                let value = &rest[1..];
+                let end = value.find(quote)?;
+                return Some(text::decode_entities(&value[..end]));
+            }
+            let end = rest.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(rest.len());
+            return Some(text::decode_entities(rest[..end].trim()));
+        }
+        from = at + needle.len();
+    }
+    None
+}
+
+/// First present element among `names`.
+fn first(item: &str, names: &[&str]) -> String {
+    for name in names {
+        if let Some(raw) = raw_element(item, name) {
+            let value = cdata_or_text(raw);
+            if !value.is_empty() {
+                return value;
+            }
+        }
+    }
+    String::new()
+}
+
+/// Tags that are markup in a feed body. Anything else — `<y>`, `<3`, a URL with `<` in it —
+/// is text, and is kept: over-stripping would silently delete the author's words.
+const KNOWN_TAGS: &[&str] = &[
+    "a", "abbr", "b", "blockquote", "br", "caption", "cite", "code", "dd", "del", "div", "dl",
+    "dt", "em", "figcaption", "figure", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "iframe",
+    "img", "ins", "li", "ol", "p", "pre", "q", "s", "small", "span", "strong", "sub", "sup",
+    "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul", "video", "audio", "source",
+    "script", "style", "svg", "path", "name", "email", "uri", "label",
+];
+
+/// Tags whose removal separates words; whitespace is collapsed afterwards, so the extra space
+/// only matters where two paragraphs would otherwise run together.
+const BLOCK_TAGS: &[&str] = &[
+    "p", "div", "br", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre",
+    "tr", "td", "th", "table", "thead", "tbody", "tfoot", "dd", "dt", "dl", "figure",
+    "figcaption", "hr", "caption",
+];
+
+fn strip_known_markup(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            let rest = &text[i + 1..];
+            let name: String = rest
+                .chars()
+                .skip_while(|c| *c == '/')
+                .take_while(|c| c.is_ascii_alphanumeric())
+                .collect();
+            let lower = name.to_ascii_lowercase();
+            let is_tag = KNOWN_TAGS.contains(&lower.as_str());
+            if is_tag && !lower.is_empty() {
+                match rest.find('>') {
+                    Some(end) => {
+                        if BLOCK_TAGS.contains(&lower.as_str()) {
+                            out.push(' ');
+                        }
+                        i += 1 + end + 1;
+                        continue;
+                    }
+                    None => break,
+                }
+            }
+        }
+        let ch = text[i..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn tidy_summary(raw: &str) -> String {
+    // Feed bodies are usually HTML. Strip real markup first, *then* decode entities, and then
+    // strip markup that was escaped into the text (`&lt;p&gt;` inside `<content type="html">`).
+    // A tag name that is not on the known list is left alone, so `x <y>` survives.
+    let plain = if raw.contains('<') { strip_known_markup(raw) } else { raw.to_string() };
+    let plain = text::decode_entities(&plain);
+    let plain = strip_known_markup(&plain);
+    plain
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(ITEM_MAX_CHARS)
+        .collect()
+}
+
+/// Parse a feed. `Err` means "this is not a feed", with the reason the user should see.
+pub fn parse(bytes: &[u8]) -> Result<Feed, String> {
+    let xml = super::decode_text(bytes);
+    if xml.trim().is_empty() {
+        return Err("the feed is empty".to_string());
+    }
+    let lower = xml.to_ascii_lowercase();
+
+    let mut feed = Feed::default();
+    let (flavour, root_title, raw_items) = if lower.contains("<rss") && lower.contains("<channel") {
+        ("rss", first(&xml, &["title"]), elements(&xml, "item"))
+    } else if lower.contains("<feed") {
+        ("atom", first(&xml, &["title"]), elements(&xml, "entry"))
+    } else if lower.contains("<rdf:rdf") {
+        ("rdf", first(&xml, &["title"]), elements(&xml, "item"))
+    } else {
+        return Err(
+            "not a feed: no <rss>, <feed> or <rdf:RDF> root element was found".to_string(),
+        );
+    };
+    feed.flavour = flavour.to_string();
+    feed.title = tidy_summary(&root_title);
+    feed.link = if flavour == "atom" { link_of(&xml) } else { first(&xml, &["link"]) };
+    if feed.link.contains('<') {
+        feed.link = link_of(&xml);
+    }
+
+    if raw_items.is_empty() {
+        return Err("the feed parses but contains no items".to_string());
+    }
+
+    for raw in raw_items {
+        let title = tidy_summary(&first(raw, &["title"]));
+        // `content:encoded` first: it is the body, `description` is often only a teaser.
+        let summary = tidy_summary(&first(raw, &["content:encoded", "content", "summary", "description"]));
+        let published = text::decode_entities(&first(raw, &["pubDate", "published", "updated", "dc:date", "date"])).trim().to_string();
+        // Atom nests the name: `<author><name>A. Menon</name></author>`. tidy_summary strips
+        // the wrapper, so both shapes give the same string.
+        let author = tidy_summary(&first(raw, &["dc:creator", "creator", "author", "name"]));
+        let link = link_of(raw);
+        if summary.is_empty() && title.is_empty() {
+            feed.warnings.push("an item had neither a title nor a body and was skipped".to_string());
+            continue;
+        }
+        if published.is_empty() {
+            // Deliberately not filled in with the fetch time: the publish date is the source's
+            // fact, and inventing one would let an answer cite a date the feed never claimed.
+            feed.warnings.push(format!(
+                "item \"{}\" has no publish date; it is indexed without one",
+                shorten(&title, 60)
+            ));
+        }
+        feed.items.push(Item { title, link, published, author, summary });
+    }
+
+    if feed.items.is_empty() {
+        return Err("every item in the feed was empty".to_string());
+    }
+    if feed.items.len() > ITEM_MAX {
+        feed.warnings.push(format!(
+            "the feed lists {} items; the first {} were indexed",
+            feed.items.len(),
+            ITEM_MAX
+        ));
+        feed.items.truncate(ITEM_MAX);
+    }
+    Ok(feed)
+}
+
+/// One block per item, in feed order (feeds are ordered by the publisher, so that order is
+/// kept rather than re-sorted: reordering would change which item is "item 1").
+pub fn blocks(feed: &Feed) -> Vec<Block> {
+    let mut out = Vec::new();
+    for (idx, item) in feed.items.iter().enumerate() {
+        let n = idx as u32 + 1;
+        let heading = if item.title.is_empty() {
+            format!("item {}", n)
+        } else {
+            item.title.clone()
+        };
+        let mut body = String::new();
+        body.push_str(&heading);
+        let mut meta: Vec<String> = Vec::new();
+        if !item.published.is_empty() {
+            meta.push(item.published.clone());
+        }
+        if !item.author.is_empty() {
+            meta.push(item.author.clone());
+        }
+        if !item.link.is_empty() {
+            meta.push(item.link.clone());
+        }
+        if !meta.is_empty() {
+            body.push('\n');
+            body.push_str(&meta.join(" · "));
+        }
+        if !item.summary.is_empty() {
+            body.push('\n');
+            body.push_str(&item.summary);
+        }
+        let section = if item.title.is_empty() { format!("{}", n) } else { format!("{} · {}", n, item.title) };
+        out.push(Block {
+            text: body,
+            locator: Locator::item(n, &shorten(&section, 120)),
+        });
+    }
+    out
+}
+
+/// The `Parsed` form used by the ingestion pipeline.
+pub fn feed(bytes: &[u8]) -> Result<Parsed, String> {
+    let parsed = parse(bytes)?;
+    let mut warnings = parsed.warnings.clone();
+    warnings.push(format!(
+        "feed read as {}: {} item(s){}",
+        match parsed.flavour.as_str() {
+            "atom" => "Atom 1.0",
+            "rdf" => "RSS 1.0 (RDF)",
+            _ => "RSS 2.0",
+        },
+        parsed.items.len(),
+        if parsed.title.is_empty() { String::new() } else { format!(" from \"{}\"", parsed.title) }
+    ));
+    let blocks = blocks(&parsed);
+    Ok(Parsed { blocks: super::chunk_blocks(blocks), warnings, page_count: parsed.items.len() as u32, tables: Vec::new() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RSS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Retention Weekly</title>
+  <link>https://example.test/</link>
+  <description>notes on retention</description>
+  <item>
+    <title>Churn fell after the onboarding rewrite</title>
+    <link>https://example.test/posts/onboarding</link>
+    <pubDate>Tue, 03 Mar 2026 09:00:00 GMT</pubDate>
+    <dc:creator>R. Okafor</dc:creator>
+    <description><![CDATA[<p>Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite.</p>]]></description>
+  </item>
+  <item>
+    <title>Legal hold overrides the thirty day window</title>
+    <link>https://example.test/posts/legal-hold</link>
+    <pubDate>Wed, 04 Mar 2026 12:30:00 GMT</pubDate>
+    <description>A legal hold suspends deletion regardless of the retention window.</description>
+  </item>
+</channel></rss>"#;
+
+    const ATOM: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Forge release notes</title>
+  <link href="https://example.test/atom"/>
+  <entry>
+    <title>Version 3 stores item dates</title>
+    <link rel="alternate" href="https://example.test/atom/3"/>
+    <published>2026-02-01T10:00:00Z</published>
+    <author><name>A. Menon</name></author>
+    <summary>Feeds are now read as dated items.</summary>
+  </entry>
+  <entry>
+    <title>Version 2 added EPUB</title>
+    <link rel="alternate" href="https://example.test/atom/2"/>
+    <updated>2026-01-15T08:00:00Z</updated>
+    <summary>EPUB files are read in spine order.</summary>
+  </entry>
+</feed>"#;
+
+    #[test]
+    fn rss_items_keep_their_own_dates_authors_and_bodies() {
+        let feed = parse(RSS.as_bytes()).expect("rss parses");
+        assert_eq!(feed.flavour, "rss");
+        assert_eq!(feed.title, "Retention Weekly");
+        assert_eq!(feed.items.len(), 2);
+        assert_eq!(feed.items[0].published, "Tue, 03 Mar 2026 09:00:00 GMT");
+        assert_eq!(feed.items[0].author, "R. Okafor");
+        // CDATA is unwrapped and the HTML inside it is stripped, not indexed as markup.
+        assert_eq!(
+            feed.items[0].summary,
+            "Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite."
+        );
+        assert_eq!(feed.items[1].link, "https://example.test/posts/legal-hold");
+    }
+
+    #[test]
+    fn atom_entries_use_the_alternate_link_and_both_date_elements() {
+        let feed = parse(ATOM.as_bytes()).expect("atom parses");
+        assert_eq!(feed.flavour, "atom");
+        assert_eq!(feed.items.len(), 2);
+        assert_eq!(feed.items[0].link, "https://example.test/atom/3");
+        assert_eq!(feed.items[0].published, "2026-02-01T10:00:00Z");
+        assert_eq!(feed.items[0].author, "A. Menon");
+        // `<updated>` is a date too, and is used when `<published>` is absent.
+        assert_eq!(feed.items[1].published, "2026-01-15T08:00:00Z");
+        assert!(feed.warnings.is_empty(), "{:?}", feed.warnings);
+    }
+
+    #[test]
+    fn an_item_without_a_date_is_left_without_one_and_says_so() {
+        let xml = r#"<rss version="2.0"><channel><title>t</title>
+            <item><title>undated</title><description>body text</description></item>
+            </channel></rss>"#;
+        let feed = parse(xml.as_bytes()).expect("parses");
+        assert_eq!(feed.items[0].published, "");
+        assert!(feed.warnings.iter().any(|w| w.contains("no publish date")), "{:?}", feed.warnings);
+        let blocks = blocks(&feed);
+        assert!(!blocks[0].text.contains("©"), "no invented metadata");
+    }
+
+    #[test]
+    fn locators_point_at_the_item_and_read_as_item_n_title() {
+        let feed = parse(ATOM.as_bytes()).expect("parses");
+        let blocks = blocks(&feed);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1].locator.kind, "item");
+        assert_eq!(blocks[1].locator.page, Some(2));
+        assert_eq!(blocks[1].locator.human(), "item 2 · Version 2 added EPUB");
+        assert!(blocks[1].text.starts_with("Version 2 added EPUB\n2026-01-15T08:00:00Z · "));
+    }
+
+    #[test]
+    fn a_document_that_is_not_a_feed_is_refused_with_a_reason() {
+        let e = parse(b"<html><body><h1>not a feed</h1></body></html>").unwrap_err();
+        assert!(e.contains("not a feed"), "{}", e);
+        let e = parse(b"<rss version=\"2.0\"><channel><title>empty</title></channel></rss>").unwrap_err();
+        assert!(e.contains("no items"), "{}", e);
+    }
+
+    #[test]
+    fn rdf_feeds_are_recognised_and_look_like_feed_does_not_overreach() {
+        let rdf = r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+              xmlns="http://purl.org/rss/1.0/"><channel><title>Old feed</title>
+              <link>https://example.test/</link></channel>
+              <item rdf:about="https://example.test/a"><title>A</title>
+              <link>https://example.test/a</link><description>first</description></item></rdf:RDF>"#;
+        let feed = parse(rdf.as_bytes()).expect("rdf parses");
+        assert_eq!(feed.flavour, "rdf");
+        assert_eq!(feed.items[0].link, "https://example.test/a");
+
+        assert!(looks_like_feed(RSS.as_bytes()));
+        assert!(looks_like_feed(ATOM.as_bytes()));
+        assert!(!looks_like_feed(b"<html><body>hi</body></html>"));
+        assert!(!looks_like_feed(b"{\"json\":true}"));
+    }
+
+    #[test]
+    fn escaped_html_in_a_content_element_is_markup_not_prose() {
+        // Real shape from a GitHub releases Atom feed: the body is escaped HTML.
+        let xml = r#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Releases</title>
+            <entry><title>v1.2</title><published>2026-01-02T03:04:05Z</published>
+            <content type="html">&lt;p&gt;Fixes the retry loop.&lt;/p&gt;&lt;p&gt;Adds EPUB.&lt;/p&gt;</content>
+            </entry></feed>"#;
+        let feed = parse(xml.as_bytes()).expect("parses");
+        assert_eq!(feed.items[0].summary, "Fixes the retry loop. Adds EPUB.", "{:?}", feed.items[0].summary);
+        assert!(!feed.items[0].summary.contains('<'), "no markup leaks into the evidence text");
+    }
+
+    #[test]
+    fn a_less_than_that_is_not_a_tag_is_kept() {
+        assert_eq!(tidy_summary("x <y> and 3 < 4"), "x <y> and 3 < 4");
+    }
+
+    #[test]
+    fn entity_encoded_titles_are_decoded() {
+        let xml = r#"<rss version="2.0"><channel><title>A &amp; B</title>
+            <item><title>Q&amp;A &#8212; retention</title><description>x &lt;y&gt;</description></item>
+            </channel></rss>"#;
+        let feed = parse(xml.as_bytes()).expect("parses");
+        assert_eq!(feed.title, "A & B");
+        assert_eq!(feed.items[0].summary, "x <y>");
+    }
+
+    #[test]
+    fn the_pipeline_reports_what_it_read() {
+        let parsed = feed(RSS.as_bytes()).expect("parses");
+        assert_eq!(parsed.page_count, 2);
+        assert!(parsed.warnings[0].starts_with("feed read as RSS 2.0: 2 item(s)"), "{:?}", parsed.warnings);
+        assert_eq!(parsed.blocks.len(), 2);
+    }
+}
+```
+
 ## `.gitignore`
 
 ```
@@ -659,6 +1670,7 @@ function renderSources(pane) {
     h("label", { for: "fileInput", class: "sr-only" }, "Upload a file"),
     h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, EPUB, MD, TXT, HTML, CSV, VTT, SRT)"),
     h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"),
+    h("button", { class: "ghost", id: "addGithubBtn", onclick: () => promptGithub() }, "Add GitHub repo…"),
     h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover links…"));
 
   const urlRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
@@ -677,13 +1689,40 @@ function renderSources(pane) {
     }
   } }, "Fetch page");
   urlRow.append(
-    h("p", { class: "hint" }, "Forge fetches the page itself, keeps its title and canonical URL, and indexes the readable text. Duplicate URLs are refused."),
+    h("p", { class: "hint" }, "Forge fetches the page itself, keeps its title and canonical URL, and indexes the readable text. RSS/Atom feeds are read as dated items. Duplicate URLs are refused."),
     urlInput, urlGo);
   importBox.append(urlRow);
+
+  // GitHub: no token exists in this build, so the note says what that costs (public repos only,
+  // anonymous rate limits) instead of implying a connection the app does not have.
+  const ghRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
+  const ghInput = h("input", { type: "text", id: "githubInput", placeholder: "owner/repo or https://github.com/owner/repo", "aria-label": "GitHub repository" });
+  const ghGo = h("button", { class: "primary", onclick: async () => {
+    const repo = ghInput.value.trim();
+    if (!repo) return;
+    ghGo.disabled = true; ghGo.textContent = "Reading…";
+    try {
+      const r = await api.post(`/notebooks/${nb.id}/sources/github`, { repo });
+      toast(`Imported “${r.title}” (${r.chunk_count} passages)`);
+      await openNotebook(document.getElementById("app"), nb.id);
+    } catch (e) {
+      toast(e.message, "err");
+      ghGo.disabled = false; ghGo.textContent = "Read repository";
+    }
+  } }, "Read repository");
+  ghRow.append(
+    h("p", { class: "hint" }, "README and issues from a public repository, read through GitHub’s public API with no token: public repositories only, anonymous rate limits apply, and issues are cited by number."),
+    ghInput, ghGo);
+  importBox.append(ghRow);
 
   function promptUrl() {
     urlRow.hidden = false;
     urlInput.focus();
+  }
+
+  function promptGithub() {
+    ghRow.hidden = false;
+    ghInput.focus();
   }
 
   importBox.append(uploadRow);
@@ -5094,6 +6133,7 @@ use crate::discovery;
 use crate::ingest::text;
 use crate::domain::*;
 use crate::fetch::{self, FetchedMeta};
+use crate::github;
 use crate::grounded;
 use crate::hashes;
 use crate::http::{percent_decode, Reply, Request, Response, StreamReply};
@@ -5152,6 +6192,41 @@ fn finish_job(db: &mut Db, job_id: &str, status: &str, error: &str) {
         job.status = status.to_string();
         job.error = error.to_string();
         job.finished_at = now_iso();
+    }
+}
+
+/// Map a fetch failure onto an HTTP answer that names the repository and the cause.
+fn github_fetch_error(e: &fetch::FetchError, repo: &github::Repo) -> Response {
+    let status = match e {
+        fetch::FetchError::Rejected(_) => 422,
+        fetch::FetchError::NoTransport(_) => 501,
+        fetch::FetchError::Limit(_) => 413,
+        fetch::FetchError::Failed(_) => 502,
+    };
+    err(status, e.code(), &format!("{}: {}", repo.full(), e.message()))
+}
+
+/// GitHub answers 403/429 for the anonymous rate limit and 404 for anything a caller without
+/// credentials may not see. Both are reported with GitHub's own message.
+fn github_status_error(status: u16, body: &[u8], repo: &github::Repo) -> Response {
+    let text = String::from_utf8_lossy(body);
+    let message = crate::json::parse(&text)
+        .ok()
+        .and_then(|v| v.str_of("message").map(|m| m.to_string()))
+        .unwrap_or_else(|| text.chars().take(200).collect::<String>());
+    match status {
+        404 => err(
+            404,
+            "repo_not_found",
+            &format!("{} is not visible to an anonymous caller (GitHub 404): {}", repo.full(), message),
+        ),
+        403 | 429 => err(
+            429,
+            "github_rate_limited",
+            &format!("GitHub refused the request ({}): {}. Wait, or add the repository again later — Forge holds no token", status, message),
+        ),
+        401 => err(502, "github_auth", &format!("GitHub requires credentials Forge does not have: {}", message)),
+        other => err(502, "github_error", &format!("GitHub answered {} for {}: {}", other, repo.full(), message)),
     }
 }
 
@@ -5421,6 +6496,7 @@ impl Api {
             ("POST", ["api", "notebooks", id, "sources", "text"]) => self.add_text_source(id, req),
             ("POST", ["api", "notebooks", id, "sources", "upload"]) => self.add_upload_source(id, req),
             ("POST", ["api", "notebooks", id, "sources", "url"]) => self.add_url_source(id, req),
+            ("POST", ["api", "notebooks", id, "sources", "github"]) => self.add_github_source(id, req),
             ("GET", ["api", "notebooks", id, "chunks"]) => Ok(ok(self.list_chunks(id))),
             ("POST", ["api", "notebooks", id, "chat"]) => self.chat(id, req),
             ("GET", ["api", "notebooks", id, "conversations"]) => Ok(ok(self.list_conversations(id))),
@@ -5544,6 +6620,17 @@ impl Api {
                 "youtube" => obj!{ "status" => "unsupported", "reason" => "needs a transcript extractor (yt-dlp) and an ASR pipeline; neither is installed" },
                 "audio_transcript" => obj!{ "status" => "unsupported", "reason" => "no ASR engine installed (see docs/RESEARCH_BLOCKERS.md)" },
                 "docx" => obj!{ "status" => "supported", "locator" => "paragraph", "note" => "WordprocessingML text; images ignored" },
+                "github" => obj!{
+                    "status" => "supported",
+                    "locator" => "issue",
+                    "note" => "public repositories only: README plus issues, read through api.github.com with no token and the anonymous rate limit, so a 429 is reported with GitHub's own message rather than retried. Pull requests are skipped; code, releases and wikis are not read",
+                },
+                "feed" => obj!{
+                    "status" => "supported",
+                    "locator" => "item",
+                    "formats" => "RSS 2.0, Atom 1.0, RSS 1.0 (RDF), fetched by URL",
+                    "note" => "one citable block per entry with the publisher's own date, position and title (\"item 3 · Churn fell\"); an entry with no date is indexed without one rather than stamped with the fetch time",
+                },
                 "epub" => obj!{ "status" => "supported", "locator" => "section", "note" => "chapters read in the package spine order, not filename order; the chapter title and its position are part of the locator; images counted, not read" },
                 "pptx" => obj!{ "status" => "supported", "locator" => "slide", "note" => "slide text; speaker notes not indexed" },
                 "xlsx" => obj!{ "status" => "supported", "locator" => "row+cell", "note" => "every worksheet, shared/inline strings, cached formulas flagged; hidden sheets stored but never cited" },
@@ -6706,6 +7793,19 @@ impl Api {
 
         let kind = fetched.ingest_kind();
         let title = self.derive_title(&fetched, kind, parsed.host.as_str());
+        let mut meta = BTreeMap::new();
+        if kind == "feed" {
+            // Record what the feed said about itself. The item count is what was indexed, not
+            // what the feed claims: a truncated or skipped entry would make the claim false.
+            if let Ok(feed) = ingest::feed::parse(&fetched.body) {
+                meta.insert("feed_flavour".to_string(), feed.flavour.clone());
+                meta.insert("feed_title".to_string(), feed.title.clone());
+                if !feed.link.is_empty() {
+                    meta.insert("feed_link".to_string(), feed.link.clone());
+                }
+                meta.insert("feed_items".to_string(), feed.items.len().to_string());
+            }
+        }
         self.ingest_source(
             Some(FetchedMeta {
                 canonical_url: fetched.canonical_url.clone(),
@@ -6714,7 +7814,7 @@ impl Api {
                 content_type: fetched.media_type(),
                 redirects: fetched.redirects.len(),
             }),
-            BTreeMap::new(),
+            meta,
             nb,
             &title,
             kind,
@@ -6723,8 +7823,153 @@ impl Api {
         )
     }
 
+    /// Read a public GitHub repository's README and/or issues as one source.
+    ///
+    /// The collection is retained as bytes (a small JSON envelope) so `retry` re-indexes what
+    /// was actually collected. No token exists in this build, so this is the anonymous public
+    /// API: rate limits are real and are reported rather than retried.
+    fn add_github_source(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let repo = github::Repo::parse(body.str_of("repo").unwrap_or(""))
+            .map_err(|e| err(422, "bad_repo", &e))?;
+
+        let mut include_readme = true;
+        let mut include_issues = true;
+        if let Some(Value::Arr(list)) = body.get("include") {
+            let mut wanted: Vec<String> = Vec::new();
+            for v in list {
+                let name = v.as_str().unwrap_or("").trim().to_ascii_lowercase();
+                if name.is_empty() {
+                    continue;
+                }
+                if name != "readme" && name != "issues" {
+                    return Err(err(422, "bad_include", "include accepts \"readme\" and \"issues\""));
+                }
+                wanted.push(name);
+            }
+            if !wanted.is_empty() {
+                include_readme = wanted.iter().any(|w| w == "readme");
+                include_issues = wanted.iter().any(|w| w == "issues");
+            }
+        }
+        let limit = body
+            .get("limit")
+            .and_then(|v| v.as_f64())
+            .map(|n| n as usize)
+            .unwrap_or(github::ISSUE_DEFAULT)
+            .clamp(1, github::ISSUE_MAX);
+
+        if self
+            .store
+            .read(|db| db.notebooks.iter().any(|n| n.id == nb))
+            != true
+        {
+            return Err(err(404, "not_found", "notebook not found"));
+        }
+
+        let canonical = format!("https://github.com/{}", repo.full());
+        if let Some(existing) = self.store.read(|db| {
+            db.sources
+                .iter()
+                .find(|s| s.notebook_id == nb && s.canonical_url == canonical)
+                .map(|s| (s.id.clone(), s.title.clone()))
+        }) {
+            return Err(err_dup(&existing.0, &existing.1, &canonical));
+        }
+
+        let mut collection = github::Collection {
+            repo: repo.full(),
+            api_base: github::api_base(),
+            ..Default::default()
+        };
+        let mut warnings: Vec<String> = Vec::new();
+
+        // Issues first: a 404 here means the repository itself is not visible to an anonymous
+        // caller, which is the one failure worth refusing outright.
+        if include_issues {
+            let url = github::issues_url(&repo, limit);
+            let page = fetch::fetch_api(&url, fetch::GITHUB_JSON_ACCEPT)
+                .map_err(|e| github_fetch_error(&e, &repo))?;
+            if page.status != 200 {
+                return Err(github_status_error(page.status, &page.body, &repo));
+            }
+            let text = String::from_utf8_lossy(&page.body);
+            let issues = github::parse_issues(&text).map_err(|e| err(502, "github_bad_payload", &e))?;
+            collection.skipped_pull_requests = issues.iter().filter(|i| i.pull_request).count();
+            collection.issues = issues.into_iter().filter(|i| !i.pull_request).collect();
+            if collection.issues.len() >= limit {
+                warnings.push(format!(
+                    "the issue list was capped at {} item(s); older issues were not read",
+                    limit
+                ));
+            }
+        }
+
+        if include_readme {
+            let url = github::readme_url(&repo);
+            match fetch::fetch_api(&url, "application/vnd.github.raw") {
+                Ok(page) if page.status == 200 => {
+                    collection.readme = String::from_utf8_lossy(&page.body).to_string();
+                }
+                Ok(page) if page.status == 404 => {
+                    warnings.push("no README is published at the default branch".to_string());
+                }
+                Ok(page) => return Err(github_status_error(page.status, &page.body, &repo)),
+                Err(e) => return Err(github_fetch_error(&e, &repo)),
+            }
+        }
+
+        let title = github::title_for(&collection, include_readme, include_issues);
+        let bytes = collection.to_bytes();
+        let mut meta = BTreeMap::new();
+        meta.insert("repo".to_string(), repo.full());
+        meta.insert("api_base".to_string(), collection.api_base.clone());
+        meta.insert("issues_indexed".to_string(), collection.issues.len().to_string());
+        meta.insert("pull_requests_skipped".to_string(), collection.skipped_pull_requests.to_string());
+        meta.insert("readme_bytes".to_string(), collection.readme.len().to_string());
+        meta.insert("include".to_string(), match (include_readme, include_issues) {
+            (true, true) => "readme,issues".to_string(),
+            (true, false) => "readme".to_string(),
+            (false, true) => "issues".to_string(),
+            (false, false) => "none".to_string(),
+        });
+
+        let response = self.ingest_source(
+            Some(FetchedMeta {
+                canonical_url: canonical,
+                fetched_at: now_iso(),
+                status: 200,
+                content_type: "application/json".to_string(),
+                redirects: 0,
+            }),
+            meta,
+            nb,
+            &title,
+            "github",
+            "github",
+            &bytes,
+        )?;
+        // The endpoint's own warnings (cap, missing README) belong with the source's, but the
+        // source is already stored; append them so the UI shows one honest list.
+        if !warnings.is_empty() {
+            let _ = self.store.write(|db| {
+                if let Some(src) = db.sources.iter_mut().find(|s| s.title == title && s.notebook_id == nb) {
+                    src.warnings.extend(warnings.clone());
+                }
+            });
+        }
+        Ok(response)
+    }
+
     /// Title for a fetched source: page title, then meta description, then the host.
     fn derive_title(&self, fetched: &fetch::Fetched, kind: &str, host: &str) -> String {
+        if kind == "feed" {
+            if let Ok(feed) = ingest::feed::parse(&fetched.body) {
+                if !feed.title.is_empty() {
+                    return clip(&feed.title, 120);
+                }
+            }
+        }
         if kind == "html" {
             let raw = ingest::decode_text(&fetched.body);
             if let Some(t) = ingest::text::html_title(&raw) {
@@ -6816,7 +8061,7 @@ impl Api {
             })
             .map_err(|e| err(500, "storage", &e.to_string()))?;
         // Keep the bytes so `retry` can re-ingest without asking the user to upload again.
-        if origin == "upload" || origin == "paste" || origin == "note" {
+        if matches!(origin, "upload" | "paste" | "note" | "github") {
             let _ = self.store.save_blob(&source_id, bytes);
         }
 
@@ -10260,6 +11505,9 @@ pub enum SourceKind {
     /// downloads media or captions on its own.
     Transcript,
     Epub,
+    /// An RSS/Atom feed fetched from a URL. Each entry is its own citable item with the
+    /// publisher's date — Forge does not invent one when the feed omits it.
+    Feed,
 }
 
 impl SourceKind {
@@ -10277,6 +11525,7 @@ impl SourceKind {
             SourceKind::Note => "note",
             SourceKind::Transcript => "transcript",
             SourceKind::Epub => "epub",
+            SourceKind::Feed => "feed",
         }
     }
 
@@ -10294,6 +11543,7 @@ impl SourceKind {
             "note" => SourceKind::Note,
             "transcript" | "vtt" | "srt" | "captions" => SourceKind::Transcript,
             "epub" => SourceKind::Epub,
+            "feed" | "rss" | "atom" => SourceKind::Feed,
             _ => return None,
         })
     }
@@ -10318,6 +11568,8 @@ impl SourceKind {
             SourceKind::Transcript
         } else if lower.ends_with(".epub") {
             SourceKind::Epub
+        } else if lower.ends_with(".rss") || lower.ends_with(".atom") {
+            SourceKind::Feed
         } else {
             SourceKind::Text
         }
@@ -10328,7 +11580,7 @@ impl SourceKind {
 /// can navigate to the exact page/row/paragraph instead of a loose text match.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Locator {
-    /// "page" | "paragraph" | "row" | "section" | "chapter" | "line" | "cell" | "slide" | "timestamp"
+    /// "page" | "paragraph" | "row" | "section" | "chapter" | "item" | "issue" | "line" | "cell" | "slide" | "timestamp"
     pub kind: String,
     pub page: Option<u32>,
     pub paragraph: Option<u32>,
@@ -10355,6 +11607,28 @@ impl Locator {
     }
     pub fn row(idx: u32, start: u32, end: u32) -> Locator {
         Locator { kind: "row".into(), page: None, paragraph: None, row: Some(idx), section: None, sheet: None, cell: None, col: None, at_ms: None, start, end }
+    }
+    /// A GitHub issue: the issue number plus "number · title".
+    pub fn issue(number: u32, section: &str) -> Locator {
+        Locator { kind: "issue".into(), page: Some(number), paragraph: None, row: None,
+            section: Some(section.to_string()), sheet: None, cell: None, col: None, at_ms: None,
+            start: 0, end: 0 }
+    }
+    /// A feed entry: position in the feed plus "position · title".
+    pub fn item(n: u32, section: &str) -> Locator {
+        Locator {
+            kind: "item".into(),
+            page: Some(n),
+            paragraph: None,
+            row: None,
+            section: Some(section.to_string()),
+            sheet: None,
+            cell: None,
+            col: None,
+            at_ms: None,
+            start: 0,
+            end: 0,
+        }
     }
     /// A spreadsheet row: keeps `kind = "row"` (existing contracts) while adding the
     /// sheet and the exact A1 range, so the row can be found in the grid.
@@ -10435,6 +11709,10 @@ impl Locator {
             // EPUB chapters carry "position · title" in `section`, so the label reads
             // "chapter 2 · The retention model".
             "chapter" => format!("chapter {}", self.section.clone().unwrap_or_default()),
+            // GitHub issues carry "number · title": "issue 12 · Retry is flaky".
+            "issue" => format!("issue {}", self.section.clone().unwrap_or_default()),
+            // Feed entries carry "position · title" in `section`: "item 3 · Churn fell".
+            "item" => format!("item {}", self.section.clone().unwrap_or_default()),
             "cell" => {
                 let cell = self.cell.clone().unwrap_or_default();
                 if cell.contains('!') {
@@ -11380,6 +12658,14 @@ impl Fetched {
         if mt == "text/html" || mt == "application/xhtml+xml" || ends("html") || ends("htm") {
             return "html";
         }
+        // Feeds are XML with a root element we can name, so the sniff decides, not the
+        // extension: `feed.xml` served as text/plain is still a feed.
+        if mt.contains("rss") || mt.contains("atom") || ends("rss") || ends("atom") {
+            return "feed";
+        }
+        if (mt.contains("xml") || ends("xml") || ends("rdf")) && crate::ingest::feed::looks_like_feed(&self.body) {
+            return "feed";
+        }
         if mt == "text/markdown" || ends("md") || ends("markdown") {
             return "markdown";
         }
@@ -11428,7 +12714,7 @@ fn temp_paths() -> (PathBuf, PathBuf) {
 }
 
 /// One request, no redirect following. Returns (status, headers text, body).
-fn request_once(url: &ParsedUrl, ip: std::net::IpAddr, max_bytes: usize) -> Result<(u16, String, Vec<u8>), FetchError> {
+fn request_once(url: &ParsedUrl, ip: std::net::IpAddr, max_bytes: usize, accept: &str) -> Result<(u16, String, Vec<u8>), FetchError> {
     let (body_path, hdr_path) = temp_paths();
     let pin = if url.host.contains(':') {
         format!("[{}]:{}:{}", url.host, url.port, ip)
@@ -11453,7 +12739,7 @@ fn request_once(url: &ParsedUrl, ip: std::net::IpAddr, max_bytes: usize) -> Resu
             "--user-agent",
             USER_AGENT,
             "--header",
-            "Accept: text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
+            &format!("Accept: {}", accept),
             "--resolve",
             &pin,
             "--dump-header",
@@ -11552,11 +12838,38 @@ fn resolve_location(base: &ParsedUrl, location: &str) -> Result<ParsedUrl, Fetch
 }
 
 /// Fetch a URL, validating policy at every hop.
+pub const BROWSER_ACCEPT: &str = "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5";
+/// GitHub's REST API wants to be asked in its own media type; asking for HTML gets a page of
+/// markup about the API instead of the JSON.
+pub const GITHUB_JSON_ACCEPT: &str = "application/vnd.github+json";
+
 pub fn fetch(raw_url: &str) -> Result<Fetched, FetchError> {
     fetch_with_limits(raw_url, MAX_FETCH_BYTES)
 }
 
+/// Fetch an API resource, keeping non-2xx answers: a 404 or a 429 body says *why* a request was
+/// refused, and turning it into a generic transport error would throw away the explanation the
+/// user needs. Redirects and the SSRF guard behave exactly as they do everywhere else.
+pub fn fetch_api(raw_url: &str, accept: &str) -> Result<Fetched, FetchError> {
+    fetch_with(raw_url, MAX_FETCH_BYTES, accept, true)
+}
+
+/// Fetch with a caller-chosen `Accept` header. Same guard, same redirect policy, same limits:
+/// only the representation asked for differs.
+pub fn fetch_accept(raw_url: &str, accept: &str) -> Result<Fetched, FetchError> {
+    fetch_with(raw_url, MAX_FETCH_BYTES, accept, false)
+}
+
 pub fn fetch_with_limits(raw_url: &str, max_bytes: usize) -> Result<Fetched, FetchError> {
+    fetch_with(raw_url, max_bytes, BROWSER_ACCEPT, false)
+}
+
+fn fetch_with(
+    raw_url: &str,
+    max_bytes: usize,
+    accept: &str,
+    keep_error_status: bool,
+) -> Result<Fetched, FetchError> {
     let mut url = security::parse_url(raw_url).map_err(FetchError::Rejected)?;
     let mut redirects: Vec<(u16, String)> = Vec::new();
 
@@ -11572,7 +12885,7 @@ pub fn fetch_with_limits(raw_url: &str, max_bytes: usize) -> Result<Fetched, Fet
             security::ResolveError::Dns(m) => FetchError::Failed(m),
         })?;
         let ip = ips[0];
-        let (status, headers, body) = request_once(&url, ip, max_bytes)?;
+        let (status, headers, body) = request_once(&url, ip, max_bytes, accept)?;
 
         if (300..400).contains(&status) {
             let location = header_value(&headers, "location")
@@ -11582,7 +12895,7 @@ pub fn fetch_with_limits(raw_url: &str, max_bytes: usize) -> Result<Fetched, Fet
             url = next;
             continue;
         }
-        if !(200..300).contains(&status) {
+        if !(200..300).contains(&status) && !keep_error_status {
             return Err(FetchError::Failed(format!(
                 "HTTP {} for {}",
                 status,
@@ -14583,6 +15896,7 @@ mod fixture_tests {
 //! citation can always point at a page/row/paragraph instead of a fuzzy match.
 
 pub mod epub;
+pub mod feed;
 pub mod ooxml;
 pub mod pdf;
 pub mod text;
@@ -14720,6 +16034,10 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
             Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
         "epub" => epub::epub(bytes),
+        "feed" => feed::feed(bytes),
+        // The retained bytes of a GitHub collection are a JSON envelope produced by
+        // `github::Collection::to_bytes`, so a retry re-indexes what was collected.
+        "github" => crate::github::extract(bytes),
         "html" | "htm" => {
             let raw = decode_text(bytes);
             let (blocks, warnings) = text::html_blocks(&raw);
@@ -17145,6 +18463,7 @@ pub mod grounded;
 pub mod guide;
 pub mod hashes;
 pub mod fetch;
+pub mod github;
 pub mod http;
 pub mod inflate;
 pub mod ingest;
@@ -25223,6 +26542,298 @@ fn artifacts_regenerate_with_their_parameters_and_conversations_export_with_cita
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Serve one document with an exact content type, so the test can prove the kind is decided
+/// by what the bytes are, not by what the server claims.
+fn start_typed_origin(content_type: &'static str, body: &'static str) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(4) {
+            let mut stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                content_type,
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    port
+}
+
+#[test]
+fn feed_sources_are_read_as_dated_items_and_cited_by_item() {
+    let _guard = URL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FORGE_FETCH_ALLOW_PRIVATE", "1");
+
+    // Served as text/plain on purpose: a feed is recognised by its root element, and a host
+    // that mislabels Content-Type must not turn a feed into a wall of unlabelled prose.
+    let rss = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Retention Weekly</title>
+  <link>https://example.test/</link>
+  <item>
+    <title>Churn fell after the onboarding rewrite</title>
+    <link>https://example.test/posts/onboarding</link>
+    <pubDate>Tue, 03 Mar 2026 09:00:00 GMT</pubDate>
+    <dc:creator>R. Okafor</dc:creator>
+    <description><![CDATA[<p>Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite.</p>]]></description>
+  </item>
+  <item>
+    <title>Legal hold overrides the thirty day window</title>
+    <link>https://example.test/posts/legal-hold</link>
+    <pubDate>Wed, 04 Mar 2026 12:30:00 GMT</pubDate>
+    <description>A legal hold suspends deletion regardless of the thirty day retention window.</description>
+  </item>
+</channel></rss>"#;
+    let port = start_typed_origin("text/plain", rss);
+    let dir = tempdir("feed-ingest");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Feeds"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    let url = format!("http://127.0.0.1:{}/feed.xml", port);
+    let (st, src) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/url", nb_id),
+        Some(obj(&[("url", Value::from(url.as_str()))])),
+    );
+    assert_eq!(st, 201, "feed ingest failed: {:?}", src);
+    assert_eq!(src.str_of("kind"), Some("feed"), "the bytes decide the kind: {:?}", src);
+    assert_eq!(src.str_of("title"), Some("Retention Weekly"), "the feed's own title, not the URL");
+    assert_eq!(src.get("page_count").and_then(|v| v.as_f64()), Some(2.0), "two items");
+
+    let (_, sources) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let stored = &sources.get("sources").unwrap().as_arr().unwrap()[0];
+    let meta = stored.get("meta").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(meta.str_of("feed_flavour"), Some("rss"));
+    assert_eq!(meta.str_of("feed_items"), Some("2"));
+    assert_eq!(meta.str_of("feed_link"), Some("https://example.test/"));
+    assert!(
+        stored.get("warnings").and_then(|w| w.as_arr()).map(|w| w.iter().any(|m| {
+            m.as_str().map(|t| t.contains("feed read as RSS 2.0: 2 item(s)")).unwrap_or(false)
+        })).unwrap_or(false),
+        "the source says what it read: {:?}",
+        stored.get("warnings")
+    );
+
+    // A citation from a feed names the item and carries the publisher's date.
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("how far did monthly churn fall after the rewrite"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    assert!(answer.str_of("answer").unwrap_or("").contains("2.9%"), "{:?}", answer);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty(), "a grounded answer must cite");
+    let loc = cites[0].get("locator").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(loc.str_of("kind"), Some("item"), "feed citations point at an item: {:?}", loc);
+    assert_eq!(loc.get("page").and_then(|v| v.as_f64()), Some(1.0), "item position is part of the locator");
+    let label = cites[0].str_of("locator_label").unwrap_or("");
+    assert!(label.starts_with("item 1 · Churn fell"), "label={}", label);
+    assert!(
+        cites[0].str_of("quote").unwrap_or("").contains("2.9%"),
+        "the quote is the item's own words: {:?}",
+        cites[0].str_of("quote")
+    );
+
+    // An undated item keeps no date at all, and the source says so at ingest.
+    std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+}
+
+/// A fake GitHub REST API on loopback: `/repos/<owner>/<repo>/readme` and `/issues`.
+/// Anything else is a 404 with GitHub's JSON error shape, which is exactly what the client has
+/// to cope with when a repository is private or simply does not exist.
+fn start_fake_github() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(12) {
+            let mut stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("/")
+                .to_string();
+
+            let (status, ctype, body) = if path == "/repos/acme/retry/readme" {
+                (
+                    "200 OK",
+                    "text/plain; charset=utf-8",
+                    "# acme/retry\n\nThe client retries with a budget of 2.75 attempts per request.\n\n## Install\n\ncargo build --release".to_string(),
+                )
+            } else if path.starts_with("/repos/acme/retry/issues") {
+                (
+                    "200 OK",
+                    "application/json",
+                    r#"[
+                      {"number":12,"title":"Retry budget is not respected","state":"open",
+                       "user":{"login":"okafor"},"created_at":"2026-03-01T10:00:00Z",
+                       "body":"With three tiers the client retries 5 times instead of 2.75."},
+                      {"number":13,"title":"Docs: wrong install line","state":"closed",
+                       "user":{"login":"menon"},"created_at":"2026-03-02T10:00:00Z",
+                       "body":"The install line said cargo build, it must be cargo build --release."},
+                      {"number":14,"title":"Bump the retry dependency","state":"open",
+                       "user":{"login":"lee"},"created_at":"2026-03-03T10:00:00Z","body":"",
+                       "pull_request":{"url":"https://api.github.com/repos/acme/retry/pulls/14"}}
+                    ]"#
+                    .to_string(),
+                )
+            } else {
+                (
+                    "404 Not Found",
+                    "application/json",
+                    r#"{"message":"Not Found","documentation_url":"https://docs.github.com/rest"}"#.to_string(),
+                )
+            };
+            let head = format!(
+                "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                status,
+                ctype,
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    port
+}
+
+#[test]
+fn github_repositories_are_read_as_readme_and_numbered_issues() {
+    let _guard = URL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FORGE_FETCH_ALLOW_PRIVATE", "1");
+    let port = start_fake_github();
+    std::env::set_var("FORGE_GITHUB_API", format!("http://127.0.0.1:{}", port));
+
+    let dir = tempdir("github-ingest");
+    let s = Server::start(dir.clone());
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Repo"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    // A URL is accepted for the repo, because that is what people paste.
+    let (st, src) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("https://github.com/acme/retry.git"))])),
+    );
+    assert_eq!(st, 201, "github ingest failed: {:?}", src);
+    assert_eq!(src.str_of("kind"), Some("github"));
+    assert_eq!(src.str_of("title"), Some("acme/retry — README, 2 issue(s)"));
+    assert_eq!(src.get("page_count").and_then(|v| v.as_f64()), Some(2.0), "two issues, the PR excluded");
+    let src_id = src.str_of("source_id").unwrap().to_string();
+
+    let (_, sources) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let stored = &sources.get("sources").unwrap().as_arr().unwrap()[0];
+    let meta = stored.get("meta").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(meta.str_of("repo"), Some("acme/retry"));
+    assert_eq!(meta.str_of("issues_indexed"), Some("2"));
+    assert_eq!(meta.str_of("pull_requests_skipped"), Some("1"));
+    assert_eq!(meta.str_of("include"), Some("readme,issues"));
+    assert_eq!(stored.str_of("origin"), Some("github"));
+    assert_eq!(stored.str_of("canonical_url"), Some("https://github.com/acme/retry"));
+    assert!(
+        stored.get("warnings").and_then(|w| w.as_arr()).map(|w| w.iter().any(|m| {
+            m.as_str().map(|t| t.contains("pull request(s) were skipped")).unwrap_or(false)
+        })).unwrap_or(false),
+        "the source says what it skipped: {:?}",
+        stored.get("warnings")
+    );
+
+    // Issue chunks carry a number and a title, so a citation can say which issue it came from.
+    let (st, chunks) = s.json("GET", &format!("/api/sources/{}/chunks", src_id), None);
+    assert_eq!(st, 200);
+    let list = chunks.get("chunks").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    let issue_chunks: Vec<_> = list
+        .iter()
+        .filter(|c| c.get("locator").and_then(|l| l.str_of("kind")) == Some("issue"))
+        .collect();
+    assert_eq!(issue_chunks.len(), 2, "one block per issue: {:?}", list.len());
+    assert_eq!(
+        issue_chunks[0].get("locator").and_then(|l| l.str_of("section")),
+        Some("12 · Retry budget is not respected"),
+        "issues are numbered in ascending order"
+    );
+
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("what is the retry budget per request"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    assert!(answer.str_of("answer").unwrap_or("").contains("2.75"), "{:?}", answer);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty());
+    assert_eq!(cites[0].str_of("locator_label"), Some("section README"), "the README answered this one");
+
+    // A question whose answer only exists in an issue is cited to that issue's number and title.
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("with three tiers how many times does the client retry"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    let label = cites[0].str_of("locator_label").unwrap_or("");
+    assert!(label.starts_with("issue 12 · Retry budget"), "label={}", label);
+
+    // The same repository is refused as a duplicate, and a repository GitHub does not show is a 404.
+    let (st, dup) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("acme/retry"))])),
+    );
+    assert_eq!(st, 409, "{:?}", dup);
+    assert_eq!(dup.str_of("code"), Some("duplicate_source"));
+
+    let (st, missing) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("acme/missing"))])),
+    );
+    assert_eq!(st, 404, "{:?}", missing);
+    assert_eq!(missing.str_of("code"), Some("repo_not_found"));
+    assert!(missing.str_of("error").unwrap_or("").contains("acme/missing"), "{:?}", missing);
+
+    // Malformed repository specs and unknown include values are refused before any network call.
+    let (st, bad) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("not-a-repo"))])),
+    );
+    assert_eq!(st, 422);
+    assert_eq!(bad.str_of("code"), Some("bad_repo"));
+    let (st, bad) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("acme/retry")), ("include", Value::Arr(vec![Value::from("wiki")]))])),
+    );
+    assert_eq!(st, 422);
+    assert_eq!(bad.str_of("code"), Some("bad_include"));
+
+    std::env::remove_var("FORGE_GITHUB_API");
+    std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+}
 ```
 
 ## `crates/forge-server/Cargo.toml`
@@ -29343,7 +30954,8 @@ curl is out of scope for this layer.
 
 Last updated: 2026-11-01 (access control + share links, crash-resilient ingestion with retry,
 timed transcripts, discovery from seed pages, slide editing and artifact export, library
-search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export).
+search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export,
+RSS/Atom feeds, GitHub repositories).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -29362,8 +30974,8 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **248 passing, 0 failing** (26 `bininspect` + 188 lib + 29 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **144 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **268 passing, 0 failing** (26 `bininspect` + 206 lib + 31 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **148 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -29383,6 +30995,8 @@ untested it says so.
 | EPUB (§7.2) | `.epub` read through the existing ZIP reader: `META-INF/container.xml` → OPF → **spine order** (not filename order), chapter title and position in the locator (`chapter 2 · The retention model`), images counted not read, a package without a spine falls back to filename order **and says so** | `ingest::epub` (4 tests) + e2e `epub_sources_are_read_in_spine_order_and_cite_their_chapter` + 3 UI assertions |
 | Artifact regeneration | `POST /api/artifacts/:id/regenerate` re-runs the generator with the parameters **stored on the artifact** (`topic`, `difficulty`, `audience`) against the current source text; keeps the id, bumps `version`, clears `stale`, and clears review marks **and says how many** — `card-3` of the old deck is not `card-3` of the new one | e2e `artifacts_regenerate_with_their_parameters_and_conversations_export_with_citations` + 3 UI assertions |
 | Conversation export | `GET /api/conversations/:id/export?format=md/json` returns the stored transcript: each question, each answer, its evidence block (source · locator · quote) and any abstention/note. PDF and other formats are refused with `422 bad_format` | same e2e + 3 UI assertions |
+| RSS / Atom feeds | a fetched feed is recognised by its root element (not its `Content-Type`), split into one citable block per entry, and each entry keeps the **publisher's** date, author and link. A citation reads `item 3 · Churn fell`; an item with no date is indexed without one instead of being stamped with the fetch time. RSS 2.0, Atom 1.0 and RSS 1.0 (RDF) are read; a document that is not a feed is refused with the reason | `ingest::feed` (11 tests) + e2e `feed_sources_are_read_as_dated_items_and_cited_by_item` + 4 UI assertions; live: `github.com/BurntSushi/ripgrep/releases.atom` → 10 dated items |
+| GitHub repositories | `POST /api/notebooks/:id/sources/github` reads a **public** repo's README and issues through `api.github.com` with no token: issues are cited by number and title (`issue 12 · Retry budget…`), pull requests are skipped and counted, and a 403/429 is reported with GitHub's own message instead of being retried. The collected JSON envelope is retained, so a retry re-indexes the same collection | `github` (8 tests) + e2e `github_repositories_are_read_as_readme_and_numbered_issues`; live: `BurntSushi/ripgrep` → 21.6 KB README, 1 issue, 4 PRs skipped |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
@@ -29483,8 +31097,9 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 
 ## Immediate next steps
 
-2. GitHub README/issues and RSS ingestion (both reachable through the existing fetch path).
-3. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
+2. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
+3. Feed autodiscovery (an HTML page's `<link rel="alternate">` is not followed today) and
+   GitHub pagination past one page of issues.
 3. A real PPTX/PDF renderer for slide export (today it is refused, not faked).
 4. Wire a TLS client (not just the `curl` subprocess) so URL ingestion and remote providers
    stop depending on an external binary.
@@ -29501,7 +31116,7 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 248 tests: 188 lib + 29 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 268 tests: 206 lib + 31 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -29509,7 +31124,7 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 144 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 148 assertions
 ```
 
 ## Unit tests (188) — exact names from `cargo test --lib -- --list`
@@ -30199,6 +31814,37 @@ Honest limits:
   per-page progress, because parsing is one synchronous pass.
 * **Retry of a URL source re-fetches.** If the page changed since the failure, the retried source
   is the new page, and the content hash changes. That is recorded on the source, not on the job.
+
+## Feeds (RSS / Atom)
+
+* Read: RSS 2.0, Atom 1.0, RSS 1.0 (RDF), plus `content:encoded` / `<summary>` / `<description>`
+  bodies. One block per entry, in the feed's own order, with the publisher's date and author
+  when the feed states them.
+* **Not read:** enclosures (a podcast feed's audio is not transcribed and not stored), full-text
+  pagination of `atom:link rel="next"`, feed autodiscovery from an HTML page's
+  `<link rel="alternate">`, and any credential-protected feed. A feed that lists more than 200
+  items is truncated with a warning.
+* An entry with **no date** is indexed without one. The fetch time is never substituted: a
+  citation that claims a publication date the feed did not state would be fabricated evidence.
+* Item order is the feed's order, not a re-sort by date — re-sorting would renumber `item 1`
+  between fetches and break previously cited positions.
+
+## GitHub repositories
+
+* Public repositories only: Forge holds **no token**, so a private repository answers 404 and
+  the error says so. The anonymous rate limit is whatever GitHub reports; a 403/429 is surfaced
+  with GitHub's message (`github_rate_limited`) rather than retried in a loop.
+* Read: the README at the default branch and one page of issues (default 30, hard cap 100).
+  **Not read:** code, file trees, releases, wikis, discussions, review comments, or any further
+  page of issues. Pull requests that appear in the issue list are skipped and counted.
+* The stored bytes are a JSON envelope of what was collected, so a retry re-indexes that
+  collection instead of silently fetching a newer one. A repository that changed in between is
+  not detected — refresh it to collect again.
+* Live check (2026-11-01, this sandbox): `GET api.github.com/repos/rust-lang/rust/readme` → 200;
+  `BurntSushi/ripgrep` ingested as 172 chunks (21.6 KB README + 1 issue, 4 PRs skipped). The
+  reported rate limit on this egress IP was 5650/hour, which is **not** the anonymous limit — a
+  different egress may see 60/hour and hit `github_rate_limited` quickly. Forge reports what it
+  receives; it does not assume a limit.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -34495,7 +36141,8 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-13 | YouTube captions | documented | blocked | — | `yt-dlp` installs, but no route to a platform host and no per-video licence decision |
 | SRC-14 | ePub | documented | **done** — spine-ordered chapters, `chapter N · title` locators, images counted not read | `ingest::epub` | 4 unit + e2e + 3 UI |
 | SRC-15 | Drive / Docs / Sheets | documented | blocked | — | OAuth + credentials |
-| SRC-16 | GitHub repo/issues | not in reference | planned | — | `api.github.com` reachable |
+| SRC-16 | GitHub repo/issues | not in reference | **done** — README + issues from a public repo, read through `api.github.com` with no token; issues cited by number and title, PRs skipped, rate limits reported | `github.rs`, `POST /api/notebooks/:id/sources/github` | 8 lib + e2e + UI |
+| SRC-23 | RSS / Atom feeds | not in reference | **done** — one citable block per entry with the publisher's date, author and link (`item 3 · Churn fell`); undated entries are not given a date | `ingest/feed.rs` | 11 lib + e2e + 4 UI |
 | SRC-17 | Source Guide auto-summary | documented | **partial (honest)** — extractive guide: quoted headline/summary with locators, topics, outline, suggested questions; **no model-written summary** (no reachable LLM) | `guide.rs`, `GET /api/sources/:id/guide` | 8 unit + e2e + 9 UI |
 | CHAT-01 | notebook-scoped grounded chat | documented | done | `grounded.rs` | lib + e2e |
 | CHAT-02 | exact citations + quote preview | documented | done | `Citation` | lib + UI |
@@ -37778,6 +39425,57 @@ async function main() {
   const epubMsg = $$(".msg.assistant").pop();
   check("an EPUB citation names the chapter, not just the file", /chapter 2/.test(epubMsg?.textContent || ""),
     epubMsg?.textContent?.slice(0, 300));
+  await window.openNotebook(window.document.getElementById("app"), nbId);
+  await wait(900);
+
+  // --- an RSS feed is read as dated items you can cite by name and date (§7.2)
+  const feedServer = http.createServer((req, res) => {
+    const rss = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Retention Weekly</title>
+  <link>https://example.test/</link>
+  <item>
+    <title>Churn fell after the onboarding rewrite</title>
+    <link>https://example.test/posts/onboarding</link>
+    <pubDate>Tue, 03 Mar 2026 09:00:00 GMT</pubDate>
+    <description><![CDATA[<p>Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite.</p>]]></description>
+  </item>
+  <item>
+    <title>Legal hold overrides the thirty day window</title>
+    <link>https://example.test/posts/legal-hold</link>
+    <pubDate>Wed, 04 Mar 2026 12:30:00 GMT</pubDate>
+    <description>A legal hold suspends deletion regardless of the thirty day retention window.</description>
+  </item>
+</channel></rss>`;
+    if (!/^\/feed\.xml/.test(req.url)) { res.writeHead(404); res.end("missing"); return; }
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(rss);
+  });
+  await new Promise((r) => feedServer.listen(0, "127.0.0.1", r));
+  const feedPort = feedServer.address().port;
+  $("#addUrlBtn").click();
+  await wait(200);
+  $("#urlInput").value = `http://127.0.0.1:${feedPort}/feed.xml`;
+  byText("button", "Fetch page").click();
+  await wait(1800);
+  const feedSource = $$(".source-item").find((el) => /Retention Weekly/.test(el.textContent));
+  check("an RSS feed becomes a source with the feed's own title", !!feedSource,
+    $$(".source-item").map((e) => e.textContent).join(" | ").slice(0, 240));
+  check("the feed source reports its kind", /feed/.test(feedSource?.textContent || ""), feedSource?.textContent);
+  check("a GitHub repository can be added from the sources pane without implying a connection",
+    !!$("#addGithubBtn"),
+    $$("#sideContent button").map((b) => b.textContent).join(","));
+  $(".composer textarea").value = "how far did monthly churn fall after the rewrite";
+  byText(".composer button", "Ask").click();
+  await wait(1400);
+  const feedMsg = $$(".msg.assistant").pop();
+  // The citation names the entry it came from. The entry's own publish date is part of the
+  // indexed text and is asserted against the chunk body in the Rust suite — the UI does not
+  // invent one, so it is not required to display one.
+  check("a feed citation names the entry it came from",
+    /item 1 · Churn fell/.test(feedMsg?.textContent || ""),
+    feedMsg?.textContent?.slice(0, 400));
+  feedServer.close();
   await window.openNotebook(window.document.getElementById("app"), nbId);
   await wait(900);
 

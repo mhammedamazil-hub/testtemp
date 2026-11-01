@@ -96,6 +96,14 @@ impl Fetched {
         if mt == "text/html" || mt == "application/xhtml+xml" || ends("html") || ends("htm") {
             return "html";
         }
+        // Feeds are XML with a root element we can name, so the sniff decides, not the
+        // extension: `feed.xml` served as text/plain is still a feed.
+        if mt.contains("rss") || mt.contains("atom") || ends("rss") || ends("atom") {
+            return "feed";
+        }
+        if (mt.contains("xml") || ends("xml") || ends("rdf")) && crate::ingest::feed::looks_like_feed(&self.body) {
+            return "feed";
+        }
         if mt == "text/markdown" || ends("md") || ends("markdown") {
             return "markdown";
         }
@@ -144,7 +152,7 @@ fn temp_paths() -> (PathBuf, PathBuf) {
 }
 
 /// One request, no redirect following. Returns (status, headers text, body).
-fn request_once(url: &ParsedUrl, ip: std::net::IpAddr, max_bytes: usize) -> Result<(u16, String, Vec<u8>), FetchError> {
+fn request_once(url: &ParsedUrl, ip: std::net::IpAddr, max_bytes: usize, accept: &str) -> Result<(u16, String, Vec<u8>), FetchError> {
     let (body_path, hdr_path) = temp_paths();
     let pin = if url.host.contains(':') {
         format!("[{}]:{}:{}", url.host, url.port, ip)
@@ -169,7 +177,7 @@ fn request_once(url: &ParsedUrl, ip: std::net::IpAddr, max_bytes: usize) -> Resu
             "--user-agent",
             USER_AGENT,
             "--header",
-            "Accept: text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
+            &format!("Accept: {}", accept),
             "--resolve",
             &pin,
             "--dump-header",
@@ -268,11 +276,38 @@ fn resolve_location(base: &ParsedUrl, location: &str) -> Result<ParsedUrl, Fetch
 }
 
 /// Fetch a URL, validating policy at every hop.
+pub const BROWSER_ACCEPT: &str = "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5";
+/// GitHub's REST API wants to be asked in its own media type; asking for HTML gets a page of
+/// markup about the API instead of the JSON.
+pub const GITHUB_JSON_ACCEPT: &str = "application/vnd.github+json";
+
 pub fn fetch(raw_url: &str) -> Result<Fetched, FetchError> {
     fetch_with_limits(raw_url, MAX_FETCH_BYTES)
 }
 
+/// Fetch an API resource, keeping non-2xx answers: a 404 or a 429 body says *why* a request was
+/// refused, and turning it into a generic transport error would throw away the explanation the
+/// user needs. Redirects and the SSRF guard behave exactly as they do everywhere else.
+pub fn fetch_api(raw_url: &str, accept: &str) -> Result<Fetched, FetchError> {
+    fetch_with(raw_url, MAX_FETCH_BYTES, accept, true)
+}
+
+/// Fetch with a caller-chosen `Accept` header. Same guard, same redirect policy, same limits:
+/// only the representation asked for differs.
+pub fn fetch_accept(raw_url: &str, accept: &str) -> Result<Fetched, FetchError> {
+    fetch_with(raw_url, MAX_FETCH_BYTES, accept, false)
+}
+
 pub fn fetch_with_limits(raw_url: &str, max_bytes: usize) -> Result<Fetched, FetchError> {
+    fetch_with(raw_url, max_bytes, BROWSER_ACCEPT, false)
+}
+
+fn fetch_with(
+    raw_url: &str,
+    max_bytes: usize,
+    accept: &str,
+    keep_error_status: bool,
+) -> Result<Fetched, FetchError> {
     let mut url = security::parse_url(raw_url).map_err(FetchError::Rejected)?;
     let mut redirects: Vec<(u16, String)> = Vec::new();
 
@@ -288,7 +323,7 @@ pub fn fetch_with_limits(raw_url: &str, max_bytes: usize) -> Result<Fetched, Fet
             security::ResolveError::Dns(m) => FetchError::Failed(m),
         })?;
         let ip = ips[0];
-        let (status, headers, body) = request_once(&url, ip, max_bytes)?;
+        let (status, headers, body) = request_once(&url, ip, max_bytes, accept)?;
 
         if (300..400).contains(&status) {
             let location = header_value(&headers, "location")
@@ -298,7 +333,7 @@ pub fn fetch_with_limits(raw_url: &str, max_bytes: usize) -> Result<Fetched, Fet
             url = next;
             continue;
         }
-        if !(200..300).contains(&status) {
+        if !(200..300).contains(&status) && !keep_error_status {
             return Err(FetchError::Failed(format!(
                 "HTTP {} for {}",
                 status,

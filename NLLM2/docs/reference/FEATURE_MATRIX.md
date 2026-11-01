@@ -33,7 +33,8 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-13 | YouTube captions | documented | blocked | — | `yt-dlp` installs, but no route to a platform host and no per-video licence decision |
 | SRC-14 | ePub | documented | **done** — spine-ordered chapters, `chapter N · title` locators, images counted not read | `ingest::epub` | 4 unit + e2e + 3 UI |
 | SRC-15 | Drive / Docs / Sheets | documented | blocked | — | OAuth + credentials |
-| SRC-16 | GitHub repo/issues | not in reference | planned | — | `api.github.com` reachable |
+| SRC-16 | GitHub repo/issues | not in reference | **done** — README + issues from a public repo, read through `api.github.com` with no token; issues cited by number and title, PRs skipped, rate limits reported | `github.rs`, `POST /api/notebooks/:id/sources/github` | 8 lib + e2e + UI |
+| SRC-23 | RSS / Atom feeds | not in reference | **done** — one citable block per entry with the publisher's date, author and link (`item 3 · Churn fell`); undated entries are not given a date | `ingest/feed.rs` | 11 lib + e2e + 4 UI |
 | SRC-17 | Source Guide auto-summary | documented | **partial (honest)** — extractive guide: quoted headline/summary with locators, topics, outline, suggested questions; **no model-written summary** (no reachable LLM) | `guide.rs`, `GET /api/sources/:id/guide` | 8 unit + e2e + 9 UI |
 | CHAT-01 | notebook-scoped grounded chat | documented | done | `grounded.rs` | lib + e2e |
 | CHAT-02 | exact citations + quote preview | documented | done | `Citation` | lib + UI |

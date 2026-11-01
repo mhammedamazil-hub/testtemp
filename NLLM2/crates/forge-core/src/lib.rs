@@ -10,6 +10,7 @@ pub mod grounded;
 pub mod guide;
 pub mod hashes;
 pub mod fetch;
+pub mod github;
 pub mod http;
 pub mod inflate;
 pub mod ingest;

@@ -82,6 +82,9 @@ pub enum SourceKind {
     /// downloads media or captions on its own.
     Transcript,
     Epub,
+    /// An RSS/Atom feed fetched from a URL. Each entry is its own citable item with the
+    /// publisher's date — Forge does not invent one when the feed omits it.
+    Feed,
 }
 
 impl SourceKind {
@@ -99,6 +102,7 @@ impl SourceKind {
             SourceKind::Note => "note",
             SourceKind::Transcript => "transcript",
             SourceKind::Epub => "epub",
+            SourceKind::Feed => "feed",
         }
     }
 
@@ -116,6 +120,7 @@ impl SourceKind {
             "note" => SourceKind::Note,
             "transcript" | "vtt" | "srt" | "captions" => SourceKind::Transcript,
             "epub" => SourceKind::Epub,
+            "feed" | "rss" | "atom" => SourceKind::Feed,
             _ => return None,
         })
     }
@@ -140,6 +145,8 @@ impl SourceKind {
             SourceKind::Transcript
         } else if lower.ends_with(".epub") {
             SourceKind::Epub
+        } else if lower.ends_with(".rss") || lower.ends_with(".atom") {
+            SourceKind::Feed
         } else {
             SourceKind::Text
         }
@@ -150,7 +157,7 @@ impl SourceKind {
 /// can navigate to the exact page/row/paragraph instead of a loose text match.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Locator {
-    /// "page" | "paragraph" | "row" | "section" | "chapter" | "line" | "cell" | "slide" | "timestamp"
+    /// "page" | "paragraph" | "row" | "section" | "chapter" | "item" | "issue" | "line" | "cell" | "slide" | "timestamp"
     pub kind: String,
     pub page: Option<u32>,
     pub paragraph: Option<u32>,
@@ -177,6 +184,28 @@ impl Locator {
     }
     pub fn row(idx: u32, start: u32, end: u32) -> Locator {
         Locator { kind: "row".into(), page: None, paragraph: None, row: Some(idx), section: None, sheet: None, cell: None, col: None, at_ms: None, start, end }
+    }
+    /// A GitHub issue: the issue number plus "number · title".
+    pub fn issue(number: u32, section: &str) -> Locator {
+        Locator { kind: "issue".into(), page: Some(number), paragraph: None, row: None,
+            section: Some(section.to_string()), sheet: None, cell: None, col: None, at_ms: None,
+            start: 0, end: 0 }
+    }
+    /// A feed entry: position in the feed plus "position · title".
+    pub fn item(n: u32, section: &str) -> Locator {
+        Locator {
+            kind: "item".into(),
+            page: Some(n),
+            paragraph: None,
+            row: None,
+            section: Some(section.to_string()),
+            sheet: None,
+            cell: None,
+            col: None,
+            at_ms: None,
+            start: 0,
+            end: 0,
+        }
     }
     /// A spreadsheet row: keeps `kind = "row"` (existing contracts) while adding the
     /// sheet and the exact A1 range, so the row can be found in the grid.
@@ -257,6 +286,10 @@ impl Locator {
             // EPUB chapters carry "position · title" in `section`, so the label reads
             // "chapter 2 · The retention model".
             "chapter" => format!("chapter {}", self.section.clone().unwrap_or_default()),
+            // GitHub issues carry "number · title": "issue 12 · Retry is flaky".
+            "issue" => format!("issue {}", self.section.clone().unwrap_or_default()),
+            // Feed entries carry "position · title" in `section`: "item 3 · Churn fell".
+            "item" => format!("item {}", self.section.clone().unwrap_or_default()),
             "cell" => {
                 let cell = self.cell.clone().unwrap_or_default();
                 if cell.contains('!') {

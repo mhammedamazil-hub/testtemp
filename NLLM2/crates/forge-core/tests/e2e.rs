@@ -2837,3 +2837,295 @@ fn artifacts_regenerate_with_their_parameters_and_conversations_export_with_cita
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Serve one document with an exact content type, so the test can prove the kind is decided
+/// by what the bytes are, not by what the server claims.
+fn start_typed_origin(content_type: &'static str, body: &'static str) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(4) {
+            let mut stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                content_type,
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    port
+}
+
+#[test]
+fn feed_sources_are_read_as_dated_items_and_cited_by_item() {
+    let _guard = URL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FORGE_FETCH_ALLOW_PRIVATE", "1");
+
+    // Served as text/plain on purpose: a feed is recognised by its root element, and a host
+    // that mislabels Content-Type must not turn a feed into a wall of unlabelled prose.
+    let rss = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Retention Weekly</title>
+  <link>https://example.test/</link>
+  <item>
+    <title>Churn fell after the onboarding rewrite</title>
+    <link>https://example.test/posts/onboarding</link>
+    <pubDate>Tue, 03 Mar 2026 09:00:00 GMT</pubDate>
+    <dc:creator>R. Okafor</dc:creator>
+    <description><![CDATA[<p>Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite.</p>]]></description>
+  </item>
+  <item>
+    <title>Legal hold overrides the thirty day window</title>
+    <link>https://example.test/posts/legal-hold</link>
+    <pubDate>Wed, 04 Mar 2026 12:30:00 GMT</pubDate>
+    <description>A legal hold suspends deletion regardless of the thirty day retention window.</description>
+  </item>
+</channel></rss>"#;
+    let port = start_typed_origin("text/plain", rss);
+    let dir = tempdir("feed-ingest");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Feeds"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    let url = format!("http://127.0.0.1:{}/feed.xml", port);
+    let (st, src) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/url", nb_id),
+        Some(obj(&[("url", Value::from(url.as_str()))])),
+    );
+    assert_eq!(st, 201, "feed ingest failed: {:?}", src);
+    assert_eq!(src.str_of("kind"), Some("feed"), "the bytes decide the kind: {:?}", src);
+    assert_eq!(src.str_of("title"), Some("Retention Weekly"), "the feed's own title, not the URL");
+    assert_eq!(src.get("page_count").and_then(|v| v.as_f64()), Some(2.0), "two items");
+
+    let (_, sources) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let stored = &sources.get("sources").unwrap().as_arr().unwrap()[0];
+    let meta = stored.get("meta").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(meta.str_of("feed_flavour"), Some("rss"));
+    assert_eq!(meta.str_of("feed_items"), Some("2"));
+    assert_eq!(meta.str_of("feed_link"), Some("https://example.test/"));
+    assert!(
+        stored.get("warnings").and_then(|w| w.as_arr()).map(|w| w.iter().any(|m| {
+            m.as_str().map(|t| t.contains("feed read as RSS 2.0: 2 item(s)")).unwrap_or(false)
+        })).unwrap_or(false),
+        "the source says what it read: {:?}",
+        stored.get("warnings")
+    );
+
+    // A citation from a feed names the item and carries the publisher's date.
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("how far did monthly churn fall after the rewrite"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    assert!(answer.str_of("answer").unwrap_or("").contains("2.9%"), "{:?}", answer);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty(), "a grounded answer must cite");
+    let loc = cites[0].get("locator").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(loc.str_of("kind"), Some("item"), "feed citations point at an item: {:?}", loc);
+    assert_eq!(loc.get("page").and_then(|v| v.as_f64()), Some(1.0), "item position is part of the locator");
+    let label = cites[0].str_of("locator_label").unwrap_or("");
+    assert!(label.starts_with("item 1 · Churn fell"), "label={}", label);
+    assert!(
+        cites[0].str_of("quote").unwrap_or("").contains("2.9%"),
+        "the quote is the item's own words: {:?}",
+        cites[0].str_of("quote")
+    );
+
+    // An undated item keeps no date at all, and the source says so at ingest.
+    std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+}
+
+/// A fake GitHub REST API on loopback: `/repos/<owner>/<repo>/readme` and `/issues`.
+/// Anything else is a 404 with GitHub's JSON error shape, which is exactly what the client has
+/// to cope with when a repository is private or simply does not exist.
+fn start_fake_github() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().take(12) {
+            let mut stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("/")
+                .to_string();
+
+            let (status, ctype, body) = if path == "/repos/acme/retry/readme" {
+                (
+                    "200 OK",
+                    "text/plain; charset=utf-8",
+                    "# acme/retry\n\nThe client retries with a budget of 2.75 attempts per request.\n\n## Install\n\ncargo build --release".to_string(),
+                )
+            } else if path.starts_with("/repos/acme/retry/issues") {
+                (
+                    "200 OK",
+                    "application/json",
+                    r#"[
+                      {"number":12,"title":"Retry budget is not respected","state":"open",
+                       "user":{"login":"okafor"},"created_at":"2026-03-01T10:00:00Z",
+                       "body":"With three tiers the client retries 5 times instead of 2.75."},
+                      {"number":13,"title":"Docs: wrong install line","state":"closed",
+                       "user":{"login":"menon"},"created_at":"2026-03-02T10:00:00Z",
+                       "body":"The install line said cargo build, it must be cargo build --release."},
+                      {"number":14,"title":"Bump the retry dependency","state":"open",
+                       "user":{"login":"lee"},"created_at":"2026-03-03T10:00:00Z","body":"",
+                       "pull_request":{"url":"https://api.github.com/repos/acme/retry/pulls/14"}}
+                    ]"#
+                    .to_string(),
+                )
+            } else {
+                (
+                    "404 Not Found",
+                    "application/json",
+                    r#"{"message":"Not Found","documentation_url":"https://docs.github.com/rest"}"#.to_string(),
+                )
+            };
+            let head = format!(
+                "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                status,
+                ctype,
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    port
+}
+
+#[test]
+fn github_repositories_are_read_as_readme_and_numbered_issues() {
+    let _guard = URL_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FORGE_FETCH_ALLOW_PRIVATE", "1");
+    let port = start_fake_github();
+    std::env::set_var("FORGE_GITHUB_API", format!("http://127.0.0.1:{}", port));
+
+    let dir = tempdir("github-ingest");
+    let s = Server::start(dir.clone());
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Repo"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    // A URL is accepted for the repo, because that is what people paste.
+    let (st, src) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("https://github.com/acme/retry.git"))])),
+    );
+    assert_eq!(st, 201, "github ingest failed: {:?}", src);
+    assert_eq!(src.str_of("kind"), Some("github"));
+    assert_eq!(src.str_of("title"), Some("acme/retry — README, 2 issue(s)"));
+    assert_eq!(src.get("page_count").and_then(|v| v.as_f64()), Some(2.0), "two issues, the PR excluded");
+    let src_id = src.str_of("source_id").unwrap().to_string();
+
+    let (_, sources) = s.json("GET", &format!("/api/notebooks/{}/sources", nb_id), None);
+    let stored = &sources.get("sources").unwrap().as_arr().unwrap()[0];
+    let meta = stored.get("meta").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(meta.str_of("repo"), Some("acme/retry"));
+    assert_eq!(meta.str_of("issues_indexed"), Some("2"));
+    assert_eq!(meta.str_of("pull_requests_skipped"), Some("1"));
+    assert_eq!(meta.str_of("include"), Some("readme,issues"));
+    assert_eq!(stored.str_of("origin"), Some("github"));
+    assert_eq!(stored.str_of("canonical_url"), Some("https://github.com/acme/retry"));
+    assert!(
+        stored.get("warnings").and_then(|w| w.as_arr()).map(|w| w.iter().any(|m| {
+            m.as_str().map(|t| t.contains("pull request(s) were skipped")).unwrap_or(false)
+        })).unwrap_or(false),
+        "the source says what it skipped: {:?}",
+        stored.get("warnings")
+    );
+
+    // Issue chunks carry a number and a title, so a citation can say which issue it came from.
+    let (st, chunks) = s.json("GET", &format!("/api/sources/{}/chunks", src_id), None);
+    assert_eq!(st, 200);
+    let list = chunks.get("chunks").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    let issue_chunks: Vec<_> = list
+        .iter()
+        .filter(|c| c.get("locator").and_then(|l| l.str_of("kind")) == Some("issue"))
+        .collect();
+    assert_eq!(issue_chunks.len(), 2, "one block per issue: {:?}", list.len());
+    assert_eq!(
+        issue_chunks[0].get("locator").and_then(|l| l.str_of("section")),
+        Some("12 · Retry budget is not respected"),
+        "issues are numbered in ascending order"
+    );
+
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("what is the retry budget per request"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    assert!(answer.str_of("answer").unwrap_or("").contains("2.75"), "{:?}", answer);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty());
+    assert_eq!(cites[0].str_of("locator_label"), Some("section README"), "the README answered this one");
+
+    // A question whose answer only exists in an issue is cited to that issue's number and title.
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("with three tiers how many times does the client retry"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    let label = cites[0].str_of("locator_label").unwrap_or("");
+    assert!(label.starts_with("issue 12 · Retry budget"), "label={}", label);
+
+    // The same repository is refused as a duplicate, and a repository GitHub does not show is a 404.
+    let (st, dup) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("acme/retry"))])),
+    );
+    assert_eq!(st, 409, "{:?}", dup);
+    assert_eq!(dup.str_of("code"), Some("duplicate_source"));
+
+    let (st, missing) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("acme/missing"))])),
+    );
+    assert_eq!(st, 404, "{:?}", missing);
+    assert_eq!(missing.str_of("code"), Some("repo_not_found"));
+    assert!(missing.str_of("error").unwrap_or("").contains("acme/missing"), "{:?}", missing);
+
+    // Malformed repository specs and unknown include values are refused before any network call.
+    let (st, bad) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("not-a-repo"))])),
+    );
+    assert_eq!(st, 422);
+    assert_eq!(bad.str_of("code"), Some("bad_repo"));
+    let (st, bad) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/github", nb_id),
+        Some(obj(&[("repo", Value::from("acme/retry")), ("include", Value::Arr(vec![Value::from("wiki")]))])),
+    );
+    assert_eq!(st, 422);
+    assert_eq!(bad.str_of("code"), Some("bad_include"));
+
+    std::env::remove_var("FORGE_GITHUB_API");
+    std::env::remove_var("FORGE_FETCH_ALLOW_PRIVATE");
+}

@@ -590,6 +590,57 @@ async function main() {
   await window.openNotebook(window.document.getElementById("app"), nbId);
   await wait(900);
 
+  // --- an RSS feed is read as dated items you can cite by name and date (§7.2)
+  const feedServer = http.createServer((req, res) => {
+    const rss = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Retention Weekly</title>
+  <link>https://example.test/</link>
+  <item>
+    <title>Churn fell after the onboarding rewrite</title>
+    <link>https://example.test/posts/onboarding</link>
+    <pubDate>Tue, 03 Mar 2026 09:00:00 GMT</pubDate>
+    <description><![CDATA[<p>Monthly churn fell from 4.1% to 2.9% in the quarter after the rewrite.</p>]]></description>
+  </item>
+  <item>
+    <title>Legal hold overrides the thirty day window</title>
+    <link>https://example.test/posts/legal-hold</link>
+    <pubDate>Wed, 04 Mar 2026 12:30:00 GMT</pubDate>
+    <description>A legal hold suspends deletion regardless of the thirty day retention window.</description>
+  </item>
+</channel></rss>`;
+    if (!/^\/feed\.xml/.test(req.url)) { res.writeHead(404); res.end("missing"); return; }
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end(rss);
+  });
+  await new Promise((r) => feedServer.listen(0, "127.0.0.1", r));
+  const feedPort = feedServer.address().port;
+  $("#addUrlBtn").click();
+  await wait(200);
+  $("#urlInput").value = `http://127.0.0.1:${feedPort}/feed.xml`;
+  byText("button", "Fetch page").click();
+  await wait(1800);
+  const feedSource = $$(".source-item").find((el) => /Retention Weekly/.test(el.textContent));
+  check("an RSS feed becomes a source with the feed's own title", !!feedSource,
+    $$(".source-item").map((e) => e.textContent).join(" | ").slice(0, 240));
+  check("the feed source reports its kind", /feed/.test(feedSource?.textContent || ""), feedSource?.textContent);
+  check("a GitHub repository can be added from the sources pane without implying a connection",
+    !!$("#addGithubBtn"),
+    $$("#sideContent button").map((b) => b.textContent).join(","));
+  $(".composer textarea").value = "how far did monthly churn fall after the rewrite";
+  byText(".composer button", "Ask").click();
+  await wait(1400);
+  const feedMsg = $$(".msg.assistant").pop();
+  // The citation names the entry it came from. The entry's own publish date is part of the
+  // indexed text and is asserted against the chunk body in the Rust suite — the UI does not
+  // invent one, so it is not required to display one.
+  check("a feed citation names the entry it came from",
+    /item 1 · Churn fell/.test(feedMsg?.textContent || ""),
+    feedMsg?.textContent?.slice(0, 400));
+  feedServer.close();
+  await window.openNotebook(window.document.getElementById("app"), nbId);
+  await wait(900);
+
   // --- a supplied caption file becomes a timecode-citing source (Journey E)
   const vtt = fs.readFileSync(path.join(WEB, "../../tests/fixtures/lecture.vtt"));
   const vttFile = new window.File([vtt], "lecture.vtt", { type: "text/vtt" });

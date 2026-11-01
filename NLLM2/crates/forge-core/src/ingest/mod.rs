@@ -4,6 +4,7 @@
 //! citation can always point at a page/row/paragraph instead of a fuzzy match.
 
 pub mod epub;
+pub mod feed;
 pub mod ooxml;
 pub mod pdf;
 pub mod text;
@@ -141,6 +142,10 @@ pub fn extract(kind: &str, filename: &str, bytes: &[u8]) -> Result<Parsed, Strin
             Ok(Parsed { blocks: chunk_blocks(blocks), warnings, page_count: 0, tables: Vec::new() })
         }
         "epub" => epub::epub(bytes),
+        "feed" => feed::feed(bytes),
+        // The retained bytes of a GitHub collection are a JSON envelope produced by
+        // `github::Collection::to_bytes`, so a retry re-indexes what was collected.
+        "github" => crate::github::extract(bytes),
         "html" | "htm" => {
             let raw = decode_text(bytes);
             let (blocks, warnings) = text::html_blocks(&raw);
