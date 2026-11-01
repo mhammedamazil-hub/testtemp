@@ -346,3 +346,20 @@ Not implemented, and not claimed:
 * The CSV export contains only the projected columns and values. Provenance (cell references)
   lives in the Markdown and JSON exports, because a CSV with provenance rows would no longer be a
   CSV that other tools can read.
+
+## Research briefs (RES-01 / RES-02 / RES-03)
+
+* **No web search happens anywhere in this build.** There is no search vendor, no key, no
+  crawler. `POST /api/notebooks/:id/research` decomposes the question and answers the parts from
+  the notebook's own sources; `/api/capabilities` reports `research.web_search: "none"` and marks
+  `fast_research` and `deep_research` unsupported. Calling this "Deep Research" would be a false
+  claim about a multi-step *web* task that never happens.
+* The plan is mechanical, not clever: the question as asked, its `and`/`plus` clauses, one
+  comparison phrasing when the question asks for one, then "what do the sources say about X" for
+  content words the corpus actually contains. Terms absent from every source are not planned into
+  sub-questions (that would manufacture gaps). No model rewrites the question.
+* A sub-question is `answered` only when it produced citations. Abstentions become **gaps** — the
+  point of the brief is to show what the notebook cannot support.
+* No budget or cancellation controls beyond `max_sub_questions` (capped at 6) and the request
+  itself: a brief is a single synchronous call, so there is nothing to cancel mid-way. No
+  intermediate progress state, no cross-notebook scope, no scheduled or follow-up research.

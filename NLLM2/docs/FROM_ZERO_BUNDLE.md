@@ -12,346 +12,258 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
-## `crates/forge-core/src/datatable.rs`
+## `crates/forge-core/src/research.rs`
 
 ```rust
-//! Data-table artifacts: a projection of a real source grid, with per-cell evidence.
+//! Research briefs scoped to the notebook.
 //!
-//! The spec's ART-06 asks for "data tables as an artifact (schema inference, per-cell evidence,
-//! export)". Only the middle part is honestly hard, and it is the part this module is built
-//! around: **every value in a data-table artifact carries the A1 reference it was copied from**,
-//! so the artifact is a *view* of a stored grid, not a new claim about the world.
+//! The reference product has "Fast Research" (search the web or Drive and import what you find)
+//! and "Deep Research" (a multi-step research task that ends in a report). Forge has **no search
+//! provider** — no key, no vendor, no crawler — so neither can be reproduced honestly over the
+//! web, and this module does not pretend to. What it does instead is the part that does not need
+//! a provider: it **plans a multi-step investigation over the sources the user already has**.
 //!
-//! Two deliberate refusals:
+//! The plan is derived, not invented: the question is decomposed into sub-questions built from
+//! the question's own content words and from the notebook's own vocabulary, each sub-question is
+//! answered by the ordinary grounded answerer (same evidence floor, same citation verification),
+//! and every sub-question that no passage can support is listed as a **gap** rather than being
+//! answered from the rest. The brief's value is precisely that it says which parts of the question
+//! the notebook cannot answer — that is what tells a researcher what to go and find.
 //!
-//! * **No schema inference from prose.** Forge does not invent a table from a paragraph. It
-//!   projects a sheet that a spreadsheet or CSV source already contains, optionally filtering
-//!   rows and selecting columns.
-//! * **No silent widening.** A filter that would drop everything, a column that does not exist,
-//!   a cell that is empty — each is reported (or refused) instead of being quietly filled in.
-//!   Exactly one convenience is allowed and it is *not* an invention: an empty cell in the
-//!   projection stays empty and is counted.
+//! Naming matters here, so: this is a *notebook-scoped research brief*, not Deep Research. The
+//! capability payload says `web_search: "none"` and explains the difference, because calling a
+//! decomposition pass "Deep Research" would be the exact kind of overclaim the spec forbids.
 
-use crate::domain::Source;
-use crate::obj;
-use crate::json::Value;
-use crate::tables::{Cell, Table};
+use crate::domain::{Chunk, Source};
+use crate::grounded::{self, Answer, AnswerOptions, Length, Style};
+use crate::retrieve;
 
-/// How many rows a projection keeps before it truncates and says so.
-pub const ROW_LIMIT_MAX: usize = 200;
-pub const ROW_LIMIT_DEFAULT: usize = 50;
+/// Upper bound on sub-questions. Each one costs a retrieval pass, and a brief with thirty
+/// sub-questions is a pile of fragments, not an investigation.
+pub const MAX_SUB_QUESTIONS: usize = 6;
+pub const DEFAULT_SUB_QUESTIONS: usize = 4;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Op {
-    Eq,
-    Contains,
-    Gt,
-    Lt,
-    IsEmpty,
-    NotEmpty,
+pub struct SubQuestion {
+    pub text: String,
+    /// Why this question was asked — "decomposed from the question", "from a term the sources
+    /// repeat". Shown to the user so the plan is auditable rather than magic.
+    pub origin: &'static str,
 }
 
-impl Op {
-    pub fn parse(raw: &str) -> Option<Op> {
-        Some(match raw.trim().to_ascii_lowercase().as_str() {
-            "" | "eq" | "=" | "equals" => Op::Eq,
-            "contains" => Op::Contains,
-            "gt" | ">" => Op::Gt,
-            "lt" | "<" => Op::Lt,
-            "is_empty" | "empty" => Op::IsEmpty,
-            "not_empty" | "notempty" => Op::NotEmpty,
-            _ => return None,
-        })
-    }
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Op::Eq => "eq",
-            Op::Contains => "contains",
-            Op::Gt => "gt",
-            Op::Lt => "lt",
-            Op::IsEmpty => "is_empty",
-            Op::NotEmpty => "not_empty",
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct Section {
+    pub question: String,
+    pub origin: String,
+    pub answer: Answer,
+    /// `answered` when the answer rests on citations, `gap` when it does not.
+    pub status: &'static str,
+    /// Distinct sources cited in this section.
+    pub sources_cited: usize,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Spec {
-    /// Which stored grid to project (a `tables` row id).
-    pub table_id: String,
-    /// Which columns to keep; empty means every column.
-    pub columns: Vec<String>,
-    /// Optional row filter.
-    pub filter_column: String,
-    pub filter_op: String,
-    pub filter_value: String,
-    pub limit: usize,
-    pub title: String,
+#[derive(Debug, Clone)]
+pub struct Brief {
+    pub question: String,
+    pub sections: Vec<Section>,
+    pub gaps: Vec<String>,
+    pub sources_used: Vec<String>,
+    pub coverage: f64,
+    pub engine: String,
 }
 
-fn number(text: &str) -> Option<f64> {
-    let cleaned: String = text
-        .chars()
-        .filter(|c| !matches!(c, ',' | '%' | '$' | ' '))
-        .collect();
-    cleaned.parse::<f64>().ok()
-}
-
-fn cell_text(cell: &Cell) -> String {
-    // `text` is the display text the parser recorded (`12 kg`, `$1,200`), not a re-derivation.
-    cell.text.trim().to_string()
-}
-
-fn matches(op: &Op, cell: &Cell, needle: &str) -> bool {
-    let text = cell_text(cell);
-    match op {
-        Op::IsEmpty => text.is_empty(),
-        Op::NotEmpty => !text.is_empty(),
-        Op::Eq => text.eq_ignore_ascii_case(needle.trim()),
-        Op::Contains => text.to_ascii_lowercase().contains(&needle.trim().to_ascii_lowercase()),
-        Op::Gt | Op::Lt => match (number(&text), number(needle)) {
-            (Some(a), Some(b)) => {
-                if *op == Op::Gt {
-                    a > b
-                } else {
-                    a < b
-                }
+/// Split a question on the conjunctions people actually write. Deliberately mechanical: a
+/// "decomposition" that silently rewrote the question would be a paraphrase, and paraphrases are
+/// not evidence.
+fn split_question(question: &str) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let lower = question.to_ascii_lowercase();
+    let mut current = String::new();
+    let words: Vec<&str> = question.split_whitespace().collect();
+    let lower_words: Vec<&str> = lower.split_whitespace().collect();
+    for (i, word) in words.iter().enumerate() {
+        let bare = lower_words
+            .get(i)
+            .copied()
+            .unwrap_or("")
+            .trim_matches(|c: char| !c.is_alphanumeric());
+        if matches!(bare, "and" | "plus" | "also") && current.split_whitespace().count() >= 3 {
+            parts.push(current.trim().to_string());
+            current = String::new();
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
             }
-            // A non-numeric cell never satisfies a numeric comparison. It is not "false by
-            // default" silently: the count of uncomparable cells is reported by `build`.
-            _ => false,
-        },
+            current.push_str(word);
+        }
     }
+    if !current.trim().is_empty() {
+        parts.push(current.trim().to_string());
+    }
+    parts
 }
 
-/// Build the artifact payload. `Err` carries the reason the user should see.
-pub fn build(spec: &Spec, tables: &[Table], sources: &[Source]) -> Result<(String, Value), String> {
-    if spec.table_id.trim().is_empty() {
-        return Err("a data table artifact needs table_id: pick a sheet from GET /api/sources/:id/tables".into());
+/// Build the plan. `max` is clamped to `MAX_SUB_QUESTIONS`.
+///
+/// The first sub-question is always the question as asked — the brief must answer the actual
+/// question, not only its parts. The rest come from content words that the corpus actually
+/// contains (a term absent from every source would guarantee a gap, which is noise, not
+/// information) and from a comparison when the question asks for one.
+pub fn plan(question: &str, chunks: &[Chunk], max: usize) -> Vec<SubQuestion> {
+    let limit = max.clamp(1, MAX_SUB_QUESTIONS);
+    let asked = question.trim();
+    if asked.is_empty() {
+        return Vec::new();
     }
-    let table = tables
-        .iter()
-        .find(|t| t.id == spec.table_id)
-        .ok_or_else(|| format!("no stored grid with id \"{}\"", spec.table_id))?;
-    let source = sources.iter().find(|s| s.id == table.source_id);
-    let source_title = source
-        .map(|s| s.title.clone())
-        .unwrap_or_else(|| format!("{} (source removed)", table.source_id));
+    let mut out = vec![SubQuestion { text: asked.to_string(), origin: "the question as asked" }];
 
-    // Column selection: names must exist, in the table's own order, so the projection is stable.
-    let wanted: Vec<usize> = if spec.columns.is_empty() {
-        (0..table.headers.len()).collect()
-    } else {
-        let mut out = Vec::new();
-        for name in &spec.columns {
-            let idx = table
-                .column_index(name)
-                .ok_or_else(|| format!("no column \"{}\" in {}", name, table.sheet))?;
-            if !out.contains(&idx) {
-                out.push(idx);
-            }
+    // Explicit conjunctions first: "X and Y" is two questions and the user is entitled to both.
+    for part in split_question(asked).into_iter().skip(1) {
+        if out.len() >= limit {
+            return out;
         }
-        out.sort_unstable();
-        out
-    };
-    if wanted.is_empty() {
-        return Err(format!("{} has no columns to project", table.sheet));
-    }
-
-    let op = if spec.filter_column.trim().is_empty() {
-        None
-    } else {
-        let parsed = Op::parse(&spec.filter_op)
-            .ok_or_else(|| format!("unknown filter op \"{}\"", spec.filter_op))?;
-        Some(parsed)
-    };
-    let filter_idx = match (&op, spec.filter_column.trim().is_empty()) {
-        (Some(_), false) => Some(
-            table
-                .column_index(spec.filter_column.trim())
-                .ok_or_else(|| format!("no column \"{}\" in {}", spec.filter_column, table.sheet))?,
-        ),
-        _ => None,
-    };
-    if let (Some(o), Some(_)) = (&op, filter_idx) {
-        if !matches!(o, Op::IsEmpty | Op::NotEmpty) && spec.filter_value.trim().is_empty() {
-            return Err(format!("filter op \"{}\" needs a filter_value", o.as_str()));
-        }
-        if matches!(o, Op::Gt | Op::Lt) && number(&spec.filter_value).is_none() {
-            return Err(format!(
-                "filter op \"{}\" needs a numeric filter_value, got \"{}\"",
-                o.as_str(),
-                spec.filter_value
-            ));
+        if part.split_whitespace().count() >= 3 {
+            out.push(SubQuestion { text: part, origin: "decomposed from the question" });
         }
     }
 
-    let limit = if spec.limit == 0 { ROW_LIMIT_DEFAULT } else { spec.limit.min(ROW_LIMIT_MAX) };
-    let mut rows: Vec<Value> = Vec::new();
-    let mut considered = 0usize;
-    let mut filtered_out = 0usize;
-    let mut uncomparable = 0usize;
-    let mut empty_cells = 0usize;
-    let mut truncated = false;
-
-    for row in &table.rows {
-        considered += 1;
-        if let (Some(o), Some(fidx)) = (&op, filter_idx) {
-            let cell = table.cell(row, fidx);
-            let hit = match cell {
-                Some(c) => {
-                    if matches!(o, Op::Gt | Op::Lt) && number(&cell_text(c)).is_none() && !cell_text(c).is_empty() {
-                        uncomparable += 1;
-                    }
-                    matches(o, c, &spec.filter_value)
-                }
-                None => false,
-            };
-            if !hit {
-                filtered_out += 1;
-                continue;
-            }
-        }
-        if rows.len() >= limit {
-            truncated = true;
-            break;
-        }
-        let mut cells: Vec<Value> = Vec::new();
-        for &idx in &wanted {
-            let (value, reference) = match table.cell(row, idx) {
-                Some(c) => {
-                    let text = cell_text(c);
-                    if text.is_empty() {
-                        empty_cells += 1;
-                    }
-                    // The A1 reference the value came from: this is the per-cell evidence. The
-                    // parser's own reference wins; the computed one is the fallback.
-                    let reference = if c.reference.is_empty() {
-                        format!("{}{}", column_letters(idx), row.number)
-                    } else {
-                        c.reference.clone()
-                    };
-                    (text, reference)
-                }
-                // A ragged row has no cell here. Saying so is not the same as writing "".
-                None => {
-                    empty_cells += 1;
-                    (String::new(), format!("{}{}", column_letters(idx), row.number))
-                }
-            };
-            cells.push(obj! { "value" => value, "ref" => reference });
-        }
-        let first = format!("{}{}", column_letters(wanted[0]), row.number);
-        let last_idx = *wanted.last().unwrap();
-        let last = format!("{}{}", column_letters(last_idx), row.number);
-        rows.push(obj! {
-            "number" => row.number as u64,
-            "cells" => Value::Arr(cells),
-            "ref" => format!("{}:{}", first, last),
+    // A comparison is a real sub-question even when the wording is not a conjunction.
+    let lower = asked.to_ascii_lowercase();
+    if (lower.contains(" vs ") || lower.contains(" versus ") || lower.starts_with("compare"))
+        && out.len() < limit
+    {
+        out.push(SubQuestion {
+            text: format!("what does each source say about {}", first_terms(asked, 3).join(" ")),
+            origin: "asked as a comparison",
         });
     }
 
-    if rows.is_empty() {
-        return Err(format!(
-            "the projection is empty: {} row(s) read from {}, all excluded by the filter",
-            considered, table.sheet
-        ));
+    // Then the terms the notebook actually repeats: they are what the sources are about.
+    let mut doc_freq: Vec<(String, usize)> = Vec::new();
+    for term in retrieve::terms(asked) {
+        let df = chunks.iter().filter(|c| c.text.to_ascii_lowercase().contains(&term)).count();
+        if df > 0 {
+            doc_freq.push((term, df));
+        }
     }
-
-    let headers: Vec<Value> = wanted
-        .iter()
-        .map(|&i| {
-            obj! {
-                "name" => table.headers.get(i).cloned().unwrap_or_default(),
-                "letter" => column_letters(i),
-                "numeric" => {
-                    // "numeric" is a fact about the projected values, not a guess: true only when
-                    // every non-empty projected value parses as a number.
-                    let values: Vec<&Cell> = table.rows.iter().filter_map(|r| table.cell(r, i)).collect();
-                    let non_empty: Vec<&&Cell> = values.iter().filter(|c| !cell_text(c).is_empty()).collect();
-                    !non_empty.is_empty() && non_empty.iter().all(|c| number(&cell_text(c)).is_some())
-                },
-            }
-        })
-        .collect();
-
-    let title = if spec.title.trim().is_empty() {
-        format!("{} · {} rows", table.sheet, rows.len())
-    } else {
-        spec.title.trim().to_string()
-    };
-
-    let row_count = rows.len() as u64;
-    let payload = obj! {
-        "kind" => "data_table",
-        "sheet" => table.sheet.as_str(),
-        "table_id" => table.id.as_str(),
-        "source_id" => table.source_id.as_str(),
-        "source_title" => source_title.as_str(),
-        "columns" => Value::Arr(headers),
-        "rows" => Value::Arr(rows),
-        "row_count" => row_count,
-        "rows_read" => considered as u64,
-        "filtered_out" => filtered_out as u64,
-        "uncomparable_cells" => uncomparable as u64,
-        "empty_cells" => empty_cells as u64,
-        "truncated" => truncated,
-        "limit" => limit as u64,
-        "filter" => if op.is_some() {
-            obj! {
-                "column" => spec.filter_column.trim(),
-                "op" => op.as_ref().map(|o| o.as_str()).unwrap_or(""),
-                "value" => spec.filter_value.as_str(),
-            }
-        } else { Value::Null },
-        "evidence" => "every value carries the A1 reference it was copied from; the grid itself is unchanged",
-        "note" => "a projection of a stored grid, not a table inferred from prose",
-    };
-    Ok((title, payload))
-}
-
-/// Spreadsheet column letters for a 0-based index: 0→A, 25→Z, 26→AA.
-pub fn column_letters(mut index: usize) -> String {
-    let mut out: Vec<u8> = Vec::new();
-    loop {
-        out.push(b'A' + (index % 26) as u8);
-        if index < 26 {
+    doc_freq.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    for (term, _) in doc_freq {
+        if out.len() >= limit {
             break;
         }
-        index = index / 26 - 1;
+        let text = format!("what do the sources say about {}", term);
+        if !out.iter().any(|q| q.text.eq_ignore_ascii_case(&text)) {
+            out.push(SubQuestion { text, origin: "from a term the sources repeat" });
+        }
     }
-    out.reverse();
-    String::from_utf8(out).unwrap_or_default()
+    out
 }
 
-/// RFC 4180 CSV of the projection: header row, then the projected values in order.
-/// Cells that contain a comma, a quote or a newline are quoted; quotes are doubled.
-pub fn to_csv(payload: &Value) -> String {
+fn first_terms(text: &str, n: usize) -> Vec<String> {
+    retrieve::terms(text).into_iter().take(n).collect()
+}
+
+/// Run the plan with the same grounded answerer chat uses, so every quotation in the brief has
+/// passed the same citation checks as a chat answer.
+pub fn run(
+    question: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    max_sub_questions: usize,
+) -> Brief {
+    let questions = plan(question, chunks, max_sub_questions);
+    let opts = AnswerOptions { style: Style::Detailed, length: Length::Standard };
+    let mut sections: Vec<Section> = Vec::new();
+    let mut gaps: Vec<String> = Vec::new();
+    let mut used: Vec<String> = Vec::new();
+
+    for sub in questions {
+        let answer = grounded::answer_with(&sub.text, chunks, sources, opts);
+        let mut cited: Vec<String> = Vec::new();
+        for c in &answer.citations {
+            if !cited.contains(&c.source_id) {
+                cited.push(c.source_id.clone());
+            }
+            if !used.contains(&c.source_title) {
+                used.push(c.source_title.clone());
+            }
+        }
+        // "Answered" means it rests on evidence, not that it produced text: an abstention has
+        // text too, and calling that an answer is exactly the failure this product exists to avoid.
+        let answered = !answer.abstained && !answer.citations.is_empty();
+        if !answered {
+            gaps.push(sub.text.clone());
+        }
+        sections.push(Section {
+            question: sub.text,
+            origin: sub.origin.to_string(),
+            status: if answered { "answered" } else { "gap" },
+            sources_cited: cited.len(),
+            answer,
+        });
+    }
+
+    let total = sections.len().max(1);
+    let answered = sections.iter().filter(|s| s.status == "answered").count();
+    let coverage = answered as f64 / total as f64;
+    used.sort();
+
+    Brief {
+        question: question.trim().to_string(),
+        sections,
+        gaps,
+        sources_used: used,
+        coverage,
+        engine: "extractive · notebook-scoped plan".to_string(),
+    }
+}
+
+/// The brief as Markdown, for the export path. Every section keeps its citations; the gaps are
+/// listed last and are the point of the document as much as the answers are.
+pub fn to_markdown(brief: &Brief) -> String {
     let mut out = String::new();
-    let columns: Vec<String> = payload
-        .get("columns")
-        .and_then(|c| c.as_arr())
-        .map(|list| list.iter().map(|c| c.str_of("name").unwrap_or("").to_string()).collect())
-        .unwrap_or_default();
-    let quote = |value: &str| -> String {
-        if value.contains([',', '"', '\n', '\r']) {
-            format!("\"{}\"", value.replace('"', "\"\""))
-        } else {
-            value.to_string()
+    out.push_str(&format!("# Research brief: {}\n\n", brief.question));
+    out.push_str(&format!(
+        "_Forge · notebook-scoped brief · {} of {} sub-questions answered ({:.0}%) · engine: {}_\n\n",
+        brief.sections.iter().filter(|s| s.status == "answered").count(),
+        brief.sections.len(),
+        brief.coverage * 100.0,
+        brief.engine
+    ));
+    out.push_str(
+        "> Scope: this brief decomposes the question and answers each part from the notebook's \
+         sources. Forge performs **no web search** in this build — a sub-question the sources \
+         cannot support is listed as a gap, not filled from outside knowledge.\n\n",
+    );
+    for (i, s) in brief.sections.iter().enumerate() {
+        out.push_str(&format!("## {}. {}\n\n", i + 1, s.question));
+        out.push_str(&format!("_{} · {}_\n\n", s.origin, s.status));
+        if s.status == "gap" {
+            out.push_str(&format!("{}\n\n", s.answer.text.trim()));
+            continue;
         }
-    };
-    out.push_str(&columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(","));
-    out.push_str("\r\n");
-    if let Some(rows) = payload.get("rows").and_then(|r| r.as_arr()) {
-        for row in rows {
-            let values: Vec<String> = row
-                .get("cells")
-                .and_then(|c| c.as_arr())
-                .map(|list| list.iter().map(|c| quote(c.str_of("value").unwrap_or(""))).collect())
-                .unwrap_or_default();
-            out.push_str(&values.join(","));
-            out.push_str("\r\n");
+        out.push_str(s.answer.text.trim());
+        out.push_str("\n\n### Evidence\n\n");
+        for c in &s.answer.citations {
+            out.push_str(&format!(
+                "- **{}** · {} — “{}”\n",
+                c.source_title,
+                c.locator.human(),
+                c.quote.trim()
+            ));
         }
+        out.push('\n');
+    }
+    if !brief.gaps.is_empty() {
+        out.push_str("## Gaps\n\n");
+        out.push_str("These parts of the question no passage in the notebook supports. Forge does not answer them from outside knowledge:\n\n");
+        for gap in &brief.gaps {
+            out.push_str(&format!("- {}\n", gap));
+        }
+        out.push('\n');
+    }
+    if !brief.sources_used.is_empty() {
+        out.push_str(&format!("Sources used: {}.\n", brief.sources_used.join("; ")));
     }
     out
 }
@@ -359,237 +271,128 @@ pub fn to_csv(payload: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tables::{CellValue, Row};
+    use crate::domain::Locator;
 
-    fn cell(col: usize, header: &str, value: &str, row: u32) -> Cell {
-        let number = value.parse::<f64>().ok();
-        Cell {
-            col: col as u32 + 1,
-            header: header.to_string(),
-            value: match (&number, value.is_empty()) {
-                (Some(n), _) => CellValue::Number(*n),
-                (None, true) => CellValue::Empty,
-                (None, false) => CellValue::Text(value.to_string()),
-            },
-            text: value.to_string(),
-            reference: format!("{}{}", column_letters(col), row),
-            unit: String::new(),
-            formula: None,
-        }
-    }
-
-    fn source() -> Source {
+    fn source(id: &str, title: &str) -> Source {
         Source {
-            id: "src-1".into(),
+            id: id.into(),
             notebook_id: "nb".into(),
-            title: "sales.xlsx".into(),
-            kind: "xlsx".into(),
+            title: title.into(),
+            kind: "text".into(),
             status: "ready".into(),
             ..Default::default()
         }
     }
 
-    fn grid() -> Table {
-        let mut t = Table {
-            id: "tbl-1".into(),
-            source_id: "src-1".into(),
-            notebook_id: "nb".into(),
-            sheet: "Sales".into(),
-            hidden: false,
-            headers: vec!["Region".into(), "Revenue".into(), "Notes".into()],
-            rows: vec![],
-            truncated: false,
-            warnings: vec![],
-        };
-        for (n, (region, revenue, note)) in [
-            ("North", "1250", "steady, with a comma"),
-            ("South", "980", ""),
-            ("North", "3100", "promo \"Q3\""),
-        ]
-        .iter()
-        .enumerate()
-        {
-            let row = n as u32 + 2;
-            t.rows.push(Row {
-                number: row,
-                cells: vec![
-                    cell(0, "Region", region, row),
-                    cell(1, "Revenue", revenue, row),
-                    cell(2, "Notes", note, row),
-                ],
-            });
+    fn corpus() -> (Vec<Chunk>, Vec<Source>) {
+        let chunks = vec![
+            Chunk {
+                id: "k1".into(),
+                source_id: "s1".into(),
+                notebook_id: "nb".into(),
+                ordinal: 0,
+                text: "Customer records are retained for thirty days after account closure.".into(),
+                locator: Locator::paragraph(0, 0, 70),
+            },
+            Chunk {
+                id: "k2".into(),
+                source_id: "s2".into(),
+                notebook_id: "nb".into(),
+                ordinal: 0,
+                text: "A legal hold suspends the retention window until the hold is released.".into(),
+                locator: Locator::paragraph(0, 0, 76),
+            },
+        ];
+        (chunks, vec![source("s1", "Policy"), source("s2", "Legal")])
+    }
+
+    #[test]
+    fn the_plan_answers_the_question_as_asked_first() {
+        let (chunks, _) = corpus();
+        let planned = plan("how long are customer records retained", &chunks, 4);
+        assert_eq!(planned[0].text, "how long are customer records retained");
+        assert_eq!(planned[0].origin, "the question as asked");
+        assert!(planned.len() <= 4);
+        // Every later sub-question is labelled with where it came from.
+        for q in planned.iter().skip(1) {
+            assert!(!q.origin.is_empty());
         }
-        t
     }
 
     #[test]
-    fn a_projection_keeps_the_a1_reference_of_every_value() {
-        let spec = Spec { table_id: "tbl-1".into(), ..Default::default() };
-        let (title, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
-        assert_eq!(title, "Sales · 3 rows");
-        assert_eq!(payload.str_of("source_title"), Some("sales.xlsx"));
-        assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(3.0));
-        let rows = payload.get("rows").and_then(|r| r.as_arr()).unwrap();
-        let first = &rows[0];
-        assert_eq!(first.str_of("ref"), Some("A2:C2"), "the row range is the evidence");
-        let cells = first.get("cells").and_then(|c| c.as_arr()).unwrap();
-        assert_eq!(cells[0].str_of("ref"), Some("A2"));
-        assert_eq!(cells[1].str_of("value"), Some("1250"));
-        // The real row number from the sheet is preserved, not renumbered from 1.
-        assert_eq!(first.get("number").and_then(|v| v.as_f64()), Some(2.0));
-    }
-
-    #[test]
-    fn columns_can_be_selected_and_are_kept_in_sheet_order() {
-        let spec = Spec {
-            table_id: "tbl-1".into(),
-            columns: vec!["Revenue".into(), "Region".into()],
-            ..Default::default()
-        };
-        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
-        let names: Vec<String> = payload
-            .get("columns")
-            .and_then(|c| c.as_arr())
-            .unwrap()
-            .iter()
-            .map(|c| c.str_of("name").unwrap().to_string())
-            .collect();
-        assert_eq!(names, vec!["Region", "Revenue"], "selection does not reorder the sheet");
-        let cells = payload.get("rows").and_then(|r| r.as_arr()).unwrap()[0]
-            .get("cells")
-            .and_then(|c| c.as_arr())
-            .unwrap();
-        assert_eq!(cells.len(), 2);
-        assert_eq!(cells[1].str_of("ref"), Some("B2"), "the reference follows the real column");
-    }
-
-    #[test]
-    fn filters_use_real_values_and_report_what_they_excluded() {
-        let spec = Spec {
-            table_id: "tbl-1".into(),
-            filter_column: "Region".into(),
-            filter_op: "eq".into(),
-            filter_value: "north".into(),
-            ..Default::default()
-        };
-        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
-        assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(2.0));
-        assert_eq!(payload.get("rows_read").and_then(|v| v.as_f64()), Some(3.0));
-        assert_eq!(payload.get("filtered_out").and_then(|v| v.as_f64()), Some(1.0));
-        assert_eq!(
-            payload.get("filter").and_then(|f| f.str_of("value")),
-            Some("north"),
-            "the filter is recorded as asked, not normalised away"
+    fn a_conjunction_becomes_two_questions_and_a_comparison_gets_its_own() {
+        let (chunks, _) = corpus();
+        let planned = plan("how long are customer records retained and what does a legal hold do", &chunks, 6);
+        assert!(
+            planned.iter().any(|q| q.text.contains("what does a legal hold do")),
+            "{:?}",
+            planned.iter().map(|q| &q.text).collect::<Vec<_>>()
         );
-
-        // Numeric comparison works on numbers, not on lexicographic text.
-        let spec = Spec {
-            table_id: "tbl-1".into(),
-            filter_column: "Revenue".into(),
-            filter_op: "gt".into(),
-            filter_value: "1000".into(),
-            ..Default::default()
-        };
-        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
-        assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(2.0));
+        let cmp = plan("retention vs legal hold", &chunks, 6);
+        assert!(cmp.iter().any(|q| q.origin == "asked as a comparison"), "{:?}", cmp);
     }
 
     #[test]
-    fn an_empty_projection_is_refused_with_the_reason() {
-        let spec = Spec {
-            table_id: "tbl-1".into(),
-            filter_column: "Region".into(),
-            filter_op: "eq".into(),
-            filter_value: "Mars".into(),
-            ..Default::default()
-        };
-        let err = build(&spec, &[grid()], &[source()]).unwrap_err();
-        assert!(err.contains("projection is empty"), "{}", err);
-        assert!(err.contains("Sales"), "{}", err);
+    fn terms_absent_from_every_source_are_not_planned_into_a_guaranteed_gap() {
+        let (chunks, _) = corpus();
+        let planned = plan("retention blockchain regulation", &chunks, 6);
+        // The question as asked is kept verbatim (that is the user's own words), but no *derived*
+        // sub-question is built from a term the notebook has never seen: that would guarantee a
+        // gap and add nothing.
+        assert!(
+            !planned.iter().skip(1).any(|q| q.text.contains("blockchain") || q.text.contains("regulation")),
+            "a term no source contains cannot be researched from the notebook: {:?}",
+            planned.iter().map(|q| &q.text).collect::<Vec<_>>()
+        );
     }
 
     #[test]
-    fn bad_requests_are_named_rather_than_guessed() {
-        assert!(build(&Spec::default(), &[grid()], &[source()]).unwrap_err().contains("table_id"));
-        let missing = Spec { table_id: "nope".into(), ..Default::default() };
-        assert!(build(&missing, &[grid()], &[source()]).unwrap_err().contains("no stored grid"));
-        let column = Spec { table_id: "tbl-1".into(), columns: vec!["Profit".into()], ..Default::default() };
-        assert!(build(&column, &[grid()], &[source()]).unwrap_err().contains("no column \"Profit\""));
-        let op = Spec {
-            table_id: "tbl-1".into(),
-            filter_column: "Region".into(),
-            filter_op: "like".into(),
-            filter_value: "x".into(),
-            ..Default::default()
-        };
-        assert!(build(&op, &[grid()], &[source()]).unwrap_err().contains("unknown filter op"));
-        let numeric = Spec {
-            table_id: "tbl-1".into(),
-            filter_column: "Revenue".into(),
-            filter_op: "gt".into(),
-            filter_value: "lots".into(),
-            ..Default::default()
-        };
-        assert!(build(&numeric, &[grid()], &[source()]).unwrap_err().contains("numeric filter_value"));
+    fn the_plan_is_capped() {
+        let (chunks, _) = corpus();
+        let capped = plan("customer records retention legal hold account closure policy", &chunks, 99);
+        assert!(capped.len() <= MAX_SUB_QUESTIONS);
+        assert_eq!(plan("", &chunks, 3).len(), 0, "an empty question plans nothing");
     }
 
     #[test]
-    fn truncation_is_reported_and_the_limit_is_capped() {
-        let mut table = grid();
-        for n in 0..20u32 {
-            let row = n + 5;
-            table.rows.push(Row {
-                number: row,
-                cells: vec![
-                    cell(0, "Region", "East", row),
-                    cell(1, "Revenue", "10", row),
-                    cell(2, "Notes", "", row),
-                ],
-            });
+    fn every_answered_section_carries_citations_and_unsupported_parts_become_gaps() {
+        let (chunks, sources) = corpus();
+        let brief = run("how long are customer records retained", &chunks, &sources, 4);
+        assert!(!brief.sections.is_empty());
+        let answered: Vec<&Section> = brief.sections.iter().filter(|s| s.status == "answered").collect();
+        assert!(!answered.is_empty(), "{:?}", brief.sections.iter().map(|s| (&s.question, s.status)).collect::<Vec<_>>());
+        for s in answered {
+            assert!(!s.answer.citations.is_empty());
+            assert!(s.sources_cited >= 1);
         }
-        let spec = Spec { table_id: "tbl-1".into(), limit: 4, ..Default::default() };
-        let (_, payload) = build(&spec, &[table.clone()], &[source()]).expect("builds");
-        assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(4.0));
-        assert_eq!(payload.get("truncated"), Some(&Value::Bool(true)));
-
-        let huge = Spec { table_id: "tbl-1".into(), limit: 100_000, ..Default::default() };
-        let (_, payload) = build(&huge, &[table], &[source()]).expect("builds");
-        assert_eq!(payload.get("limit").and_then(|v| v.as_f64()), Some(ROW_LIMIT_MAX as f64));
+        // The gap list is derived from the sections, not maintained separately.
+        let gap_count = brief.sections.iter().filter(|s| s.status == "gap").count();
+        assert_eq!(brief.gaps.len(), gap_count);
+        assert!(brief.coverage > 0.0 && brief.coverage <= 1.0);
+        assert!(brief.sources_used.contains(&"Policy".to_string()));
     }
 
     #[test]
-    fn empty_cells_are_counted_not_invented() {
-        let spec = Spec { table_id: "tbl-1".into(), ..Default::default() };
-        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
-        assert_eq!(payload.get("empty_cells").and_then(|v| v.as_f64()), Some(1.0));
-        let south = &payload.get("rows").and_then(|r| r.as_arr()).unwrap()[1];
-        let cells = south.get("cells").and_then(|c| c.as_arr()).unwrap();
-        assert_eq!(cells[2].str_of("value"), Some(""), "an empty cell stays empty");
-        assert_eq!(cells[2].str_of("ref"), Some("C3"), "and still points at the cell it was read from");
+    fn a_question_the_sources_cannot_answer_is_all_gaps_and_says_so() {
+        let (chunks, sources) = corpus();
+        let brief = run("what is the refund policy for gift cards", &chunks, &sources, 3);
+        assert!(brief.sections.iter().all(|s| s.status == "gap"), "{:?}", brief.sections.iter().map(|s| s.status).collect::<Vec<_>>());
+        assert_eq!(brief.coverage, 0.0);
+        let md = to_markdown(&brief);
+        assert!(md.contains("Gaps"), "{}", md);
+        assert!(md.contains("no web search"), "the scope line is present: {}", md);
     }
 
     #[test]
-    fn the_csv_export_is_rfc_4180_and_carries_exactly_the_projected_values() {
-        let spec = Spec { table_id: "tbl-1".into(), ..Default::default() };
-        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
-        let csv = to_csv(&payload);
-        let lines: Vec<&str> = csv.split("\r\n").collect();
-        assert_eq!(lines[0], "Region,Revenue,Notes");
-        assert_eq!(lines[1], "North,1250,\"steady, with a comma\"");
-        assert_eq!(lines[2], "South,980,");
-        assert_eq!(lines[3], "North,3100,\"promo \"\"Q3\"\"\"");
-        assert_eq!(lines[4], "", "the file ends with a line break");
-    }
-
-    #[test]
-    fn column_letters_follow_spreadsheet_convention() {
-        assert_eq!(column_letters(0), "A");
-        assert_eq!(column_letters(25), "Z");
-        assert_eq!(column_letters(26), "AA");
-        assert_eq!(column_letters(51), "AZ");
-        assert_eq!(column_letters(52), "BA");
-        assert_eq!(column_letters(701), "ZZ");
-        assert_eq!(column_letters(702), "AAA");
+    fn the_markdown_keeps_quotes_locators_and_the_scope_statement() {
+        let (chunks, sources) = corpus();
+        let brief = run("how long are customer records retained", &chunks, &sources, 4);
+        let md = to_markdown(&brief);
+        assert!(md.starts_with("# Research brief: how long are customer records retained"));
+        assert!(md.contains("### Evidence"));
+        assert!(md.contains("— “"), "quotes are marked as quotes: {}", md);
+        assert!(md.contains("paragraph 0"), "locators survive: {}", md);
+        assert!(md.contains("no web search"));
     }
 }
 ```
@@ -1242,7 +1045,8 @@ function renderSources(pane) {
     h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, EPUB, MD, TXT, HTML, CSV, VTT, SRT)"),
     h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"),
     h("button", { class: "ghost", id: "addGithubBtn", onclick: () => promptGithub() }, "Add GitHub repo…"),
-    h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover links…"));
+    h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover links…"),
+    h("button", { class: "ghost", id: "researchBtn", onclick: () => openResearch() }, "Research brief…"));
 
   const urlRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
   const urlInput = h("input", { type: "url", id: "urlInput", placeholder: "https://…", "aria-label": "Web page URL" });
@@ -1459,6 +1263,108 @@ async function openDiscovery() {
       "bibliography, a project page); Forge fetches it, lists its real outbound links with the page they came " +
       "from, and imports only the ones you tick."),
     seed, go, results);
+}
+
+/// A notebook-scoped research brief: plan, per-part answers, and the gaps. The panel states its own
+/// scope — "no web search" — because a brief that looked like web research would be a false claim.
+async function openResearch() {
+  const nb = state.nb;
+  if (!nb) return;
+  const body = h("div", { class: "content stack" });
+  const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    h("div", { class: "viewer" },
+      h("header", {},
+        h("div", { style: "flex:1" },
+          h("div", { style: "font-weight:600" }, "Research brief"),
+          h("div", { class: "hint" }, "decomposes the question over this notebook's sources — no web search")),
+        h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+      body));
+  document.body.append(overlay);
+
+  const input = h("input", { type: "text", id: "researchQuestion", placeholder: "the question to investigate", "aria-label": "Research question" });
+  const results = h("div", { class: "stack", id: "researchResults" });
+  const go = h("button", { class: "primary", onclick: async () => {
+    const question = input.value.trim();
+    if (!question) return;
+    go.disabled = true; go.textContent = "Planning…";
+    results.replaceChildren(spinner("Planning the brief"));
+    try {
+      const r = await api.post(`/notebooks/${nb.id}/research`, { question, max_sub_questions: 4 });
+      paintBrief(r);
+    } catch (e) {
+      toast(e.message, "err");
+      results.replaceChildren();
+    }
+    go.disabled = false; go.textContent = "Build brief";
+  } }, "Build brief");
+
+  function paintBrief(r) {
+    const parts = [];
+    parts.push(h("div", { class: "hint" },
+      `${r.answered} of ${r.sub_questions} sub-question(s) answered · coverage ${Math.round((r.coverage || 0) * 100)}% · web search: ${r.web_search}`));
+    for (const sec of r.sections || []) {
+      const secBox = h("div", { class: "note-item" },
+        h("div", { class: "row-between" },
+          h("div", { style: "font-weight:600" }, sec.question),
+          h("span", { class: "badge" + (sec.status === "gap" ? " warn" : "") }, sec.status)),
+        h("div", { class: "hint" }, sec.origin));
+      if (sec.status === "gap") {
+        secBox.append(h("p", { class: "hint" },
+          "No passage in the notebook supports this part. Forge does not answer it from outside knowledge."));
+      } else {
+        secBox.append(h("div", { class: "body", style: "white-space:pre-wrap;margin-top:6px" }, sec.answer));
+        const cites = h("div", { class: "cites" });
+        for (const c of sec.citations || []) {
+          cites.append(h("button", { class: "cite", onclick: () => openViewer(c.source_id, c.chunk_id) },
+            h("span", { class: "n" }, `[${c.n}]`),
+            h("span", { class: "src" }, c.source_title || c.source_id),
+            h("span", { class: "hint" }, c.locator_label || "")));
+        }
+        secBox.append(cites);
+      }
+      parts.push(secBox);
+    }
+    if ((r.gaps || []).length) {
+      parts.push(h("div", { class: "conflicts", role: "group", "aria-label": "Gaps" },
+        h("div", { class: "conflicts-title" }, "Gaps in this notebook"),
+        ...r.gaps.map((g) => h("div", { class: "hint" }, `- ${g}`)),
+        h("p", { class: "hint" }, "These parts need a source the notebook does not have yet.")));
+    }
+    parts.push(h("p", { class: "hint" }, r.scope_note || ""));
+    parts.push(h("button", { class: "ghost", onclick: () => downloadBrief(r) }, "Download Markdown brief"));
+    results.replaceChildren(...parts);
+  }
+
+  async function downloadBrief(r) {
+    try {
+      const res = await fetch(`/api/notebooks/${nb.id}/research`, {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+        body: JSON.stringify({ question: r.question, format: "md" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const preview = h("div", { class: "overlay", onclick: (e) => { if (e.target === preview) preview.remove(); } },
+        h("div", { class: "viewer" },
+          h("header", {}, h("div", { style: "flex:1" }, h("div", { style: "font-weight:600" }, "Research brief · Markdown")),
+            h("button", { class: "ghost", onclick: () => preview.remove() }, "✕")),
+          h("div", { class: "content" }, h("pre", { class: "export-body", style: "white-space:pre-wrap;font-size:12px" }, text))));
+      document.body.append(preview);
+      try {
+        const url = URL.createObjectURL(new Blob([text], { type: "text/markdown" }));
+        const a = h("a", { href: url, download: "forge-research-brief.md" });
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch { /* downloads can be blocked; the preview is still the brief */ }
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  body.append(
+    h("p", { class: "hint" },
+      "Forge has no search provider, so this does not search the web and is not Deep Research. It plans " +
+      "sub-questions, answers each from the sources you already have, and lists what the notebook cannot " +
+      "answer — so you know what to go and find."),
+    input, go, results);
 }
 
 /// The job log is shown, not hidden: if an ingest was interrupted by a crash the user can see
@@ -6068,6 +5974,7 @@ impl Api {
             ("GET", _) | ("HEAD", _) => "read",
             ("POST", ["api", "notebooks"]) => "manage",
             ("POST", ["api", "notebooks", _, "chat"]) => "read",
+            ("POST", ["api", "notebooks", _, "research"]) => "read",
             ("POST", ["api", "notebooks", _, "chat", "stream"]) => "read",
             ("POST", ["api", "notebooks", _, "sources", ..]) => "write",
             ("POST", ["api", "notebooks", _, "shares"]) => "manage",
@@ -6156,6 +6063,7 @@ impl Api {
             ("POST", ["api", "notebooks", id, "sources", "github"]) => self.add_github_source(id, req),
             ("GET", ["api", "notebooks", id, "chunks"]) => Ok(ok(self.list_chunks(id))),
             ("POST", ["api", "notebooks", id, "chat"]) => self.chat(id, req),
+            ("POST", ["api", "notebooks", id, "research"]) => self.research_brief(id, req),
             ("GET", ["api", "notebooks", id, "conversations"]) => Ok(ok(self.list_conversations(id))),
             ("GET", ["api", "conversations", cid]) => Ok(self.get_conversation(cid)),
             ("POST", ["api", "notebooks", id, "notes"]) => self.create_note(id, req),
@@ -6248,6 +6156,14 @@ impl Api {
                 "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
                 "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
                 "export_note" => "the PPTX is a written-by-hand OPC package and the PDF a written-by-hand page tree, verified by reading both back with Forge's own readers and (one-off, outside the build) python-pptx and pypdf",
+            },
+            "research" => obj! {
+                "status" => "notebook_scoped_only",
+                "web_search" => "none",
+                "endpoint" => "POST /api/notebooks/:id/research (format=md for the Markdown brief)",
+                "note" => "decomposes a question into sub-questions, answers each from the notebook's own sources, and lists the parts the sources cannot support as gaps. There is no search provider, no crawler and no vendor key in this build, so this is NOT web research and NOT Deep Research: nothing is fetched from outside the notebook",
+                "fast_research" => "unsupported: needs a search provider",
+                "deep_research" => "unsupported: needs a search provider and a multi-step web task",
             },
             "conversations" => obj! {
                 "status" => "supported",
@@ -7058,6 +6974,91 @@ impl Api {
             "origin" => origin,
             "chunk_count" => chunk_count as u64,
             "attempts" => (attempts + 1) as u64,
+        }))
+    }
+
+    /// `POST /api/notebooks/:id/research`
+    ///
+    /// A notebook-scoped research brief: decompose the question, answer each part from the
+    /// sources, and list the parts the sources cannot support. **No web search happens here** and
+    /// the payload says so — there is no search provider in this build, and calling a
+    /// decomposition pass "Deep Research" would be the overclaim the spec forbids.
+    fn research_brief(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let question = body.str_of("question").unwrap_or("").trim().to_string();
+        if question.is_empty() {
+            return Err(err(422, "missing_question", "question is required"));
+        }
+        if grounded::is_degenerate_question(&question) {
+            return Err(err(422, "degenerate_question", "ask a question with content, not a single filler word"));
+        }
+        let selected: Vec<String> = parse_str_list(body.get("source_ids"));
+        let max = body
+            .get("max_sub_questions")
+            .and_then(|v| v.as_f64())
+            .map(|n| n as usize)
+            .unwrap_or(crate::research::DEFAULT_SUB_QUESTIONS);
+        let wants_markdown = body
+            .str_of("format")
+            .map(|f| f.eq_ignore_ascii_case("md") || f.eq_ignore_ascii_case("markdown"))
+            .unwrap_or(false);
+
+        let (chunks, sources) = self.store.read(|db| {
+            let sources: Vec<Source> = db
+                .sources
+                .iter()
+                .filter(|s| s.notebook_id == nb && s.status == "ready")
+                .filter(|s| selected.is_empty() || selected.contains(&s.id))
+                .cloned()
+                .collect();
+            let chunks: Vec<Chunk> = db
+                .chunks
+                .iter()
+                .filter(|c| c.notebook_id == nb)
+                .filter(|c| selected.is_empty() || selected.contains(&c.source_id))
+                .cloned()
+                .collect();
+            (chunks, sources)
+        });
+        if chunks.is_empty() {
+            return Err(err(409, "no_sources", "no ready sources are selected; import a source first"));
+        }
+
+        let brief = crate::research::run(&question, &chunks, &sources, max);
+        if wants_markdown {
+            let md = crate::research::to_markdown(&brief);
+            return Ok(Response::new(200, "text/markdown; charset=utf-8", md.into_bytes())
+                .with_header("Content-Disposition", "attachment; filename=\"forge-research-brief.md\""));
+        }
+
+        let sections: Vec<Value> = brief
+            .sections
+            .iter()
+            .map(|s| {
+                obj! {
+                    "question" => s.question.as_str(),
+                    "origin" => s.origin.as_str(),
+                    "status" => s.status,
+                    "sources_cited" => s.sources_cited as u64,
+                    "answer" => s.answer.text.clone(),
+                    "abstained" => s.answer.abstained,
+                    "citations" => Value::Arr(s.answer.citations.iter().map(|c| c.to_json()).collect()),
+                }
+            })
+            .collect();
+
+        Ok(ok(obj! {
+            "question" => brief.question.as_str(),
+            "scope" => "notebook",
+            "web_search" => "none",
+            "scope_note" => "this brief decomposes the question and answers each part from this notebook's sources. Forge performs no web search in this build: a part the sources cannot support is listed as a gap, not filled from outside knowledge",
+            "engine" => brief.engine.as_str(),
+            "coverage" => brief.coverage,
+            "answered" => brief.sections.iter().filter(|s| s.status == "answered").count() as u64,
+            "sub_questions" => brief.sections.len() as u64,
+            "sections" => Value::Arr(sections),
+            "gaps" => Value::Arr(brief.gaps.iter().map(|g| Value::from(g.as_str())).collect()),
+            "sources_used" => Value::Arr(brief.sources_used.iter().map(|s| Value::from(s.as_str())).collect()),
         }))
     }
 
@@ -11050,6 +11051,588 @@ mod tests {
         let found = find("what is the default retention window", &chunks, &sources);
         assert_eq!(attach(&mut answer, &found), 0);
         assert!(!answer.text.contains("Sources disagree"));
+    }
+}
+```
+
+## `crates/forge-core/src/datatable.rs`
+
+```rust
+//! Data-table artifacts: a projection of a real source grid, with per-cell evidence.
+//!
+//! The spec's ART-06 asks for "data tables as an artifact (schema inference, per-cell evidence,
+//! export)". Only the middle part is honestly hard, and it is the part this module is built
+//! around: **every value in a data-table artifact carries the A1 reference it was copied from**,
+//! so the artifact is a *view* of a stored grid, not a new claim about the world.
+//!
+//! Two deliberate refusals:
+//!
+//! * **No schema inference from prose.** Forge does not invent a table from a paragraph. It
+//!   projects a sheet that a spreadsheet or CSV source already contains, optionally filtering
+//!   rows and selecting columns.
+//! * **No silent widening.** A filter that would drop everything, a column that does not exist,
+//!   a cell that is empty — each is reported (or refused) instead of being quietly filled in.
+//!   Exactly one convenience is allowed and it is *not* an invention: an empty cell in the
+//!   projection stays empty and is counted.
+
+use crate::domain::Source;
+use crate::obj;
+use crate::json::Value;
+use crate::tables::{Cell, Table};
+
+/// How many rows a projection keeps before it truncates and says so.
+pub const ROW_LIMIT_MAX: usize = 200;
+pub const ROW_LIMIT_DEFAULT: usize = 50;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Op {
+    Eq,
+    Contains,
+    Gt,
+    Lt,
+    IsEmpty,
+    NotEmpty,
+}
+
+impl Op {
+    pub fn parse(raw: &str) -> Option<Op> {
+        Some(match raw.trim().to_ascii_lowercase().as_str() {
+            "" | "eq" | "=" | "equals" => Op::Eq,
+            "contains" => Op::Contains,
+            "gt" | ">" => Op::Gt,
+            "lt" | "<" => Op::Lt,
+            "is_empty" | "empty" => Op::IsEmpty,
+            "not_empty" | "notempty" => Op::NotEmpty,
+            _ => return None,
+        })
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Op::Eq => "eq",
+            Op::Contains => "contains",
+            Op::Gt => "gt",
+            Op::Lt => "lt",
+            Op::IsEmpty => "is_empty",
+            Op::NotEmpty => "not_empty",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Spec {
+    /// Which stored grid to project (a `tables` row id).
+    pub table_id: String,
+    /// Which columns to keep; empty means every column.
+    pub columns: Vec<String>,
+    /// Optional row filter.
+    pub filter_column: String,
+    pub filter_op: String,
+    pub filter_value: String,
+    pub limit: usize,
+    pub title: String,
+}
+
+fn number(text: &str) -> Option<f64> {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| !matches!(c, ',' | '%' | '$' | ' '))
+        .collect();
+    cleaned.parse::<f64>().ok()
+}
+
+fn cell_text(cell: &Cell) -> String {
+    // `text` is the display text the parser recorded (`12 kg`, `$1,200`), not a re-derivation.
+    cell.text.trim().to_string()
+}
+
+fn matches(op: &Op, cell: &Cell, needle: &str) -> bool {
+    let text = cell_text(cell);
+    match op {
+        Op::IsEmpty => text.is_empty(),
+        Op::NotEmpty => !text.is_empty(),
+        Op::Eq => text.eq_ignore_ascii_case(needle.trim()),
+        Op::Contains => text.to_ascii_lowercase().contains(&needle.trim().to_ascii_lowercase()),
+        Op::Gt | Op::Lt => match (number(&text), number(needle)) {
+            (Some(a), Some(b)) => {
+                if *op == Op::Gt {
+                    a > b
+                } else {
+                    a < b
+                }
+            }
+            // A non-numeric cell never satisfies a numeric comparison. It is not "false by
+            // default" silently: the count of uncomparable cells is reported by `build`.
+            _ => false,
+        },
+    }
+}
+
+/// Build the artifact payload. `Err` carries the reason the user should see.
+pub fn build(spec: &Spec, tables: &[Table], sources: &[Source]) -> Result<(String, Value), String> {
+    if spec.table_id.trim().is_empty() {
+        return Err("a data table artifact needs table_id: pick a sheet from GET /api/sources/:id/tables".into());
+    }
+    let table = tables
+        .iter()
+        .find(|t| t.id == spec.table_id)
+        .ok_or_else(|| format!("no stored grid with id \"{}\"", spec.table_id))?;
+    let source = sources.iter().find(|s| s.id == table.source_id);
+    let source_title = source
+        .map(|s| s.title.clone())
+        .unwrap_or_else(|| format!("{} (source removed)", table.source_id));
+
+    // Column selection: names must exist, in the table's own order, so the projection is stable.
+    let wanted: Vec<usize> = if spec.columns.is_empty() {
+        (0..table.headers.len()).collect()
+    } else {
+        let mut out = Vec::new();
+        for name in &spec.columns {
+            let idx = table
+                .column_index(name)
+                .ok_or_else(|| format!("no column \"{}\" in {}", name, table.sheet))?;
+            if !out.contains(&idx) {
+                out.push(idx);
+            }
+        }
+        out.sort_unstable();
+        out
+    };
+    if wanted.is_empty() {
+        return Err(format!("{} has no columns to project", table.sheet));
+    }
+
+    let op = if spec.filter_column.trim().is_empty() {
+        None
+    } else {
+        let parsed = Op::parse(&spec.filter_op)
+            .ok_or_else(|| format!("unknown filter op \"{}\"", spec.filter_op))?;
+        Some(parsed)
+    };
+    let filter_idx = match (&op, spec.filter_column.trim().is_empty()) {
+        (Some(_), false) => Some(
+            table
+                .column_index(spec.filter_column.trim())
+                .ok_or_else(|| format!("no column \"{}\" in {}", spec.filter_column, table.sheet))?,
+        ),
+        _ => None,
+    };
+    if let (Some(o), Some(_)) = (&op, filter_idx) {
+        if !matches!(o, Op::IsEmpty | Op::NotEmpty) && spec.filter_value.trim().is_empty() {
+            return Err(format!("filter op \"{}\" needs a filter_value", o.as_str()));
+        }
+        if matches!(o, Op::Gt | Op::Lt) && number(&spec.filter_value).is_none() {
+            return Err(format!(
+                "filter op \"{}\" needs a numeric filter_value, got \"{}\"",
+                o.as_str(),
+                spec.filter_value
+            ));
+        }
+    }
+
+    let limit = if spec.limit == 0 { ROW_LIMIT_DEFAULT } else { spec.limit.min(ROW_LIMIT_MAX) };
+    let mut rows: Vec<Value> = Vec::new();
+    let mut considered = 0usize;
+    let mut filtered_out = 0usize;
+    let mut uncomparable = 0usize;
+    let mut empty_cells = 0usize;
+    let mut truncated = false;
+
+    for row in &table.rows {
+        considered += 1;
+        if let (Some(o), Some(fidx)) = (&op, filter_idx) {
+            let cell = table.cell(row, fidx);
+            let hit = match cell {
+                Some(c) => {
+                    if matches!(o, Op::Gt | Op::Lt) && number(&cell_text(c)).is_none() && !cell_text(c).is_empty() {
+                        uncomparable += 1;
+                    }
+                    matches(o, c, &spec.filter_value)
+                }
+                None => false,
+            };
+            if !hit {
+                filtered_out += 1;
+                continue;
+            }
+        }
+        if rows.len() >= limit {
+            truncated = true;
+            break;
+        }
+        let mut cells: Vec<Value> = Vec::new();
+        for &idx in &wanted {
+            let (value, reference) = match table.cell(row, idx) {
+                Some(c) => {
+                    let text = cell_text(c);
+                    if text.is_empty() {
+                        empty_cells += 1;
+                    }
+                    // The A1 reference the value came from: this is the per-cell evidence. The
+                    // parser's own reference wins; the computed one is the fallback.
+                    let reference = if c.reference.is_empty() {
+                        format!("{}{}", column_letters(idx), row.number)
+                    } else {
+                        c.reference.clone()
+                    };
+                    (text, reference)
+                }
+                // A ragged row has no cell here. Saying so is not the same as writing "".
+                None => {
+                    empty_cells += 1;
+                    (String::new(), format!("{}{}", column_letters(idx), row.number))
+                }
+            };
+            cells.push(obj! { "value" => value, "ref" => reference });
+        }
+        let first = format!("{}{}", column_letters(wanted[0]), row.number);
+        let last_idx = *wanted.last().unwrap();
+        let last = format!("{}{}", column_letters(last_idx), row.number);
+        rows.push(obj! {
+            "number" => row.number as u64,
+            "cells" => Value::Arr(cells),
+            "ref" => format!("{}:{}", first, last),
+        });
+    }
+
+    if rows.is_empty() {
+        return Err(format!(
+            "the projection is empty: {} row(s) read from {}, all excluded by the filter",
+            considered, table.sheet
+        ));
+    }
+
+    let headers: Vec<Value> = wanted
+        .iter()
+        .map(|&i| {
+            obj! {
+                "name" => table.headers.get(i).cloned().unwrap_or_default(),
+                "letter" => column_letters(i),
+                "numeric" => {
+                    // "numeric" is a fact about the projected values, not a guess: true only when
+                    // every non-empty projected value parses as a number.
+                    let values: Vec<&Cell> = table.rows.iter().filter_map(|r| table.cell(r, i)).collect();
+                    let non_empty: Vec<&&Cell> = values.iter().filter(|c| !cell_text(c).is_empty()).collect();
+                    !non_empty.is_empty() && non_empty.iter().all(|c| number(&cell_text(c)).is_some())
+                },
+            }
+        })
+        .collect();
+
+    let title = if spec.title.trim().is_empty() {
+        format!("{} · {} rows", table.sheet, rows.len())
+    } else {
+        spec.title.trim().to_string()
+    };
+
+    let row_count = rows.len() as u64;
+    let payload = obj! {
+        "kind" => "data_table",
+        "sheet" => table.sheet.as_str(),
+        "table_id" => table.id.as_str(),
+        "source_id" => table.source_id.as_str(),
+        "source_title" => source_title.as_str(),
+        "columns" => Value::Arr(headers),
+        "rows" => Value::Arr(rows),
+        "row_count" => row_count,
+        "rows_read" => considered as u64,
+        "filtered_out" => filtered_out as u64,
+        "uncomparable_cells" => uncomparable as u64,
+        "empty_cells" => empty_cells as u64,
+        "truncated" => truncated,
+        "limit" => limit as u64,
+        "filter" => if op.is_some() {
+            obj! {
+                "column" => spec.filter_column.trim(),
+                "op" => op.as_ref().map(|o| o.as_str()).unwrap_or(""),
+                "value" => spec.filter_value.as_str(),
+            }
+        } else { Value::Null },
+        "evidence" => "every value carries the A1 reference it was copied from; the grid itself is unchanged",
+        "note" => "a projection of a stored grid, not a table inferred from prose",
+    };
+    Ok((title, payload))
+}
+
+/// Spreadsheet column letters for a 0-based index: 0→A, 25→Z, 26→AA.
+pub fn column_letters(mut index: usize) -> String {
+    let mut out: Vec<u8> = Vec::new();
+    loop {
+        out.push(b'A' + (index % 26) as u8);
+        if index < 26 {
+            break;
+        }
+        index = index / 26 - 1;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// RFC 4180 CSV of the projection: header row, then the projected values in order.
+/// Cells that contain a comma, a quote or a newline are quoted; quotes are doubled.
+pub fn to_csv(payload: &Value) -> String {
+    let mut out = String::new();
+    let columns: Vec<String> = payload
+        .get("columns")
+        .and_then(|c| c.as_arr())
+        .map(|list| list.iter().map(|c| c.str_of("name").unwrap_or("").to_string()).collect())
+        .unwrap_or_default();
+    let quote = |value: &str| -> String {
+        if value.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", value.replace('"', "\"\""))
+        } else {
+            value.to_string()
+        }
+    };
+    out.push_str(&columns.iter().map(|c| quote(c)).collect::<Vec<_>>().join(","));
+    out.push_str("\r\n");
+    if let Some(rows) = payload.get("rows").and_then(|r| r.as_arr()) {
+        for row in rows {
+            let values: Vec<String> = row
+                .get("cells")
+                .and_then(|c| c.as_arr())
+                .map(|list| list.iter().map(|c| quote(c.str_of("value").unwrap_or(""))).collect())
+                .unwrap_or_default();
+            out.push_str(&values.join(","));
+            out.push_str("\r\n");
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tables::{CellValue, Row};
+
+    fn cell(col: usize, header: &str, value: &str, row: u32) -> Cell {
+        let number = value.parse::<f64>().ok();
+        Cell {
+            col: col as u32 + 1,
+            header: header.to_string(),
+            value: match (&number, value.is_empty()) {
+                (Some(n), _) => CellValue::Number(*n),
+                (None, true) => CellValue::Empty,
+                (None, false) => CellValue::Text(value.to_string()),
+            },
+            text: value.to_string(),
+            reference: format!("{}{}", column_letters(col), row),
+            unit: String::new(),
+            formula: None,
+        }
+    }
+
+    fn source() -> Source {
+        Source {
+            id: "src-1".into(),
+            notebook_id: "nb".into(),
+            title: "sales.xlsx".into(),
+            kind: "xlsx".into(),
+            status: "ready".into(),
+            ..Default::default()
+        }
+    }
+
+    fn grid() -> Table {
+        let mut t = Table {
+            id: "tbl-1".into(),
+            source_id: "src-1".into(),
+            notebook_id: "nb".into(),
+            sheet: "Sales".into(),
+            hidden: false,
+            headers: vec!["Region".into(), "Revenue".into(), "Notes".into()],
+            rows: vec![],
+            truncated: false,
+            warnings: vec![],
+        };
+        for (n, (region, revenue, note)) in [
+            ("North", "1250", "steady, with a comma"),
+            ("South", "980", ""),
+            ("North", "3100", "promo \"Q3\""),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let row = n as u32 + 2;
+            t.rows.push(Row {
+                number: row,
+                cells: vec![
+                    cell(0, "Region", region, row),
+                    cell(1, "Revenue", revenue, row),
+                    cell(2, "Notes", note, row),
+                ],
+            });
+        }
+        t
+    }
+
+    #[test]
+    fn a_projection_keeps_the_a1_reference_of_every_value() {
+        let spec = Spec { table_id: "tbl-1".into(), ..Default::default() };
+        let (title, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
+        assert_eq!(title, "Sales · 3 rows");
+        assert_eq!(payload.str_of("source_title"), Some("sales.xlsx"));
+        assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(3.0));
+        let rows = payload.get("rows").and_then(|r| r.as_arr()).unwrap();
+        let first = &rows[0];
+        assert_eq!(first.str_of("ref"), Some("A2:C2"), "the row range is the evidence");
+        let cells = first.get("cells").and_then(|c| c.as_arr()).unwrap();
+        assert_eq!(cells[0].str_of("ref"), Some("A2"));
+        assert_eq!(cells[1].str_of("value"), Some("1250"));
+        // The real row number from the sheet is preserved, not renumbered from 1.
+        assert_eq!(first.get("number").and_then(|v| v.as_f64()), Some(2.0));
+    }
+
+    #[test]
+    fn columns_can_be_selected_and_are_kept_in_sheet_order() {
+        let spec = Spec {
+            table_id: "tbl-1".into(),
+            columns: vec!["Revenue".into(), "Region".into()],
+            ..Default::default()
+        };
+        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
+        let names: Vec<String> = payload
+            .get("columns")
+            .and_then(|c| c.as_arr())
+            .unwrap()
+            .iter()
+            .map(|c| c.str_of("name").unwrap().to_string())
+            .collect();
+        assert_eq!(names, vec!["Region", "Revenue"], "selection does not reorder the sheet");
+        let cells = payload.get("rows").and_then(|r| r.as_arr()).unwrap()[0]
+            .get("cells")
+            .and_then(|c| c.as_arr())
+            .unwrap();
+        assert_eq!(cells.len(), 2);
+        assert_eq!(cells[1].str_of("ref"), Some("B2"), "the reference follows the real column");
+    }
+
+    #[test]
+    fn filters_use_real_values_and_report_what_they_excluded() {
+        let spec = Spec {
+            table_id: "tbl-1".into(),
+            filter_column: "Region".into(),
+            filter_op: "eq".into(),
+            filter_value: "north".into(),
+            ..Default::default()
+        };
+        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
+        assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(2.0));
+        assert_eq!(payload.get("rows_read").and_then(|v| v.as_f64()), Some(3.0));
+        assert_eq!(payload.get("filtered_out").and_then(|v| v.as_f64()), Some(1.0));
+        assert_eq!(
+            payload.get("filter").and_then(|f| f.str_of("value")),
+            Some("north"),
+            "the filter is recorded as asked, not normalised away"
+        );
+
+        // Numeric comparison works on numbers, not on lexicographic text.
+        let spec = Spec {
+            table_id: "tbl-1".into(),
+            filter_column: "Revenue".into(),
+            filter_op: "gt".into(),
+            filter_value: "1000".into(),
+            ..Default::default()
+        };
+        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
+        assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(2.0));
+    }
+
+    #[test]
+    fn an_empty_projection_is_refused_with_the_reason() {
+        let spec = Spec {
+            table_id: "tbl-1".into(),
+            filter_column: "Region".into(),
+            filter_op: "eq".into(),
+            filter_value: "Mars".into(),
+            ..Default::default()
+        };
+        let err = build(&spec, &[grid()], &[source()]).unwrap_err();
+        assert!(err.contains("projection is empty"), "{}", err);
+        assert!(err.contains("Sales"), "{}", err);
+    }
+
+    #[test]
+    fn bad_requests_are_named_rather_than_guessed() {
+        assert!(build(&Spec::default(), &[grid()], &[source()]).unwrap_err().contains("table_id"));
+        let missing = Spec { table_id: "nope".into(), ..Default::default() };
+        assert!(build(&missing, &[grid()], &[source()]).unwrap_err().contains("no stored grid"));
+        let column = Spec { table_id: "tbl-1".into(), columns: vec!["Profit".into()], ..Default::default() };
+        assert!(build(&column, &[grid()], &[source()]).unwrap_err().contains("no column \"Profit\""));
+        let op = Spec {
+            table_id: "tbl-1".into(),
+            filter_column: "Region".into(),
+            filter_op: "like".into(),
+            filter_value: "x".into(),
+            ..Default::default()
+        };
+        assert!(build(&op, &[grid()], &[source()]).unwrap_err().contains("unknown filter op"));
+        let numeric = Spec {
+            table_id: "tbl-1".into(),
+            filter_column: "Revenue".into(),
+            filter_op: "gt".into(),
+            filter_value: "lots".into(),
+            ..Default::default()
+        };
+        assert!(build(&numeric, &[grid()], &[source()]).unwrap_err().contains("numeric filter_value"));
+    }
+
+    #[test]
+    fn truncation_is_reported_and_the_limit_is_capped() {
+        let mut table = grid();
+        for n in 0..20u32 {
+            let row = n + 5;
+            table.rows.push(Row {
+                number: row,
+                cells: vec![
+                    cell(0, "Region", "East", row),
+                    cell(1, "Revenue", "10", row),
+                    cell(2, "Notes", "", row),
+                ],
+            });
+        }
+        let spec = Spec { table_id: "tbl-1".into(), limit: 4, ..Default::default() };
+        let (_, payload) = build(&spec, &[table.clone()], &[source()]).expect("builds");
+        assert_eq!(payload.get("row_count").and_then(|v| v.as_f64()), Some(4.0));
+        assert_eq!(payload.get("truncated"), Some(&Value::Bool(true)));
+
+        let huge = Spec { table_id: "tbl-1".into(), limit: 100_000, ..Default::default() };
+        let (_, payload) = build(&huge, &[table], &[source()]).expect("builds");
+        assert_eq!(payload.get("limit").and_then(|v| v.as_f64()), Some(ROW_LIMIT_MAX as f64));
+    }
+
+    #[test]
+    fn empty_cells_are_counted_not_invented() {
+        let spec = Spec { table_id: "tbl-1".into(), ..Default::default() };
+        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
+        assert_eq!(payload.get("empty_cells").and_then(|v| v.as_f64()), Some(1.0));
+        let south = &payload.get("rows").and_then(|r| r.as_arr()).unwrap()[1];
+        let cells = south.get("cells").and_then(|c| c.as_arr()).unwrap();
+        assert_eq!(cells[2].str_of("value"), Some(""), "an empty cell stays empty");
+        assert_eq!(cells[2].str_of("ref"), Some("C3"), "and still points at the cell it was read from");
+    }
+
+    #[test]
+    fn the_csv_export_is_rfc_4180_and_carries_exactly_the_projected_values() {
+        let spec = Spec { table_id: "tbl-1".into(), ..Default::default() };
+        let (_, payload) = build(&spec, &[grid()], &[source()]).expect("builds");
+        let csv = to_csv(&payload);
+        let lines: Vec<&str> = csv.split("\r\n").collect();
+        assert_eq!(lines[0], "Region,Revenue,Notes");
+        assert_eq!(lines[1], "North,1250,\"steady, with a comma\"");
+        assert_eq!(lines[2], "South,980,");
+        assert_eq!(lines[3], "North,3100,\"promo \"\"Q3\"\"\"");
+        assert_eq!(lines[4], "", "the file ends with a line break");
+    }
+
+    #[test]
+    fn column_letters_follow_spreadsheet_convention() {
+        assert_eq!(column_letters(0), "A");
+        assert_eq!(column_letters(25), "Z");
+        assert_eq!(column_letters(26), "AA");
+        assert_eq!(column_letters(51), "AZ");
+        assert_eq!(column_letters(52), "BA");
+        assert_eq!(column_letters(701), "ZZ");
+        assert_eq!(column_letters(702), "AAA");
     }
 }
 ```
@@ -19457,6 +20040,7 @@ pub mod export;
 pub mod notebooklm;
 pub mod providers;
 pub mod render;
+pub mod research;
 pub mod retrieve;
 pub mod security;
 pub mod store;
@@ -29364,6 +29948,112 @@ fn data_table_artifacts_project_a_real_grid_with_per_cell_evidence() {
     assert_eq!(st, 409, "{:?}", body);
     assert_eq!(body.str_of("code"), Some("format_unavailable"));
 }
+
+#[test]
+fn research_briefs_decompose_the_question_and_name_their_gaps() {
+    let dir = tempdir("research");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Research"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    for (title, text) in [
+        (
+            "Policy",
+            "Customer records are retained for thirty days after account closure.",
+        ),
+        (
+            "Legal",
+            "A legal hold suspends the retention window until the hold is released by the legal team.",
+        ),
+    ] {
+        let (st, _) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/sources/text", nb_id),
+            Some(obj(&[("title", Value::from(title)), ("text", Value::from(text))])),
+        );
+        assert_eq!(st, 201);
+    }
+
+    let (st, brief) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/research", nb_id),
+        Some(obj(&[("question", Value::from("how long are customer records retained"))])),
+    );
+    assert_eq!(st, 200, "{:?}", brief);
+    // The scope is stated in the payload itself, not only in the UI.
+    assert_eq!(brief.str_of("scope"), Some("notebook"));
+    assert_eq!(brief.str_of("web_search"), Some("none"));
+    assert!(brief.str_of("scope_note").unwrap_or("").contains("no web search"));
+    let sections = brief.get("sections").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+    assert!(!sections.is_empty(), "{:?}", brief);
+    assert_eq!(sections[0].str_of("question"), Some("how long are customer records retained"));
+    assert_eq!(sections[0].str_of("origin"), Some("the question as asked"));
+    assert_eq!(sections[0].str_of("status"), Some("answered"));
+    let cites = sections[0].get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty(), "an answered section carries citations");
+    assert!(cites[0].str_of("locator_label").is_some());
+    // Every section is either answered with citations or listed as a gap — nothing in between.
+    let gaps = brief.get("gaps").and_then(|g| g.as_arr()).cloned().unwrap_or_default();
+    for section in &sections {
+        let status = section.str_of("status").unwrap_or("");
+        let has_cites = section
+            .get("citations")
+            .and_then(|c| c.as_arr())
+            .map(|c| !c.is_empty())
+            .unwrap_or(false);
+        assert_eq!(status == "answered", has_cites, "status and evidence agree: {:?}", section);
+    }
+    assert_eq!(gaps.len(), sections.iter().filter(|s| s.str_of("status") == Some("gap")).count());
+    assert!(brief.get("coverage").and_then(|c| c.as_f64()).unwrap_or(0.0) > 0.0);
+    assert!(brief.get("sources_used").and_then(|u| u.as_arr()).map(|u| !u.is_empty()).unwrap_or(false));
+
+    // A question the notebook cannot support is all gaps, and neither is invented nor hidden.
+    let (st, empty) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/research", nb_id),
+        Some(obj(&[("question", Value::from("what is the refund policy for gift cards"))])),
+    );
+    assert_eq!(st, 200, "{:?}", empty);
+    let empty_sections = empty.get("sections").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+    assert!(empty_sections.iter().all(|s| s.str_of("status") == Some("gap")), "{:?}", empty_sections);
+    assert_eq!(empty.get("coverage").and_then(|c| c.as_f64()), Some(0.0));
+
+    // The Markdown brief keeps quotes, locators and the scope statement.
+    let (st, md) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/research", nb_id),
+        Some(json::to_string(&obj(&[
+            ("question", Value::from("how long are customer records retained")),
+            ("format", Value::from("md")),
+        ])).as_bytes()),
+        "application/json",
+    );
+    assert_eq!(st, 200);
+    assert!(md.contains("# Research brief: how long are customer records retained"), "{}", md);
+    assert!(md.contains("### Evidence") && md.contains("paragraph 0"), "{}", md);
+    assert!(md.contains("no web search"), "the scope statement is in the document: {}", md);
+
+    // Bad input is refused with a reason before any work is done.
+    let (st, err) = s.json("POST", &format!("/api/notebooks/{}/research", nb_id), Some(obj(&[])));
+    assert_eq!(st, 422);
+    assert_eq!(err.str_of("code"), Some("missing_question"));
+    let (st, err) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/research", nb_id),
+        Some(obj(&[("question", Value::from("the"))])),
+    );
+    assert_eq!(st, 422);
+    assert_eq!(err.str_of("code"), Some("degenerate_question"));
+
+    // The capability page refuses to call this web research.
+    let (_, caps) = s.json("GET", "/api/capabilities", None);
+    let research = caps.get("research").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(research.str_of("web_search"), Some("none"));
+    assert_eq!(research.str_of("fast_research"), Some("unsupported: needs a search provider"));
+    assert_eq!(research.str_of("deep_research"), Some("unsupported: needs a search provider and a multi-step web task"));
+}
 ```
 
 ## `crates/forge-server/Cargo.toml`
@@ -33506,7 +34196,7 @@ Last updated: 2026-11-01 (access control + share links, crash-resilient ingestio
 timed transcripts, discovery from seed pages, slide editing and artifact export, library
 search/sort/icons/duplicate, EPUB ingestion, artifact regeneration and chat export,
 RSS/Atom feeds, GitHub repositories, PPTX and PDF export, instruction-like source text,
-data-table artifacts).
+data-table artifacts, notebook-scoped research briefs).
 Everything below was executed in this workspace; nothing is aspirational. Where a claim is
 untested it says so.
 
@@ -33525,8 +34215,8 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **293 passing, 0 failing** (26 `bininspect` + 228 lib + 34 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **164 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **301 passing, 0 failing** (26 `bininspect` + 235 lib + 35 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **169 assertions passing** | `node tests/ui-smoke.js` against a live server |
 | Spreadsheet tables | every worksheet parsed into a grid with sheet + A1 cell references; hidden sheets stored but never cited; cached formulas flagged | `tables` (22 tests) + e2e `spreadsheet_questions_are_computed_over_real_cells` |
 | Computed answers | sum / average / min / max / count over real numeric cells, optional grouping; refuses mixed units, truncated sheets and non-numeric columns instead of guessing | `tables::try_answer`, `api::chat` (`engine: table`) |
 | Table browser | source viewer renders the actual grid with original row numbers and per-cell A1 tooltips | UI smoke (4 assertions) |
@@ -33552,6 +34242,7 @@ untested it says so.
 | PDF export | `format=pdf` works for **every** artifact: title block, one section per slide/row, citation labels inline, sources named (not just ids), real xref table, `page n of m` footer. Text is encoded one byte per character for WinAnsi, so a `·` is `0xB7` and not `Â·`; characters outside Latin-1 become `?` and the footer says so | `render::pdf` (4 tests) + journey G/H + 2 UI assertions |
 | Instruction-like source text (§11) | source text is data, never an order. Ingestion counts sentences that read as instructions to an assistant (`ignore all previous instructions`, role reassignment, prompt exfiltration, "don't tell the user", credential requests), stores `instruction_like_spans` and warns on the source row. The answer path **skips** such a sentence when choosing what to quote, reports every hit (rule + text + offset) in `untrusted`, and adds a note saying what was left out. If nothing quotable remains it abstains **saying the passages were instructions**. A question *about* instructions is exempt: then quoting them is the answer | `untrusted` (5 tests) + e2e `instruction_like_source_text_is_reported_and_not_followed` + 4 UI assertions |
 | Data-table artifact (ART-06) | `kind: "data_table"` projects a **stored grid**: pick `table_id`, optionally `columns`, a filter (`eq`/`contains`/`gt`/`lt`/`is_empty`/`not_empty`) and a row limit. Every value carries the **A1 reference** it came from; row numbers are the sheet's own; empty cells are counted, not filled; a filter that excludes everything is refused with the counts; regeneration re-reads the same grid and filter. `format=csv` exports the projection as RFC 4180; `md`/`pdf` print it with its references. Charts and prose→table inference are **not** implemented and not claimed | `datatable` (9 tests) + e2e `data_table_artifacts_project_a_real_grid_with_per_cell_evidence` + 7 UI assertions |
+| Research brief (notebook scope) | `POST /api/notebooks/:id/research` plans **sub-questions** (the question as asked, its conjunctions, a comparison when one is asked for, then terms the sources actually repeat), answers each with the same grounded answerer chat uses, and lists every part the sources cannot support as a **gap**. Sections are `answered` only when they carry citations. `format=md` returns the brief with its evidence and a scope line. Capabilities say `web_search: "none"` and `fast_research`/`deep_research` **unsupported** — this is not web research and not Deep Research | `research` (7 tests) + e2e `research_briefs_decompose_the_question_and_name_their_gaps` + 5 UI assertions |
 | Server | serves API + SPA on a configurable port | `curl localhost:8099/api/health` → 200 |
 | PDF | 2-page fixtures (stored + Flate) → page locators | `ingest::pdf` tests |
 | DOCX/PPTX/XLSX | real OOXML → paragraph/slide locators; XLSX goes through the grid path (all sheets, cell references) | `ingest::ooxml`, `tables` + e2e |
@@ -33670,7 +34361,7 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 293 tests: 228 lib + 34 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 301 tests: 235 lib + 35 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -33678,7 +34369,7 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 164 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 169 assertions
 ```
 
 ## Unit tests (188) — exact names from `cargo test --lib -- --list`
@@ -34457,6 +35148,23 @@ Not implemented, and not claimed:
 * The CSV export contains only the projected columns and values. Provenance (cell references)
   lives in the Markdown and JSON exports, because a CSV with provenance rows would no longer be a
   CSV that other tools can read.
+
+## Research briefs (RES-01 / RES-02 / RES-03)
+
+* **No web search happens anywhere in this build.** There is no search vendor, no key, no
+  crawler. `POST /api/notebooks/:id/research` decomposes the question and answers the parts from
+  the notebook's own sources; `/api/capabilities` reports `research.web_search: "none"` and marks
+  `fast_research` and `deep_research` unsupported. Calling this "Deep Research" would be a false
+  claim about a multi-step *web* task that never happens.
+* The plan is mechanical, not clever: the question as asked, its `and`/`plus` clauses, one
+  comparison phrasing when the question asks for one, then "what do the sources say about X" for
+  content words the corpus actually contains. Terms absent from every source are not planned into
+  sub-questions (that would manufacture gaps). No model rewrites the question.
+* A sub-question is `answered` only when it produced citations. Abstentions become **gaps** — the
+  point of the brief is to show what the notebook cannot support.
+* No budget or cancellation controls beyond `max_sub_questions` (capped at 6) and the request
+  itself: a brief is a single synchronous call, so there is nothing to cancel mid-way. No
+  intermediate progress state, no cross-notebook scope, no scheduled or follow-up research.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -38780,8 +39488,9 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | ART-06 | data tables as an artifact: per-cell evidence + export | documented | **partial (honest)** — projects a **stored** grid (columns, one filter, row limit) with an A1 reference on every value, exports CSV/Markdown/PDF, regenerates from the same spec. **No schema inference from prose** and no charts | `datatable.rs`, `kind: "data_table"` | 9 unit + e2e + 7 UI |
 | ART-09 | PowerPoint export of a deck | documented | **done** — hand-written OPC package, re-readable by Forge's own PPTX reader | `render::pptx` | 5 unit + 3 e2e |
 | ART-10 | PDF export of any artifact | not in reference | **done** — hand-written page tree with xref, WinAnsi text, citations inline | `render::pdf` | 4 unit + 3 e2e |
-| RES-01 | Fast Research | documented | planned | — | no search provider |
-| RES-02 | Deep Research | documented | planned | — | no search provider |
+| RES-01 | Fast Research (web/Drive search, import results) | documented | **blocked** — needs a search provider or Drive OAuth; Forge has neither and does not fake one. The notebook-side half exists as `DISC-01` (crawl the links of a page you supply) | — | — |
+| RES-02 | Deep Research (multi-step web task → report) | documented | **blocked for the web**; a notebook-scoped decomposition (**RES-03**) is done and explicitly not called Deep Research | — | — |
+| RES-03 | notebook-scoped research brief: plan, per-part cited answers, gaps | not in reference | **done** — sub-questions from the question and the sources' own repeated terms; every part either answered with citations or listed as a gap; Markdown export; `web_search: none` stated in the payload and the capability page | `research.rs`, `POST /api/notebooks/:id/research` | 7 unit + e2e + 5 UI |
 | SHARE-01 | roles, share links, revocation | documented | **partial (honest)** — owner token + per-notebook links with `viewer`/`editor`, 401/403 per role, revocation checked per request, hashed tokens shown once; no accounts, groups or audit log | `auth.rs`, `api.rs` (`authenticate`/`guard`/`create_share`), UI share panel | 8 unit + e2e Journey J + 6 UI |
 | OPS-01 | durable ingestion job, crash recovery, retry (§14 K) | own policy (reliability) | **done** — source+job written before parsing, blob retained, `interrupted`/`failed` on reopen, in-place retry with `attempts` | `store::recover_interrupted`, `api::retry_source`, `list_jobs` | e2e Journey K + 4 UI |
 | SRC-22 | user-supplied timed transcript (`.vtt`/`.srt`) with timecode locators | documented (transcript import for a captioned video) | **partial (honest)** — the user supplies captions; Forge never downloads media or captions and has no frame analysis. Video/audio/image uploads as sources are refused with a reason | `ingest::transcript`, `ingest::unsupported_media` | 4 unit + e2e Journey E + 5 UI |
@@ -41981,6 +42690,28 @@ async function main() {
   check("hidden sheets are labelled when shown", hiddenNote, "Meta sheet not labelled");
   byText(".viewer header button", "✕").click();
   await wait(200);
+
+  // --- a research brief plans over the notebook and names its gaps
+  window.openResearch();
+  await wait(400);
+  const briefPanel = $$(".overlay").pop();
+  check("the research panel says it does not search the web",
+    /does not search the web/.test(briefPanel?.textContent || ""), briefPanel?.textContent?.slice(0, 200));
+  $("#researchQuestion").value = "what does photosynthesis convert";
+  byText(".overlay button", "Build brief").click();
+  await wait(1500);
+  const briefText = $("#researchResults")?.textContent || "";
+  check("the brief reports how much of the question the notebook covers",
+    /coverage \d+%/.test(briefText) && /web search: none/.test(briefText), briefText.slice(0, 200));
+  check("the brief answers the question as asked from the notebook, with a citation chip",
+    /what does photosynthesis convert/.test(briefText) && !!$("#researchResults .cite"),
+    briefText.slice(0, 300));
+  check("every section is either answered with evidence or listed as a gap",
+    $$("#researchResults .note-item").every((el) => /answered|gap/.test(el.textContent)),
+    $$("#researchResults .note-item").map((e) => e.textContent.slice(0, 60)).join(" | "));
+  check("the brief can be downloaded as Markdown", !!byText("#researchResults button", "Download Markdown brief"));
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
 
   // --- a data table artifact projects that grid, cell references included
   const salesSrc = (await (await fetch(`${BASE}/api/notebooks/${nbId}/sources`)).json()).sources

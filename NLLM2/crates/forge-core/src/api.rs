@@ -296,6 +296,7 @@ impl Api {
             ("GET", _) | ("HEAD", _) => "read",
             ("POST", ["api", "notebooks"]) => "manage",
             ("POST", ["api", "notebooks", _, "chat"]) => "read",
+            ("POST", ["api", "notebooks", _, "research"]) => "read",
             ("POST", ["api", "notebooks", _, "chat", "stream"]) => "read",
             ("POST", ["api", "notebooks", _, "sources", ..]) => "write",
             ("POST", ["api", "notebooks", _, "shares"]) => "manage",
@@ -384,6 +385,7 @@ impl Api {
             ("POST", ["api", "notebooks", id, "sources", "github"]) => self.add_github_source(id, req),
             ("GET", ["api", "notebooks", id, "chunks"]) => Ok(ok(self.list_chunks(id))),
             ("POST", ["api", "notebooks", id, "chat"]) => self.chat(id, req),
+            ("POST", ["api", "notebooks", id, "research"]) => self.research_brief(id, req),
             ("GET", ["api", "notebooks", id, "conversations"]) => Ok(ok(self.list_conversations(id))),
             ("GET", ["api", "conversations", cid]) => Ok(self.get_conversation(cid)),
             ("POST", ["api", "notebooks", id, "notes"]) => self.create_note(id, req),
@@ -476,6 +478,14 @@ impl Api {
                 "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
                 "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
                 "export_note" => "the PPTX is a written-by-hand OPC package and the PDF a written-by-hand page tree, verified by reading both back with Forge's own readers and (one-off, outside the build) python-pptx and pypdf",
+            },
+            "research" => obj! {
+                "status" => "notebook_scoped_only",
+                "web_search" => "none",
+                "endpoint" => "POST /api/notebooks/:id/research (format=md for the Markdown brief)",
+                "note" => "decomposes a question into sub-questions, answers each from the notebook's own sources, and lists the parts the sources cannot support as gaps. There is no search provider, no crawler and no vendor key in this build, so this is NOT web research and NOT Deep Research: nothing is fetched from outside the notebook",
+                "fast_research" => "unsupported: needs a search provider",
+                "deep_research" => "unsupported: needs a search provider and a multi-step web task",
             },
             "conversations" => obj! {
                 "status" => "supported",
@@ -1286,6 +1296,91 @@ impl Api {
             "origin" => origin,
             "chunk_count" => chunk_count as u64,
             "attempts" => (attempts + 1) as u64,
+        }))
+    }
+
+    /// `POST /api/notebooks/:id/research`
+    ///
+    /// A notebook-scoped research brief: decompose the question, answer each part from the
+    /// sources, and list the parts the sources cannot support. **No web search happens here** and
+    /// the payload says so — there is no search provider in this build, and calling a
+    /// decomposition pass "Deep Research" would be the overclaim the spec forbids.
+    fn research_brief(&self, nb: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let question = body.str_of("question").unwrap_or("").trim().to_string();
+        if question.is_empty() {
+            return Err(err(422, "missing_question", "question is required"));
+        }
+        if grounded::is_degenerate_question(&question) {
+            return Err(err(422, "degenerate_question", "ask a question with content, not a single filler word"));
+        }
+        let selected: Vec<String> = parse_str_list(body.get("source_ids"));
+        let max = body
+            .get("max_sub_questions")
+            .and_then(|v| v.as_f64())
+            .map(|n| n as usize)
+            .unwrap_or(crate::research::DEFAULT_SUB_QUESTIONS);
+        let wants_markdown = body
+            .str_of("format")
+            .map(|f| f.eq_ignore_ascii_case("md") || f.eq_ignore_ascii_case("markdown"))
+            .unwrap_or(false);
+
+        let (chunks, sources) = self.store.read(|db| {
+            let sources: Vec<Source> = db
+                .sources
+                .iter()
+                .filter(|s| s.notebook_id == nb && s.status == "ready")
+                .filter(|s| selected.is_empty() || selected.contains(&s.id))
+                .cloned()
+                .collect();
+            let chunks: Vec<Chunk> = db
+                .chunks
+                .iter()
+                .filter(|c| c.notebook_id == nb)
+                .filter(|c| selected.is_empty() || selected.contains(&c.source_id))
+                .cloned()
+                .collect();
+            (chunks, sources)
+        });
+        if chunks.is_empty() {
+            return Err(err(409, "no_sources", "no ready sources are selected; import a source first"));
+        }
+
+        let brief = crate::research::run(&question, &chunks, &sources, max);
+        if wants_markdown {
+            let md = crate::research::to_markdown(&brief);
+            return Ok(Response::new(200, "text/markdown; charset=utf-8", md.into_bytes())
+                .with_header("Content-Disposition", "attachment; filename=\"forge-research-brief.md\""));
+        }
+
+        let sections: Vec<Value> = brief
+            .sections
+            .iter()
+            .map(|s| {
+                obj! {
+                    "question" => s.question.as_str(),
+                    "origin" => s.origin.as_str(),
+                    "status" => s.status,
+                    "sources_cited" => s.sources_cited as u64,
+                    "answer" => s.answer.text.clone(),
+                    "abstained" => s.answer.abstained,
+                    "citations" => Value::Arr(s.answer.citations.iter().map(|c| c.to_json()).collect()),
+                }
+            })
+            .collect();
+
+        Ok(ok(obj! {
+            "question" => brief.question.as_str(),
+            "scope" => "notebook",
+            "web_search" => "none",
+            "scope_note" => "this brief decomposes the question and answers each part from this notebook's sources. Forge performs no web search in this build: a part the sources cannot support is listed as a gap, not filled from outside knowledge",
+            "engine" => brief.engine.as_str(),
+            "coverage" => brief.coverage,
+            "answered" => brief.sections.iter().filter(|s| s.status == "answered").count() as u64,
+            "sub_questions" => brief.sections.len() as u64,
+            "sections" => Value::Arr(sections),
+            "gaps" => Value::Arr(brief.gaps.iter().map(|g| Value::from(g.as_str())).collect()),
+            "sources_used" => Value::Arr(brief.sources_used.iter().map(|s| Value::from(s.as_str())).collect()),
         }))
     }
 

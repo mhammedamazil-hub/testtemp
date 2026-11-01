@@ -518,7 +518,8 @@ function renderSources(pane) {
     h("button", { id: "uploadBtn", onclick: () => fileInput.click() }, "Upload file (PDF, DOCX, PPTX, XLSX, EPUB, MD, TXT, HTML, CSV, VTT, SRT)"),
     h("button", { class: "ghost", id: "addUrlBtn", onclick: () => promptUrl() }, "Add from URL…"),
     h("button", { class: "ghost", id: "addGithubBtn", onclick: () => promptGithub() }, "Add GitHub repo…"),
-    h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover links…"));
+    h("button", { class: "ghost", id: "discoverBtn", onclick: () => openDiscovery() }, "Discover links…"),
+    h("button", { class: "ghost", id: "researchBtn", onclick: () => openResearch() }, "Research brief…"));
 
   const urlRow = h("div", { class: "stack", style: "margin-top:9px", hidden: true });
   const urlInput = h("input", { type: "url", id: "urlInput", placeholder: "https://…", "aria-label": "Web page URL" });
@@ -735,6 +736,108 @@ async function openDiscovery() {
       "bibliography, a project page); Forge fetches it, lists its real outbound links with the page they came " +
       "from, and imports only the ones you tick."),
     seed, go, results);
+}
+
+/// A notebook-scoped research brief: plan, per-part answers, and the gaps. The panel states its own
+/// scope — "no web search" — because a brief that looked like web research would be a false claim.
+async function openResearch() {
+  const nb = state.nb;
+  if (!nb) return;
+  const body = h("div", { class: "content stack" });
+  const overlay = h("div", { class: "overlay", onclick: (e) => { if (e.target === overlay) overlay.remove(); } },
+    h("div", { class: "viewer" },
+      h("header", {},
+        h("div", { style: "flex:1" },
+          h("div", { style: "font-weight:600" }, "Research brief"),
+          h("div", { class: "hint" }, "decomposes the question over this notebook's sources — no web search")),
+        h("button", { class: "ghost", onclick: () => overlay.remove() }, "✕")),
+      body));
+  document.body.append(overlay);
+
+  const input = h("input", { type: "text", id: "researchQuestion", placeholder: "the question to investigate", "aria-label": "Research question" });
+  const results = h("div", { class: "stack", id: "researchResults" });
+  const go = h("button", { class: "primary", onclick: async () => {
+    const question = input.value.trim();
+    if (!question) return;
+    go.disabled = true; go.textContent = "Planning…";
+    results.replaceChildren(spinner("Planning the brief"));
+    try {
+      const r = await api.post(`/notebooks/${nb.id}/research`, { question, max_sub_questions: 4 });
+      paintBrief(r);
+    } catch (e) {
+      toast(e.message, "err");
+      results.replaceChildren();
+    }
+    go.disabled = false; go.textContent = "Build brief";
+  } }, "Build brief");
+
+  function paintBrief(r) {
+    const parts = [];
+    parts.push(h("div", { class: "hint" },
+      `${r.answered} of ${r.sub_questions} sub-question(s) answered · coverage ${Math.round((r.coverage || 0) * 100)}% · web search: ${r.web_search}`));
+    for (const sec of r.sections || []) {
+      const secBox = h("div", { class: "note-item" },
+        h("div", { class: "row-between" },
+          h("div", { style: "font-weight:600" }, sec.question),
+          h("span", { class: "badge" + (sec.status === "gap" ? " warn" : "") }, sec.status)),
+        h("div", { class: "hint" }, sec.origin));
+      if (sec.status === "gap") {
+        secBox.append(h("p", { class: "hint" },
+          "No passage in the notebook supports this part. Forge does not answer it from outside knowledge."));
+      } else {
+        secBox.append(h("div", { class: "body", style: "white-space:pre-wrap;margin-top:6px" }, sec.answer));
+        const cites = h("div", { class: "cites" });
+        for (const c of sec.citations || []) {
+          cites.append(h("button", { class: "cite", onclick: () => openViewer(c.source_id, c.chunk_id) },
+            h("span", { class: "n" }, `[${c.n}]`),
+            h("span", { class: "src" }, c.source_title || c.source_id),
+            h("span", { class: "hint" }, c.locator_label || "")));
+        }
+        secBox.append(cites);
+      }
+      parts.push(secBox);
+    }
+    if ((r.gaps || []).length) {
+      parts.push(h("div", { class: "conflicts", role: "group", "aria-label": "Gaps" },
+        h("div", { class: "conflicts-title" }, "Gaps in this notebook"),
+        ...r.gaps.map((g) => h("div", { class: "hint" }, `- ${g}`)),
+        h("p", { class: "hint" }, "These parts need a source the notebook does not have yet.")));
+    }
+    parts.push(h("p", { class: "hint" }, r.scope_note || ""));
+    parts.push(h("button", { class: "ghost", onclick: () => downloadBrief(r) }, "Download Markdown brief"));
+    results.replaceChildren(...parts);
+  }
+
+  async function downloadBrief(r) {
+    try {
+      const res = await fetch(`/api/notebooks/${nb.id}/research`, {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+        body: JSON.stringify({ question: r.question, format: "md" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const preview = h("div", { class: "overlay", onclick: (e) => { if (e.target === preview) preview.remove(); } },
+        h("div", { class: "viewer" },
+          h("header", {}, h("div", { style: "flex:1" }, h("div", { style: "font-weight:600" }, "Research brief · Markdown")),
+            h("button", { class: "ghost", onclick: () => preview.remove() }, "✕")),
+          h("div", { class: "content" }, h("pre", { class: "export-body", style: "white-space:pre-wrap;font-size:12px" }, text))));
+      document.body.append(preview);
+      try {
+        const url = URL.createObjectURL(new Blob([text], { type: "text/markdown" }));
+        const a = h("a", { href: url, download: "forge-research-brief.md" });
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch { /* downloads can be blocked; the preview is still the brief */ }
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  body.append(
+    h("p", { class: "hint" },
+      "Forge has no search provider, so this does not search the web and is not Deep Research. It plans " +
+      "sub-questions, answers each from the sources you already have, and lists what the notebook cannot " +
+      "answer — so you know what to go and find."),
+    input, go, results);
 }
 
 /// The job log is shown, not hidden: if an ingest was interrupted by a crash the user can see

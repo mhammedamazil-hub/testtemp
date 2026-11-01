@@ -528,6 +528,28 @@ async function main() {
   byText(".viewer header button", "✕").click();
   await wait(200);
 
+  // --- a research brief plans over the notebook and names its gaps
+  window.openResearch();
+  await wait(400);
+  const briefPanel = $$(".overlay").pop();
+  check("the research panel says it does not search the web",
+    /does not search the web/.test(briefPanel?.textContent || ""), briefPanel?.textContent?.slice(0, 200));
+  $("#researchQuestion").value = "what does photosynthesis convert";
+  byText(".overlay button", "Build brief").click();
+  await wait(1500);
+  const briefText = $("#researchResults")?.textContent || "";
+  check("the brief reports how much of the question the notebook covers",
+    /coverage \d+%/.test(briefText) && /web search: none/.test(briefText), briefText.slice(0, 200));
+  check("the brief answers the question as asked from the notebook, with a citation chip",
+    /what does photosynthesis convert/.test(briefText) && !!$("#researchResults .cite"),
+    briefText.slice(0, 300));
+  check("every section is either answered with evidence or listed as a gap",
+    $$("#researchResults .note-item").every((el) => /answered|gap/.test(el.textContent)),
+    $$("#researchResults .note-item").map((e) => e.textContent.slice(0, 60)).join(" | "));
+  check("the brief can be downloaded as Markdown", !!byText("#researchResults button", "Download Markdown brief"));
+  $$(".overlay").forEach((o) => o.remove());
+  await wait(150);
+
   // --- a data table artifact projects that grid, cell references included
   const salesSrc = (await (await fetch(`${BASE}/api/notebooks/${nbId}/sources`)).json()).sources
     .find((src) => /sales\.xlsx/i.test(src.title));

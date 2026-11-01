@@ -3500,3 +3500,109 @@ fn data_table_artifacts_project_a_real_grid_with_per_cell_evidence() {
     assert_eq!(st, 409, "{:?}", body);
     assert_eq!(body.str_of("code"), Some("format_unavailable"));
 }
+
+#[test]
+fn research_briefs_decompose_the_question_and_name_their_gaps() {
+    let dir = tempdir("research");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Research"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    for (title, text) in [
+        (
+            "Policy",
+            "Customer records are retained for thirty days after account closure.",
+        ),
+        (
+            "Legal",
+            "A legal hold suspends the retention window until the hold is released by the legal team.",
+        ),
+    ] {
+        let (st, _) = s.json(
+            "POST",
+            &format!("/api/notebooks/{}/sources/text", nb_id),
+            Some(obj(&[("title", Value::from(title)), ("text", Value::from(text))])),
+        );
+        assert_eq!(st, 201);
+    }
+
+    let (st, brief) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/research", nb_id),
+        Some(obj(&[("question", Value::from("how long are customer records retained"))])),
+    );
+    assert_eq!(st, 200, "{:?}", brief);
+    // The scope is stated in the payload itself, not only in the UI.
+    assert_eq!(brief.str_of("scope"), Some("notebook"));
+    assert_eq!(brief.str_of("web_search"), Some("none"));
+    assert!(brief.str_of("scope_note").unwrap_or("").contains("no web search"));
+    let sections = brief.get("sections").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+    assert!(!sections.is_empty(), "{:?}", brief);
+    assert_eq!(sections[0].str_of("question"), Some("how long are customer records retained"));
+    assert_eq!(sections[0].str_of("origin"), Some("the question as asked"));
+    assert_eq!(sections[0].str_of("status"), Some("answered"));
+    let cites = sections[0].get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty(), "an answered section carries citations");
+    assert!(cites[0].str_of("locator_label").is_some());
+    // Every section is either answered with citations or listed as a gap — nothing in between.
+    let gaps = brief.get("gaps").and_then(|g| g.as_arr()).cloned().unwrap_or_default();
+    for section in &sections {
+        let status = section.str_of("status").unwrap_or("");
+        let has_cites = section
+            .get("citations")
+            .and_then(|c| c.as_arr())
+            .map(|c| !c.is_empty())
+            .unwrap_or(false);
+        assert_eq!(status == "answered", has_cites, "status and evidence agree: {:?}", section);
+    }
+    assert_eq!(gaps.len(), sections.iter().filter(|s| s.str_of("status") == Some("gap")).count());
+    assert!(brief.get("coverage").and_then(|c| c.as_f64()).unwrap_or(0.0) > 0.0);
+    assert!(brief.get("sources_used").and_then(|u| u.as_arr()).map(|u| !u.is_empty()).unwrap_or(false));
+
+    // A question the notebook cannot support is all gaps, and neither is invented nor hidden.
+    let (st, empty) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/research", nb_id),
+        Some(obj(&[("question", Value::from("what is the refund policy for gift cards"))])),
+    );
+    assert_eq!(st, 200, "{:?}", empty);
+    let empty_sections = empty.get("sections").and_then(|s| s.as_arr()).cloned().unwrap_or_default();
+    assert!(empty_sections.iter().all(|s| s.str_of("status") == Some("gap")), "{:?}", empty_sections);
+    assert_eq!(empty.get("coverage").and_then(|c| c.as_f64()), Some(0.0));
+
+    // The Markdown brief keeps quotes, locators and the scope statement.
+    let (st, md) = s.raw(
+        "POST",
+        &format!("/api/notebooks/{}/research", nb_id),
+        Some(json::to_string(&obj(&[
+            ("question", Value::from("how long are customer records retained")),
+            ("format", Value::from("md")),
+        ])).as_bytes()),
+        "application/json",
+    );
+    assert_eq!(st, 200);
+    assert!(md.contains("# Research brief: how long are customer records retained"), "{}", md);
+    assert!(md.contains("### Evidence") && md.contains("paragraph 0"), "{}", md);
+    assert!(md.contains("no web search"), "the scope statement is in the document: {}", md);
+
+    // Bad input is refused with a reason before any work is done.
+    let (st, err) = s.json("POST", &format!("/api/notebooks/{}/research", nb_id), Some(obj(&[])));
+    assert_eq!(st, 422);
+    assert_eq!(err.str_of("code"), Some("missing_question"));
+    let (st, err) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/research", nb_id),
+        Some(obj(&[("question", Value::from("the"))])),
+    );
+    assert_eq!(st, 422);
+    assert_eq!(err.str_of("code"), Some("degenerate_question"));
+
+    // The capability page refuses to call this web research.
+    let (_, caps) = s.json("GET", "/api/capabilities", None);
+    let research = caps.get("research").cloned().unwrap_or(Value::Bool(false));
+    assert_eq!(research.str_of("web_search"), Some("none"));
+    assert_eq!(research.str_of("fast_research"), Some("unsupported: needs a search provider"));
+    assert_eq!(research.str_of("deep_research"), Some("unsupported: needs a search provider and a multi-step web task"));
+}
