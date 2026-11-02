@@ -1,0 +1,43 @@
+# dependencies
+node_modules/
+.venv/
+venv/
+
+# builds
+dist/
+build/
+apps/web/dist/
+*.tsbuildinfo
+
+# runtime data (uploads, generated splats, history DB)
+data/
+.tmp/
+artifacts/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# logs
+*.log

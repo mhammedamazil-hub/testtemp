@@ -1,0 +1,16 @@
+.git
+.gitignore
+**/node_modules
+**/dist
+.venv
+venv
+data
+.tmp
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/.pytest_cache
+*.log
+docs
+scripts

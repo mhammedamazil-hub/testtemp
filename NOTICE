@@ -1,0 +1,35 @@
+Idol Studio — Image to 3D Gaussian Splat
+Copyright (C) 2026 Idol Studio contributors
+
+This project is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See LICENSE.
+
+This project integrates, at arm's length over ComfyUI's HTTP/WebSocket API, the following third-party work:
+
+Idol (speridlabs) — https://github.com/speridlabs/idol-sdk
+  Model architecture (TripoSplat by VAST) and weights, Apache License 2.0.
+  Copyright speridlabs. The converted weights are published by PedroMarinhoDev.
+
+ComfyUI-Idol — https://github.com/PedroMarinhoDev/ComfyUI-Idol (commit 59ed4b4)
+  GPL-3.0. Adds Idol Preprocess Image, Idol Input Camera and Idol Precision on ComfyUI's native
+  TripoSplat nodes. Installed inside the GPU worker container, unmodified.
+
+ComfyUI — https://github.com/comfyanonymous/ComfyUI (v0.43.0)
+  GPL-3.0. Inference runtime and 3D/Gaussian-splat nodes.
+
+Model files downloaded by the worker keep their own licences:
+  * Idol / Idol VAE decoder (PedroMarinhoDev/Idol-ComfyUI): Apache-2.0
+  * DINOv3 ViT-H (Meta, via VAST-AI/TripoSplat): DINOv3 License
+  * FLUX.2 VAE (Black Forest Labs, via VAST-AI/TripoSplat): see the model card
+  * BiRefNet (Comfy-Org repack): MIT
+
+Frontend/backend dependencies:
+  * Three.js — MIT
+  * @mkkellogg/gaussian-splats-3d — MIT
+  * React, Vite, Tailwind CSS, FastAPI, Starlette, Pillow, httpx, uvicorn — MIT/BSD/Apache-2.0 as per their
+    respective licences.
+
+The development simulator (tools/simulate_comfy.py) is original code in this repository. It does not run
+Idol and must not be presented as inference output.

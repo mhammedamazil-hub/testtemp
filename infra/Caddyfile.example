@@ -1,0 +1,24 @@
+# Example reverse proxy for Idol Studio.
+# Replace the domain and the bcrypt hash (caddy hash-password --plaintext 'your-password').
+studio.example.com {
+	basic_auth {
+		studio $2a$14$REPLACE_WITH_A_BCRYPT_HASH
+	}
+
+	encode zstd gzip
+
+	# SSE progress must stream, not buffer.
+	reverse_proxy 127.0.0.1:8000 {
+		flush_interval -1
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	request_body {
+		max_size 25MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+}

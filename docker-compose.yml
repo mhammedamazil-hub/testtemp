@@ -1,0 +1,78 @@
+# Production-ish deployment: one studio container + one GPU inference worker.
+#
+#   cp .env.example .env       # set IDOL_WEIGHTS_VARIANT and other values
+#   docker compose up -d --build
+#   open http://localhost:8000
+#
+# The worker downloads ~5 GB of weights on first boot (see docs/MODEL_REQUIREMENTS.md).
+# ComfyUI's own port is not published: only the studio talks to it.
+
+name: idol-studio
+
+services:
+  comfyui:
+    build:
+      context: ./worker
+      args:
+        COMFYUI_REF: ${COMFYUI_REF:-v0.43.0}
+        COMFYUI_IDOL_REF: ${COMFYUI_IDOL_REF:-59ed4b43f0d04a2c8bac689f99e51901dd7c2329}
+    image: idol-studio-worker:1.0.0
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      COMFYUI_MODELS_DIR: /comfyui/models
+      IDOL_WEIGHTS_VARIANT: ${IDOL_WEIGHTS_VARIANT:-fp32}
+      DOWNLOAD_MODELS: ${DOWNLOAD_MODELS:-1}
+    volumes:
+      - idol-models:/comfyui/models
+      - idol-worker-output:/comfyui/output
+      - idol-worker-input:/comfyui/input
+    # Give the worker time to download weights and load the model.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8188/system_stats', timeout=8)",
+        ]
+      interval: 30s
+      timeout: 12s
+      retries: 10
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Optional: expose ComfyUI on localhost only, for debugging.
+    # ports: ["127.0.0.1:8188:8188"]
+
+  studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: idol-studio:1.0.0
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      IDOL_COMFYUI_URL: http://comfyui:8188
+      IDOL_DATA_DIR: /data
+      IDOL_FRONTEND_DIST: /app/frontend_dist
+      IDOL_ENVIRONMENT: ${IDOL_ENVIRONMENT:-production}
+      IDOL_ALLOW_SIMULATED_WORKER: "false"
+    ports:
+      - "${STUDIO_PORT:-8000}:8000"
+    volumes:
+      - studio-data:/data
+    depends_on:
+      comfyui:
+        condition: service_healthy
+
+volumes:
+  studio-data:
+  idol-models:
+  idol-worker-output:
+  idol-worker-input:

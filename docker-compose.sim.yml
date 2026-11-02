@@ -1,0 +1,53 @@
+# Development deployment WITHOUT a GPU.
+#
+#   docker compose -f docker-compose.sim.yml up --build
+#   open http://localhost:8000
+#
+# ⚠ The "worker" here is tools/simulate_comfy.py: it speaks ComfyUI's API but
+# produces a procedural torus-knot PLY instead of running Idol. The studio marks
+# every job and the header as SIMULATED. Do not use this for real results.
+
+name: idol-studio-sim
+
+services:
+  sim:
+    build:
+      context: .
+      dockerfile: worker/sim.Dockerfile
+    restart: unless-stopped
+    environment:
+      SIM_STEP_SECONDS: "0.05"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8288/system_stats', timeout=4)",
+        ]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+
+  studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      IDOL_COMFYUI_URL: http://sim:8288
+      IDOL_DATA_DIR: /data
+      IDOL_FRONTEND_DIST: /app/frontend_dist
+      IDOL_ENVIRONMENT: development
+      IDOL_ALLOW_SIMULATED_WORKER: "true"
+      IDOL_JOB_TIMEOUT_SECONDS: "600"
+    ports:
+      - "${STUDIO_PORT:-8000}:8000"
+    volumes:
+      - studio-sim-data:/data
+    depends_on:
+      sim:
+        condition: service_healthy
+
+volumes:
+  studio-sim-data:
