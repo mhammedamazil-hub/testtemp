@@ -12,275 +12,282 @@ They are rebuilt from the generators in `tests/fixtures/` (also included below):
 
 Regenerate this file with `bash scripts/from_zero_bundle.sh` after changes.
 
-## `crates/forge-core/src/settings.rs`
+## `docs/reference/REFERENCE_SURFACE.md`
 
-```rust
-//! Server-stored preferences, and honest usage reporting.
-//!
-//! The spec's §7.17 asks for user control: theme, appearance, defaults, storage, privacy and
-//! accessibility. The temptation with a settings screen is to offer everything and wire up half
-//! of it. This module takes the opposite line: every field here **changes behaviour somewhere**,
-//! and the things Forge cannot do (interface languages, model selection without a provider,
-//! server-side font rendering) are named as unsupported in `/api/capabilities` instead of being
-//! shown as dead toggles.
-//!
-//! Settings are stored in the same `db.json` as everything else, so a backup carries them and a
-//! restart keeps them — a preference that resets on restart is not a preference.
+```markdown
+# The reference surface, exhaustively
 
-use crate::grounded::{Length, Style};
-use crate::json::Value;
-use crate::obj;
+What Gemini Notebook (the product formerly called NotebookLM) actually offers, read from
+Google's own help pages, and what Forge does about each item. This document exists because a
+feature matrix that lists only what we built is a brochure. Every row below is either a
+documented behaviour we reproduce, one we deliberately do not, or one we cannot.
 
-/// Theme names the UI understands.
-pub const THEMES: [&str; 3] = ["dark", "light", "system"];
-/// Library sort orders the notebook list accepts.
-pub const SORTS: [&str; 4] = ["recent", "title", "created", "sources"];
-/// Font scale bounds. Below 0.9 the interface stops being readable; above 1.4 the layout breaks.
-pub const FONT_SCALE_MIN: f64 = 0.9;
-pub const FONT_SCALE_MAX: f64 = 1.4;
+**Evidence labels** (§4 of `MASTER_FORGE.md`). Only two appear here:
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Settings {
-    pub theme: String,
-    /// Multiplier applied to the root font size by the client.
-    pub font_scale: f64,
-    /// Removes non-essential animation and smooth scrolling.
-    pub reduced_motion: bool,
-    /// Raises contrast for text and borders.
-    pub high_contrast: bool,
-    /// Default answer presentation for a new chat.
-    pub default_style: String,
-    /// Default citation budget for a new chat.
-    pub default_length: String,
-    /// Default order of the notebook library.
-    pub library_sort: String,
-    /// Whether the library hides archived notebooks by default.
-    pub hide_archived: bool,
-}
+* `OFFICIAL_DOCUMENTED` — read on a `support.google.com/gemininotebook` page in this session
+  (2026-11-02). The page URL is cited in the section header.
+* `UNREAD` — the help-centre article is linked from a page we read, but its body was not
+  fetched. Nothing is claimed about its contents.
 
-impl Default for Settings {
-    fn default() -> Self {
-        Settings {
-            theme: "dark".into(),
-            font_scale: 1.0,
-            reduced_motion: false,
-            high_contrast: false,
-            default_style: "evidence".into(),
-            default_length: "standard".into(),
-            library_sort: "recent".into(),
-            hide_archived: true,
-        }
-    }
-}
+No row here is `LIVE_OBSERVED`: this workspace has no route to `notebook.google.com` and no
+authorized account. A failed fetch is not evidence that a feature is absent, and a help page is
+not evidence that a feature works — it is evidence that Google documents it.
 
-impl Settings {
-    pub fn to_json(&self) -> Value {
-        obj! {
-            "theme" => self.theme.as_str(),
-            "font_scale" => self.font_scale,
-            "reduced_motion" => self.reduced_motion,
-            "high_contrast" => self.high_contrast,
-            "default_style" => self.default_style.as_str(),
-            "default_length" => self.default_length.as_str(),
-            "library_sort" => self.library_sort.as_str(),
-            "hide_archived" => self.hide_archived,
-        }
-    }
+**Status vocabulary** (same as `reference/FEATURE_MATRIX.md`):
 
-    pub fn from_json(v: &Value) -> Settings {
-        let d = Settings::default();
-        Settings {
-            theme: v.str_of("theme").map(|s| s.to_string()).unwrap_or(d.theme),
-            font_scale: v.get("font_scale").and_then(|x| x.as_f64()).unwrap_or(d.font_scale),
-            reduced_motion: v.get("reduced_motion").and_then(|x| x.as_bool()).unwrap_or(d.reduced_motion),
-            high_contrast: v.get("high_contrast").and_then(|x| x.as_bool()).unwrap_or(d.high_contrast),
-            default_style: v.str_of("default_style").map(|s| s.to_string()).unwrap_or(d.default_style),
-            default_length: v.str_of("default_length").map(|s| s.to_string()).unwrap_or(d.default_length),
-            library_sort: v.str_of("library_sort").map(|s| s.to_string()).unwrap_or(d.library_sort),
-            hide_archived: v.get("hide_archived").and_then(|x| x.as_bool()).unwrap_or(d.hide_archived),
-        }
-    }
+| Status | Meaning |
+|---|---|
+| `done` | Implemented here, with a test that exercises it |
+| `partial` | Implemented with a stated limit |
+| `blocked` | Cannot be built offline: needs an engine, credential, or network route we do not have |
+| `refused` | Deliberately not implemented, with a reason (no paid plan model, no fake output) |
+| `n/a` | Google-account, billing or vendor-specific behaviour with no Forge analogue |
 
-    /// Apply a partial update. Each rejected value is reported by name, so a client that sends one
-    /// bad field learns which one it was instead of losing the whole update.
-    pub fn apply(&mut self, patch: &Value) -> Vec<String> {
-        let mut rejected: Vec<String> = Vec::new();
-        if let Some(theme) = patch.str_of("theme") {
-            let t = theme.trim().to_ascii_lowercase();
-            if THEMES.contains(&t.as_str()) {
-                self.theme = t;
-            } else {
-                rejected.push(format!("theme must be one of {}", THEMES.join(", ")));
-            }
-        }
-        if let Some(scale) = patch.get("font_scale").and_then(|v| v.as_f64()) {
-            if (FONT_SCALE_MIN..=FONT_SCALE_MAX).contains(&scale) {
-                // Two decimals is what the UI renders; keeping the raw value would round-trip noise.
-                self.font_scale = (scale * 100.0).round() / 100.0;
-            } else {
-                rejected.push(format!(
-                    "font_scale must be between {} and {}",
-                    FONT_SCALE_MIN, FONT_SCALE_MAX
-                ));
-            }
-        }
-        if let Some(flag) = patch.get("reduced_motion").and_then(|v| v.as_bool()) {
-            self.reduced_motion = flag;
-        }
-        if let Some(flag) = patch.get("high_contrast").and_then(|v| v.as_bool()) {
-            self.high_contrast = flag;
-        }
-        if let Some(style) = patch.str_of("default_style") {
-            match Style::parse(style) {
-                Some(s) => self.default_style = s.as_str().to_string(),
-                None => rejected.push("default_style must be evidence, concise or detailed".into()),
-            }
-        }
-        if let Some(length) = patch.str_of("default_length") {
-            match Length::parse(length) {
-                Some(l) => self.default_length = l.as_str().to_string(),
-                None => rejected.push("default_length must be brief, standard or thorough".into()),
-            }
-        }
-        if let Some(sort) = patch.str_of("library_sort") {
-            let s = sort.trim().to_ascii_lowercase();
-            if SORTS.contains(&s.as_str()) {
-                self.library_sort = s;
-            } else {
-                rejected.push(format!("library_sort must be one of {}", SORTS.join(", ")));
-            }
-        }
-        if let Some(flag) = patch.get("hide_archived").and_then(|v| v.as_bool()) {
-            self.hide_archived = flag;
-        }
-        rejected
-    }
-}
+---
 
-/// Real on-disk usage, measured rather than estimated from record counts.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Usage {
-    pub database_bytes: u64,
-    pub blob_bytes: u64,
-    pub blob_count: u64,
-    pub backup_count: u64,
-    pub backup_bytes: u64,
-    pub notebook_count: u64,
-    pub source_count: u64,
-    pub chunk_count: u64,
-    pub artifact_count: u64,
-    pub conversation_count: u64,
-}
+## 1. Notebooks
 
-impl Usage {
-    pub fn total_bytes(&self) -> u64 {
-        self.database_bytes + self.blob_bytes + self.backup_bytes
-    }
+Source: `support.google.com/gemininotebook/answer/16206563` (`OFFICIAL_DOCUMENTED`)
 
-    pub fn to_json(&self) -> Value {
-        obj! {
-            "database_bytes" => self.database_bytes,
-            "blob_bytes" => self.blob_bytes,
-            "blob_count" => self.blob_count,
-            "backup_bytes" => self.backup_bytes,
-            "backup_count" => self.backup_count,
-            "total_bytes" => self.total_bytes(),
-            "records" => obj! {
-                "notebooks" => self.notebook_count,
-                "sources" => self.source_count,
-                "chunks" => self.chunk_count,
-                "artifacts" => self.artifact_count,
-                "conversations" => self.conversation_count,
-            },
-            "note" => "measured from the data directory: db.json plus the retained source blobs and rolling backups",
-        }
-    }
-}
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 1.1 | Create a notebook; each is an independent corpus; no cross-notebook access | `done` | `POST /api/notebooks`, `Nb` store; chat is scoped to one notebook id |
+| 1.2 | Left panel = Sources; middle = Chat; right = Studio | `done` | three-pane workspace (`app.js`), asserted 3 `.pane` |
+| 1.3 | Chat opens with a generated summary of all sources | `partial` | the empty chat shows how many ready sources are in scope and what grounding means; a *generated* summary is `artifacts::summary`, requested explicitly, never silently produced |
+| 1.4 | Auto-assigned emoji per notebook, changeable via emoji search | `partial` | `Notebook.icon` is a free-text field capped at 4 chars, shown in the library; **no emoji picker** |
+| 1.5 | Auto-label & categorise sources at 5+ sources; add/rename/delete labels; move sources between labels | `partial` | sources carry `labels`; labels are set through `PATCH /api/sources/:id` and searched by the library. **No automatic labelling** (needs a model) and no drag-between-labels UI |
+| 1.6 | "View custom prompt" on any artifact shows the prompt that generated it | `partial` | `Artifact.topic`, `difficulty`, `audience`, `count` are stored and returned; the JSON export includes them. There is no model prompt, because no model is called — Forge says so instead of inventing prompt text |
+| 1.7 | Web notifications for finished artifacts: desktop notification, animated tab title, unread dot | `refused` | generation is synchronous and completes before the response, so there is nothing to notify about; the UI does not fake a "running" state |
+| 1.8 | Reports export to Docs; data tables export to Sheets (citations on a second tab) | `partial` | Markdown/JSON/PDF for every artifact, PPTX for decks, CSV for data tables and decks, SVG for concept maps. **No Google Docs/Sheets export** — that needs Drive OAuth |
+| 1.9 | Usage analytics tab for public notebooks with paid plans | `n/a` | no plans, no public notebooks, no analytics; `GET /api/storage` reports local bytes instead |
+| 1.10 | Delete a notebook | `done` | `DELETE /api/notebooks/:id`, cascades to sources, notes, artifacts, conversations, grids |
+| 1.11 | Duplicate a notebook | `done` (Forge extra) | `POST /api/notebooks/:id/duplicate` with fresh ids; chat history deliberately not copied, and the response says so |
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+## 2. Sources
 
-    #[test]
-    fn defaults_are_the_documented_defaults() {
-        let s = Settings::default();
-        assert_eq!(s.theme, "dark");
-        assert_eq!(s.default_style, "evidence");
-        assert_eq!(s.default_length, "standard");
-        assert!(s.hide_archived);
-        assert_eq!(Settings::from_json(&s.to_json()), s, "settings round-trip through JSON");
-    }
+Source: `support.google.com/gemininotebook/answer/16215270` (`OFFICIAL_DOCUMENTED`)
 
-    #[test]
-    fn a_patch_changes_only_what_it_names() {
-        let mut s = Settings::default();
-        let rejected = s.apply(&crate::obj! { "theme" => "light" });
-        assert!(rejected.is_empty());
-        assert_eq!(s.theme, "light");
-        assert_eq!(s.default_length, "standard", "untouched fields keep their value");
-    }
+| # | Reference source type / rule | Status | Forge |
+|---|---|---|---|
+| 2.1 | Copy and pasted text | `done` | `POST /api/notebooks/:id/sources/text` |
+| 2.2 | PDF, with page locators | `done` | `ingest::pdf`, 2-page fixtures incl. Flate; locator is `page n` |
+| 2.3 | DOCX, PPTX, TXT, MD, CSV, XLSX | `done` | `ingest::ooxml`, `tables` (every sheet, A1 cell refs), `parse_delimited` |
+| 2.4 | ePub files | `done` | `ingest::epub`, spine order, `chapter n · title` |
+| 2.5 | Web URLs — **HTML text only**, no images, embeds or nested pages; paywalled pages unsupported | `done` | `fetch.rs` with SSRF guards, size cap, redirect re-validation; only text is ingested |
+| 2.6 | PDF served over a URL stays a PDF | `done` | `Fetched::ingest_kind` dispatches on content type |
+| 2.7 | Google Docs / Slides / Sheets from Drive, auto-synced; "Click to sync" | `partial` | sync exists as an explicit `POST /api/sources/:id/refresh` for every kind (URL, text, file); **no Drive import, no OAuth, no automatic polling**; a `.docx`/`.xlsx` upload fills the same slot |
+| 2.8 | Google Slides up to 100 slides; Sheets limited to 100k tokens | `partial` | no slide/token cap of Google's shape; Forge caps **bytes** per source and reports truncation. Google's numbers are not copied (spec §8: do not hard-code Google quotas) |
+| 2.9 | Images (avif…webp) as sources | `blocked` | no OCR engine; refused with a reason (`ingest::unsupported_media`) |
+| 2.10 | Audio files (mp3, wav, …) transcribed at import | `blocked` | no ASR. Audio **track metadata** is readable (`media.rs`, `/api/media/inspect`); speech is not transcribed. A user-supplied `.vtt`/`.srt` is supported and cited by timecode |
+| 2.11 | YouTube URLs — public videos with captions, transcript only; deleted video auto-removed within 30 days | `blocked` | no route to a platform host and no licence decision per video; refused with a reason |
+| 2.12 | Play Books / textbooks as sources | `n/a` | purchases, DRM and a vendor account; not reproducible |
+| 2.13 | Gemini Chats as context | `n/a` | requires a Google account |
+| 2.14 | Notes as sources, cited like any other source, selectable in the Sources panel | `done` | `POST /api/notes/:id/to-source` (one) and **new** `POST /api/notebooks/:id/notes/to-sources` (all, with per-note skip reasons) |
+| 2.15 | 500,000 words or 200 MB per source; 50 sources on the free plan | `refused` (the numbers), `done` (a cap) | Forge enforces its own documented byte cap and reports it; it does not pretend to know Google's plan tiers |
+| 2.16 | Multiple URLs pasted at once, separated by space or newline | `done` | `POST /api/notebooks/:id/sources/url` accepts a list |
+| 2.17 | Updating or deleting a source **does not change** existing studio outputs | `done`, improved | Forge marks dependent artifacts `stale` and offers `POST /api/artifacts/:id/regenerate`; silently stale outputs are worse than a flag |
+| 2.18 | Source Guide: an auto-generated summary of the whole source | `partial` | extractive guide (quoted headline, summary with locators, recurring terms, outline, suggested questions). No model-written prose |
+| 2.19 | Duplicate URL refused | `done` (Forge extra) | 409 naming the original source |
+| 2.20 | Rename a source, add labels | `done` | `PATCH /api/sources/:id` |
+| 2.21 | Inaccessible Drive file still counts toward limits but is never cited | `done` (analogue) | a source whose refresh fails keeps `status: failed` + `error`, is never cited, and is retried in place (`attempts`) |
 
-    #[test]
-    fn bad_values_are_named_and_not_applied() {
-        let mut s = Settings::default();
-        let rejected = s.apply(&crate::obj! {
-            "theme" => "neon",
-            "font_scale" => 9.0,
-            "default_style" => "shouty",
-            "default_length" => "epic",
-            "library_sort" => "vibes",
-        });
-        assert_eq!(rejected.len(), 5, "{:?}", rejected);
-        assert!(rejected.iter().any(|r| r.contains("theme")));
-        assert!(rejected.iter().any(|r| r.contains("font_scale")));
-        assert!(rejected.iter().any(|r| r.contains("default_style")));
-        assert!(rejected.iter().any(|r| r.contains("default_length")));
-        assert!(rejected.iter().any(|r| r.contains("library_sort")));
-        // Nothing bad was applied.
-        assert_eq!(s, Settings::default());
-    }
+## 3. Chat
 
-    #[test]
-    fn good_values_in_the_same_patch_still_apply_when_others_are_rejected() {
-        let mut s = Settings::default();
-        let rejected = s.apply(&crate::obj! { "theme" => "light", "font_scale" => 99.0 });
-        assert_eq!(rejected.len(), 1);
-        assert_eq!(s.theme, "light", "a good field is not thrown away because a sibling was bad");
-    }
+Source: `support.google.com/gemininotebook/answer/16179559` (`OFFICIAL_DOCUMENTED`)
 
-    #[test]
-    fn font_scale_is_rounded_to_what_the_ui_renders() {
-        let mut s = Settings::default();
-        assert!(s.apply(&crate::obj! { "font_scale" => 1.234 }).is_empty());
-        assert_eq!(s.font_scale, 1.23);
-    }
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 3.1 | Ask questions grounded in sources; answers use direct quotes as citations | `done` | `grounded.rs`, BM25 retrieval + verbatim extraction |
+| 3.2 | Hover a citation for the full quote; click to open it in context | `done` (click) / `partial` (hover) | clicking opens the viewer with the chunk highlighted and the citation chip carries the quote text; no hover-only tooltip |
+| 3.3 | Creative requests are refused ("can't answer this question") | `done` | abstention with the reason and what to try instead |
+| 3.4 | Configure Chat: conversational style — Default / Learning Guide / Custom ("respond like a PhD student") | `partial` | style = `evidence` / `concise` / `detailed` changes presentation and citation budget; a custom instruction is stored and echoed but **cannot steer an engine that does not exist** |
+| 3.5 | Configure Chat: response length | `done` | `brief` / `standard` / `thorough` → 1 / 2 / 4 citations |
+| 3.6 | "Save to note" pins a response to the notebook; the saved note keeps tables and clickable citations | `partial` | save-as-note exists (UI) and the note stores the transcript text; inline citations become plain text, so **formatting is not preserved** |
+| 3.7 | Saved response notes are editable once citations are removed | `partial` | all notes are editable; Forge does not silently strip citations |
+| 3.8 | Chat history retained; "Delete Chat History" from the three-dot menu | `done` | **new** `DELETE /api/notebooks/:id/conversations` + a "Delete chat history" button that says what it keeps |
+| 3.9 | "Add a note" from chat; Audio Overview and Mind Map available from chat | `partial` | notes and artifacts are one click from the notebook; there is no in-chat command surface and no audio |
+| 3.10 | Live voice chat (mobile, 18+) with interruptible speech | `blocked` | no ASR, no TTS, no audio capture pipeline |
+| 3.11 | Agentic chat: web search, running code, generating files (PDF, DOCX, MD, TXT, PNG, JPG, GIF, CSV, JSON, XLSX, PPTX), charts, modifying charts, "thinking steps" | `partial` / `refused` | Forge *does* produce PDF, PPTX, CSV, JSON, Markdown and SVG from **sources**, with citations; it **does not** search the web, execute code, or generate images, and it shows no "thinking steps" because there is no planning model |
+| 3.12 | Research completed inside chat, then imported into the notebook | `partial` | `POST /api/notebooks/:id/research` returns a notebook-scoped brief with gaps; `web_search: "none"` is stated in the payload |
+| 3.13 | Stop while generating, with "revise prompt" / "keep generating" | `partial` | Stop aborts the stream and the turn is not persisted. There is no "keep generating" because the answer is computed before the first frame |
+| 3.14 | Selecting a subset of sources scopes the answer | `done` | checkbox selection in the Sources panel; server re-scopes retrieval |
 
-    #[test]
-    fn an_old_database_with_no_settings_decodes_to_defaults() {
-        let s = Settings::from_json(&Value::Null);
-        assert_eq!(s, Settings::default());
-        // A partial object fills the rest from defaults rather than zeroing them.
-        let partial = Settings::from_json(&crate::obj! { "theme" => "light" });
-        assert_eq!(partial.theme, "light");
-        assert_eq!(partial.font_scale, 1.0);
-        assert_eq!(partial.default_style, "evidence");
-    }
+## 4. Studio artifacts
 
-    #[test]
-    fn usage_adds_up_and_reports_what_it_measured() {
-        let u = Usage {
-            database_bytes: 1000,
-            blob_bytes: 250,
-            backup_bytes: 500,
-            blob_count: 2,
-            ..Default::default()
-        };
-        assert_eq!(u.total_bytes(), 1750);
-        let json = u.to_json();
-        assert_eq!(json.get("total_bytes").and_then(|v| v.as_f64()), Some(1750.0));
-        assert!(json.str_of("note").unwrap_or("").contains("measured"));
-    }
-}
+### 4.1 Reports and Notes
+
+Sources: `…/answer/16206563`, `…/answer/16262519` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 4.1.1 | Report types: your own, FAQ, study guide, briefing document, AI-suggested type | `partial` | `report`, `faq`, `study_guide`, `summary` are implemented extractively; an "AI-suggested report type" needs a model |
+| 4.1.2 | Notes appear in the Sources panel and can be cited | `done` | note → source conversion (single and bulk) |
+| 4.1.3 | Convert legacy Studio notes one at a time or all at once | `done` | single and bulk conversion; conversion is idempotent and reports `already_a_source` |
+| 4.1.4 | Export a note to Google Docs | `refused` | needs Drive OAuth; Markdown export of the notebook covers the same need offline |
+| 4.1.5 | Notes editable (not on mobile) | `done` | `PATCH /api/notes/:id`, autosave in the UI |
+
+### 4.2 Audio Overviews
+
+Source: `…/answer/16212820` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 4.2.1 | Two AI hosts discuss the sources (Deep Dive) | `blocked` | no TTS, no model. Forge produces a **narration script** artifact with per-segment citations and an `estimated_seconds`, and says in the artifact that no audio file exists |
+| 4.2.2 | Formats: Deep Dive, The Brief (single speaker, <2 min), The Critique, The Debate | `partial` | the script generator has one shape (host + source-by-source briefing). Format variants are not implemented and are not faked |
+| 4.2.3 | Output language: 80+ languages | `blocked` | extractive output is quoted in the source's own language; there is no generation step to translate |
+| 4.2.4 | Length: Shorter / Default / Longer (English only) | `partial` | `estimated_seconds` and segment count are reported; length is not selectable |
+| 4.2.5 | Custom prompt to focus the overview | `partial` | `topic` focuses reports/decks/scripts; there is no free-text prompt field for the script |
+| 4.2.6 | Playback speed, background playback, thumbs up/down | `refused` | no player: there is no audio |
+| 4.2.7 | Interactive mode: join the conversation by voice | `blocked` | speech in/out |
+| 4.2.8 | Share link, download the audio file | `refused` | nothing to download; the script exports as Markdown/PDF |
+
+### 4.3 Video Overviews
+
+Source: `…/answer/16454555` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 4.3.1 | Generate a narrated video from the sources | `blocked` | no renderer, no TTS, no image generation |
+| 4.3.2 | Formats: Cinematic (18+), Explainer, Short (~60 s) | `blocked` | as above |
+| 4.3.3 | Visual style: Classic, Whiteboard, Watercolour, Retro Print, Heritage, Paper-craft, Kawaii, Anime, auto, custom | `blocked` | as above |
+| 4.3.4 | Producer notes reviewed before final render (AI Ultra) | `refused` | a plan-gated workflow with a human approval step; Forge has no renderer to gate |
+| 4.3.5 | Generate now / Generate later (background job) | `partial` | every artifact is written synchronously and is listed as soon as it exists; there is no queue, so there is nothing to schedule |
+| 4.3.6 | Playback controls, share, download | `refused` | no video file |
+| 4.3.7 | Steering prompt for a focus topic | `partial` | `topic` on the artifacts that accept one |
+
+### 4.4 Mind Maps
+
+Source: `…/answer/16212283` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 4.4.1 | Branching diagram of the main topics | `done` | `artifacts::mindmap` from corpus term frequency + co-occurrence; deterministic, no model |
+| 4.4.2 | Zoom and scroll, expand/collapse branches | `partial` | SVG nodes and edges render and the SVG exports; there is no pan/zoom canvas and branches are always expanded |
+| 4.4.3 | Select a node to ask about that topic | `partial` | a node's label is available to copy; clicking does not pre-fill the composer |
+| 4.4.4 | Download the map | `done` | `format=svg` (and PDF) |
+| 4.4.5 | Generated from a chat chip | `partial` | generated from the Studio panel; the chat has no chip row |
+
+### 4.5 Slide decks
+
+Source: `…/answer/16757456` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 4.5.1 | Generate a deck from the sources, then present it | `done` | quotation deck with per-bullet citations; full-screen "slideshow" is not implemented (slides render as a scrollable list) |
+| 4.5.2 | Customise: format, output language, length, sources, free-text description | `partial` | `audience` (general/executive/technical) and `topic` change the deck; source selection is real. No format/language/length-selector and no free-text prompt |
+| 4.5.3 | Revise slides with instructions; batch by slide; "Generate revised deck" | `partial` | per-slide edit, reorder, delete, restore, version bump — all deterministic edits stored on the artifact. There is no instruction-following revision, because there is no model |
+| 4.5.4 | Delete / restore slides | `done` | `PATCH /api/artifacts/:id` ops `delete` / `restore`, versioned |
+| 4.5.5 | Reorder slides by dragging thumbnails | `partial` | `move` op with an index; the drag gesture is not implemented |
+| 4.5.6 | Download as PDF | `done` | `render::pdf` (hand-written, verifiable `%PDF` + xref) |
+| 4.5.7 | Share a deck publicly, independent of the notebook | `refused` | Forge share links are per notebook and revocable; a per-artifact public link is deliberately out of scope (D20) |
+| 4.5.8 | Good content / bad content feedback | `refused` | no telemetry and no product team to receive it |
+
+### 4.6 Flashcards and Quizzes
+
+Source: `…/answer/16958963` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 4.6.1 | Generate flashcards / quizzes from the sources | `done` | definitional cards + cloze fallback; quiz with corpus-drawn distractors |
+| 4.6.2 | Difficulty: easy / medium / hard | `done` | `easy` (definitions only) / `normal` / `hard` (cloze first); the reference's "medium" maps to `normal` |
+| 4.6.3 | Free-text prompt to guide the deck | `partial` | `topic` reaches the generators that accept a focus; the reference's free-text prompt is not a field |
+| 4.6.4 | Choose the number: fewer / standard / more | `done` | **new**: `count` accepts `fewer`/`standard`/`more` or 3–24, is recorded on the artifact and reproduced by regeneration |
+| 4.6.5 | "Explain" a card or answer | `partial` | every card and question carries its verbatim source sentence and a citation that opens the passage; there is no model-written explanation |
+| 4.6.6 | Track progress: "Got it!" / "Missed it!", remembered across sessions | `done` | `POST /api/artifacts/:id/review` with `known: true/false`, persisted per card, counts returned |
+| 4.6.7 | Results screen; practise again with Same / All / Only missed | `partial` | **new** "practise missed" filters the visible deck by the stored marks; there is no results screen and no "same cards" re-shuffle mode |
+| 4.6.8 | Flashcard controls: previous/next, full screen, shuffle, delete a card, restart, download CSV | `partial` → `done` for the data-changing ones | **new** `POST /api/artifacts/:id/study` with `shuffle`, `restart`, `delete_card` (versioned, persisted) and **CSV download**; the deck is a scrollable list, so previous/next and full screen are not implemented |
+| 4.6.9 | Quiz controls: full screen, hint, previous/next | `partial` | **new** a per-question hint that names the passage (never the answer); no full-screen or paging |
+| 4.6.10 | Restricted download for Play Books sources | `n/a` | no Play Books |
+
+### 4.7 Data tables and Infographics
+
+Sources: `…/answer/16206563`, `…/answer/16758265` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 4.7.1 | Data table generated from sources, customisable by prompt, exportable to Sheets with a citation tab | `partial` | a data table **projects a stored grid** (columns, one filter, row limit) with an A1 reference on every value; CSV/Markdown/PDF export. No schema inference from prose, no prompt, no Sheets export |
+| 4.7.2 | Infographic: single visual summary, orientation, detail level, visual style, PNG download | `blocked` | no image generation or rasteriser; Forge returns 501 for PNG rather than a placeholder |
+
+### 4.8 Artifact lifecycle, shared by all kinds
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 4.8.1 | Artifacts are generated in the background and can be revisited later | `done` (analogue) | stored, versioned, listed, re-openable; generation is synchronous |
+| 4.8.2 | Outputs do **not** change when a source changes | `done`, improved | `stale` flag + explicit regeneration with the recorded parameters |
+| 4.8.3 | Rename / delete an artifact | `done` | `PATCH` / `DELETE /api/artifacts/:id` |
+| 4.8.4 | Export: PDF for decks, PNG for infographics, Docs for reports, Sheets for tables | `partial` | PDF/PPTX/Markdown/JSON/SVG/CSV as listed above; PNG is 501 |
+| 4.8.5 | Feedback (good/bad content) on every artifact | `refused` | no telemetry |
+
+## 5. Sharing and access
+
+Sources: `…/answer/16206563`, `…/answer/16322204`, `…/answer/16212820` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 5.1 | Private sharing to an email address as Viewer or Editor | `partial` | per-notebook share links with role `viewer` (read + ask) / `editor` (also write); **no email accounts** — a link is the credential, its SHA-256 is all that is stored, and it is shown once |
+| 5.2 | Viewer: read all shared sources and notes | `done` | role-gated routes; a share lists exactly one notebook |
+| 5.3 | Editor: add/remove sources and notes, and share further | `partial` | editor may add/remove sources and notes, edit artifacts; **sharing further is owner-only** (documented divergence, D20) |
+| 5.4 | Copy link; "Copy link to chat view" hides sources but does not revoke access | `refused` (the second link) | Forge has one link per notebook and does not offer a hiding feature that implies revocation it cannot perform |
+| 5.5 | Public link ("Anyone with a link") with a globe indicator; revoking makes old links dead | `refused` | publishing to an unauthenticated internet is not a safe default for a local workspace; share links are always scoped and revocable, and revocation takes effect on the next request |
+| 5.6 | Personal accounts can share with up to 50 users; not with Groups | `refused` (the number) | no quota is copied; every link is individually revocable |
+| 5.7 | Workspace admin rules: editors cannot delete notebooks, share, or revoke | `done` (adopted, D20) | Forge takes the stricter reading: notebook delete, share creation/revocation, provider and settings changes are owner-only |
+| 5.8 | Featured notebooks curated by publishers; viewers read, ask and consume artifacts but cannot generate | `refused` | a curated corpus with a vendor's publishing programme; not reproducible offline |
+| 5.9 | Usage analytics for public notebooks | `n/a` | no public notebooks |
+
+## 6. Settings, language, usage
+
+Sources: `…/answer/16261963`, `…/answer/17670842` (`OFFICIAL_DOCUMENTED`)
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 6.1 | Settings → Output Language, 80+ languages for generated text | `blocked` | Forge generates nothing: answers are quoted from the sources in their own language. A language selector would be a dead control, so `caps.settings.unsupported.interface_language` states this |
+| 6.2 | Settings → Notifications: web notifications on artifact completion | `refused` | nothing runs in the background |
+| 6.3 | Settings → Usage: remaining AI usage, weekly limit, refresh time | `refused` | no metered compute, no plan tiers; Forge reports **measured storage** (`GET /api/storage`) instead of invented quota |
+| 6.4 | Chat shows "limit reached, resets at 3:00 PM"; Studio shows expected cost bar | `refused` | there is no cost model to show; inventing one would be a fabricated number |
+| 6.5 | Generate later when out of quota | `refused` | generation is instant and local; scheduling it would be theatre |
+| 6.6 | Upgrade to a higher plan | `n/a` | no plans, no billing |
+| 6.7 | Theme, text size, reduced motion, contrast (Forge's own settings surface) | `done` (Forge extra) | §7.17 panel: persisted in `db.json`, applied as root attributes and one CSS variable; owner-only |
+| 6.8 | Mode switching (e.g. Notebooks in Gemini Apps) | `UNREAD` (`…/answer/16225229`) | not read in this session; no claim made |
+| 6.9 | Report a problem / send feedback | `UNREAD` (`…/answer/16179536`) | no telemetry by design |
+| 6.10 | Mobile app feature differences | `UNREAD` (`…/answer/16296687`) | Forge ships a responsive web app; no native client |
+
+## 7. Cross-cutting behaviours worth naming
+
+| # | Reference behaviour | Status | Forge |
+|---|---|---|---|
+| 7.1 | Each notebook is independent; no cross-notebook retrieval | `done` | enforced by the store queries, not by convention |
+| 7.2 | Citations must be exact and checkable | `done` | every citation resolves to a stored chunk; `citation_problems` is returned and tested |
+| 7.3 | AI outputs may be inaccurate and are labelled as AI output | `done` | the UI marks assistant messages, artifacts carry `model: null` where applicable, and the capability page never claims a model |
+| 7.4 | Source text may contain instructions; the product must not follow them | `done` (Forge's §11 policy) | `untrusted.rs` counts instruction-like spans, the answerer skips and reports them, and abstains when only instructions matched |
+| 7.5 | Copyright: do not import what you have no rights to | `done` (policy) | the UI says it at import time; no media is downloaded or republished |
+
+---
+
+## What this document is not
+
+* It is not a claim that the reference product behaves as its help pages say. Help pages are
+  `OFFICIAL_DOCUMENTED`; they are not observation.
+* It is not a promise to build every row. Rows marked `blocked` need an engine, a credential or
+  a network route this build does not have; rows marked `refused` are decisions, and the reason
+  is written next to each one.
+* The numeric quotas Google states (50 sources, 500k words, 50 viewers, 80+ languages) are
+  recorded as *the reference's* numbers. Forge does not copy them into its code.
+
+## Counts
+
+| Status | Rows |
+|---|---|
+| `done` | 45 |
+| `partial` | 36 |
+| `refused` | 18 |
+| `blocked` | 12 |
+| `n/a` | 6 |
+| `UNREAD` | 3 |
+| **total** | **120** |
+
+Two rows are written `done` for the data-changing part and `partial` for the rest; they are
+counted once, as `done`, and the per-row text says which part is which. The per-row text is the
+authority, not this table.
 ```
 
 ## `.gitignore`
@@ -854,7 +861,7 @@ async function openNotebook(app, id, artifactId) {
 
   // --- left: sources
   const sourcesPane = h("div", { class: "pane" });
-  const chatPane = h("div", { class: "pane", style: "padding:0;display:flex;flex-direction:column" });
+  const chatPane = h("div", { class: "pane chat", style: "padding:0;display:flex;flex-direction:column" });
   const sidePane = h("div", { class: "pane" });
   workspace.append(sourcesPane, chatPane, sidePane);
   app.replaceChildren(workspace);
@@ -1448,14 +1455,34 @@ function lengthHint(length) {
 /// the live message list rather than baked into the first render, because the conversation id
 /// only exists after the first answer lands.
 function ensureChatExport(scroll = document.getElementById("messages")) {
-  if (!scroll || !state.conversationId) return;
-  if (scroll.querySelector("#exportChat")) return;
-  scroll.prepend(h("div", { class: "row-between", style: "gap:8px;margin-bottom:8px" },
+  if (!scroll) return;
+  // Re-render rather than skip: the export button only exists once there is a conversation, and
+  // clearing the history must not leave a stale toolbar behind.
+  scroll.querySelector("#chatTools")?.remove();
+  const nb = state.nb;
+  scroll.prepend(h("div", { class: "row-between", style: "gap:8px;margin-bottom:8px", id: "chatTools" },
     h("span", { class: "hint" }, "conversation"),
-    h("button", {
-      class: "ghost", id: "exportChat", title: "Download this conversation with its citations",
-      onclick: () => downloadConversation(state.conversationId),
-    }, "Export transcript")));
+    h("div", { class: "row", style: "gap:6px" },
+      state.conversationId
+        ? h("button", {
+            class: "ghost", id: "exportChat", title: "Download this conversation with its citations",
+            onclick: () => downloadConversation(state.conversationId),
+          }, "Export transcript")
+        : null,
+      // Clearing history is a real deletion of the transcripts in this notebook — not of the
+      // notes, artifacts or sources built from them — and the button says so.
+      h("button", { class: "ghost danger", id: "clearChat", title: "Delete every chat transcript in this notebook",
+        onclick: async () => {
+          if (!nb) return;
+          if (!confirm("Delete this notebook's chat history? Notes, artifacts and sources are kept.")) return;
+          try {
+            const r = await api.del(`/notebooks/${nb.id}/conversations`);
+            state.messages = [];
+            state.conversationId = null;
+            renderChat(document.querySelector(".pane.chat"));
+            toast(`${r.deleted} conversation(s) deleted`);
+          } catch (e) { toast(e.message, "err"); }
+        } }, "Delete chat history"))));
 }
 
 function renderChat(pane, onlyComposer = false) {
@@ -1730,6 +1757,19 @@ function renderNotes(el) {
             state.tab = "notes";
           } }, "delete")))));
   }
+  if ((nb.notes || []).length) {
+    el.append(h("div", { class: "row-between", style: "margin-top:10px;flex-wrap:wrap;gap:6px" },
+      h("span", { class: "hint" }, "Converting a note turns it into a text source, so it can be cited and used in artifacts."),
+      h("button", { class: "ghost", id: "convertAllNotes", onclick: async (e) => {
+        e.target.disabled = true;
+        try {
+          const r = await api.post(`/notebooks/${nb.id}/notes/to-sources`, {});
+          toast(`${r.converted} note(s) became sources${r.skipped ? `, ${r.skipped} skipped` : ""}`);
+          await openNotebook(document.getElementById("app"), nb.id);
+          state.tab = "notes";
+        } catch (err) { toast(err.message, "err"); e.target.disabled = false; }
+      } }, "Convert all notes to sources")));
+  }
   if (!(nb.notes || []).length) el.append(h("p", { class: "empty" }, "No notes yet."));
 }
 
@@ -1742,6 +1782,7 @@ async function generate(kind, topic = "", extra = {}) {
     kind, topic,
     difficulty: extra.difficulty || "normal",
     audience: extra.audience || "general",
+    count: extra.count || "",
     source_ids: [...state.selected],
   });
   return r;
@@ -1837,6 +1878,10 @@ function renderStudy(el) {
         const r = await generate(kind, "", {
           difficulty: document.getElementById("artifactDifficulty")?.value || "normal",
           audience: document.getElementById("artifactAudience")?.value || "general",
+          // Deck size only reaches flashcards and quizzes; the server ignores it otherwise.
+          count: ["flashcards", "quiz"].includes(kind)
+            ? (document.getElementById("artifactDeckSize")?.value || "")
+            : "",
         });
         // Reload the stored artifact so review marks and the recorded difficulty are the
         // server's, not this tab's guess.
@@ -1853,6 +1898,9 @@ function renderStudy(el) {
   const difficulty = h("select", { id: "artifactDifficulty", "aria-label": "Difficulty" },
     [["easy", "easy"], ["normal", "normal"], ["hard", "hard"]]
       .map(([v, label]) => h("option", { value: v, selected: v === "normal" }, label)));
+  const deckSize = h("select", { id: "artifactDeckSize", "aria-label": "Deck size" },
+    [["fewer", "fewer (6)"], ["standard", "standard (12)"], ["more", "more (24)"]]
+      .map(([v, label]) => h("option", { value: v, selected: v === "standard" }, label)));
   const audience = h("select", { id: "artifactAudience", "aria-label": "Slide audience" },
     [["general", "general"], ["executive", "executive"], ["technical", "technical"]]
       .map(([v, label]) => h("option", { value: v }, label)));
@@ -1861,9 +1909,11 @@ function renderStudy(el) {
     row,
     h("div", { class: "row", style: "gap:8px;margin-top:8px;flex-wrap:wrap" },
       h("span", { class: "hint" }, "Difficulty"), difficulty,
+      h("span", { class: "hint" }, "Deck size"), deckSize,
       h("span", { class: "hint" }, "Slide audience"), audience),
     h("p", { class: "hint" },
-      "Difficulty changes how many cards are built and whether cloze recall comes first. " +
+      "Difficulty changes how the cards are built and whether cloze recall comes first; deck size " +
+      "changes how many cards a new flashcards or quiz artifact has (3-24). " +
       "Audience changes how many bullets go on a slide. Generated from the selected sources only; " +
       "click any citation marker to open its evidence."));
 }
@@ -1872,9 +1922,36 @@ function renderArtifact(payload, art = null) {
   const box = h("div", { class: "stack" });
   if (payload.kind === "flashcards") {
     // Review marks are the learner's own data: they live on the artifact (Journey F), so
-    // reopening it shows what was already marked instead of starting over.
+    // reopening it shows what was already marked instead of starting over. Order and cards are
+    // server state too — shuffle, restart and delete go through /study, never through the DOM.
     const marks = Object.assign({}, (art && art.reviews) || {});
     const summary = h("div", { class: "hint", id: "reviewSummary" });
+    let cards = (payload.cards || []).slice();
+    const cardList = h("div", { class: "stack", id: "deckCards" });
+    const studyNote = h("div", { class: "hint", id: "studyNote" });
+    let missedOnly = false;
+    const rerender = () => {
+      cardList.replaceChildren();
+      const visible = missedOnly ? cards.filter((c) => marks[c.id] === "unknown") : cards;
+      if (!visible.length) {
+        cardList.append(h("p", { class: "empty" },
+          missedOnly ? "No cards are marked for review — nothing to practise." : "This deck has no cards left."));
+      }
+      for (const c of visible) paintCard(c);
+    };
+    const studyOp = async (body, okMessage) => {
+      if (!art) { toast("Deck controls are stored with the artifact — reopen it from the notebook", "err"); return null; }
+      try {
+        const r = await api.post(`/artifacts/${art.id}/study`, body);
+        cards = ((r.payload && r.payload.cards) || []).slice();
+        for (const k of Object.keys(marks)) if (!cards.some((c) => c.id === k)) delete marks[k];
+        studyNote.textContent = `${r.note} · version ${r.version}`;
+        paint();
+        rerender();
+        toast(okMessage);
+        return r;
+      } catch (e) { toast(e.message, "err"); return null; }
+    };
     const paint = () => {
       const total = (payload.cards || []).length;
       const known = Object.values(marks).filter((v) => v === "known").length;
@@ -1899,7 +1976,7 @@ function renderArtifact(payload, art = null) {
         summary.dataset.serverKnown = String(r.counts.known);
       } catch (e) { toast(e.message, "err"); }
     };
-    for (const c of payload.cards || []) {
+    function paintCard(c) {
       const state0 = marks[c.id];
       const badge = h("span", {
         class: "badge" + (state0 === "known" ? " ok" : state0 === "unknown" ? " warn" : ""),
@@ -1911,7 +1988,7 @@ function renderArtifact(payload, art = null) {
         shown = !shown;
         inner.replaceChildren(h("div", { class: shown ? "back" : "" }, shown ? c.back : c.front));
       });
-      box.append(h("div", { class: "flashcard" }, inner,
+      cardList.append(h("div", { class: "flashcard" }, inner,
         h("div", { class: "row-between", style: "margin-top:4px" },
           h("span", { class: "hint" }, "click to flip"),
           h("button", { class: "cite", onclick: () => openViewer(c.citation.source_id, c.citation.chunk_id) },
@@ -1919,10 +1996,40 @@ function renderArtifact(payload, art = null) {
         h("div", { class: "row", style: "gap:6px;margin-top:6px;align-items:center" },
           h("button", { class: "ghost", title: "I knew this card", onclick: () => mark(c.id, true, badge) }, "knew it"),
           h("button", { class: "ghost", title: "Mark for another pass", onclick: () => mark(c.id, false, badge) }, "review again"),
+          h("button", { class: "ghost danger", title: "Remove this card from the deck", onclick: async () => {
+            if (!confirm("Remove this card from the deck? The source passage is untouched.")) return;
+            await studyOp({ action: "delete_card", card_id: c.id }, "Card removed from this deck");
+          } }, "delete"),
           badge)));
     }
     paint();
     box.append(summary);
+    box.append(h("div", { class: "row", style: "gap:6px;flex-wrap:wrap;margin:8px 0" },
+      h("button", { class: "ghost", id: "deckShuffle", onclick: () => studyOp({ action: "shuffle" }, "Deck shuffled") }, "shuffle"),
+      h("button", { class: "ghost", id: "deckRestart", title: "Clear the review marks and restore the original order", onclick: async () => {
+        if (!confirm("Restart this session? The review marks on this deck are cleared.")) return;
+        await studyOp({ action: "restart" }, "Session restarted");
+      } }, "restart"),
+      h("button", { class: "ghost", id: "deckMissed", onclick: () => {
+        missedOnly = !missedOnly;
+        document.getElementById("deckMissed").classList.toggle("primary", missedOnly);
+        rerender();
+      } }, "practise missed"),
+      art ? h("button", { class: "ghost", id: "deckCsv", title: "Download the deck as CSV", onclick: async () => {
+        try {
+          const res = await fetch(`/api/artifacts/${art.id}/export?format=csv`, { headers: authHeaders() });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          const a = h("a", { href: URL.createObjectURL(blob), download: `forge-deck-${art.id}.csv` });
+          document.body.append(a); a.click(); a.remove();
+        } catch (e) { toast(e.message, "err"); }
+      } }, "download CSV") : null));
+    box.append(studyNote);
+    box.append(cardList);
+    rerender();
+    box.append(h("p", { class: "hint" },
+      "Shuffle, restart and delete are stored on the artifact, so a reload keeps the deck you left. " +
+      "Review marks stay in the database; the CSV carries each card's source, locator and your mark."));
   } else if (payload.kind === "quiz") {
     for (const q of payload.questions || []) {
       const opts = h("div", { class: "opts" });
@@ -1936,8 +2043,12 @@ function renderArtifact(payload, art = null) {
         } }, o));
       });
       const expl = h("div", { class: "hint", hidden: true, style: "margin-top:6px" }, "Source: " + q.explanation);
+      // A hint points at the evidence; it never reveals the answer.
+      const hint = h("div", { class: "hint", hidden: true, "data-hint": q.id }, q.hint || "No hint was recorded for this question.");
       box.append(h("div", { class: "quiz-q" },
-        h("div", {}, q.question), opts, expl,
+        h("div", {}, q.question), opts,
+        h("button", { class: "ghost", "data-hint-btn": q.id, onclick: () => { hint.hidden = !hint.hidden; } }, "hint"),
+        hint, expl,
         h("button", { class: "cite", onclick: () => openViewer(q.citation.source_id, q.citation.chunk_id) },
           `[${q.citation.n}] ${q.citation.locator_label}`)));
     }
@@ -6136,6 +6247,9 @@ impl Api {
             ("POST", ["api", "notebooks", _, "shares"]) => "manage",
             ("POST", ["api", "notebooks", _, "duplicate"]) => "manage",
             ("POST", ["api", "artifacts", _, "regenerate"]) => "write",
+            ("POST", ["api", "artifacts", _, "study"]) => "write",
+            ("POST", ["api", "notebooks", _, "notes", "to-sources"]) => "write",
+            ("DELETE", ["api", "notebooks", _, "conversations"]) => "write",
             ("DELETE", ["api", "notebooks", ..]) => "manage",
             ("PATCH", ["api", "notebooks", ..]) => "manage",
             ("DELETE", ["api", "shares", ..]) => "manage",
@@ -6232,6 +6346,9 @@ impl Api {
             ("PATCH", ["api", "notes", nid]) => self.update_note(nid, req),
             ("DELETE", ["api", "notes", nid]) => Ok(self.delete_note(nid)),
             ("POST", ["api", "notes", nid, "to-source"]) => self.note_to_source(nid),
+            ("POST", ["api", "notebooks", id, "notes", "to-sources"]) => self.convert_all_notes(id),
+            ("POST", ["api", "artifacts", aid, "study"]) => self.study_op(aid, req),
+            ("DELETE", ["api", "notebooks", id, "conversations"]) => self.clear_chat_history(id),
             ("POST", ["api", "notebooks", id, "artifacts"]) => self.create_artifact(id, req),
             ("PATCH", ["api", "artifacts", aid]) => self.update_artifact(aid, req),
             ("POST", ["api", "artifacts", aid, "review"]) => self.review_card(aid, req),
@@ -6315,7 +6432,7 @@ impl Api {
             "artifact_lifecycle" => obj! {
                 "status" => "supported",
                 "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
-                "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
+                "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks; CSV for data tables and flashcard decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
                 "export_note" => "the PPTX is a written-by-hand OPC package and the PDF a written-by-hand page tree, verified by reading both back with Forge's own readers and (one-off, outside the build) python-pptx and pypdf",
             },
             "settings" => obj! {
@@ -6432,6 +6549,11 @@ impl Api {
                 "report" => "supported",
                 "mindmap" => "supported",
                 "study_guide" => "supported",
+                "study_deck_controls" => obj!{ "status" => "supported", "note" => "deck size (fewer/standard/more or 3-24), shuffle (seeded, deterministic), restart (clears marks, restores generated order), per-card delete; review marks persist" },
+                "study_results_screen" => obj!{ "status" => "unsupported", "reason" => "no results screen, paging or full-screen mode; the deck is a scrollable list with a practise-missed filter" },
+                "audio_overview" => obj!{ "status" => "unsupported", "reason" => "no text-to-speech: a narration script with per-segment citations is produced instead, and the artifact says no audio file exists" },
+                "video_overview" => obj!{ "status" => "unsupported", "reason" => "no renderer, no speech synthesis and no image generation" },
+                "infographic" => obj!{ "status" => "unsupported", "reason" => "no image generation and no rasteriser; PNG export returns 501 rather than a placeholder" },
                 "faq" => "supported",
                 "summary" => "supported",
                 "audio_overview" => "unsupported",
@@ -7231,6 +7353,232 @@ impl Api {
             conversation_count: counts.4,
         }
         .to_json()
+    }
+
+    /// `POST /api/artifacts/:id/study` — shuffle, restart or drop one card of a stored deck.
+    ///
+    /// These are edits to the deck the learner is holding, so they bump the version and are
+    /// persisted. Nothing is regenerated: the quotations in the deck do not change, only their
+    /// order and the review marks.
+    fn study_op(&self, aid: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let action = body.str_of("action").unwrap_or("").to_ascii_lowercase();
+        let card_id = body.str_of("card_id").unwrap_or("").to_string();
+        if !matches!(action.as_str(), "shuffle" | "restart" | "delete_card") {
+            return Err(err(
+                422,
+                "bad_action",
+                &format!("unknown action \"{}\" (use shuffle, restart or delete_card)", action),
+            ));
+        }
+        if action == "delete_card" && card_id.is_empty() {
+            return Err(err(422, "missing_card", "delete_card needs a card_id"));
+        }
+        self.store
+            .write(|db| {
+                let Some(art) = db.artifacts.iter_mut().find(|a| a.id == aid) else {
+                    return Err(err(404, "not_found", "artifact not found"));
+                };
+                if art.kind != "flashcards" && art.kind != "quiz" {
+                    return Err(err(
+                        409,
+                        "not_a_deck",
+                        "study operations exist for flashcards and quizzes; this artifact is not a study deck",
+                    ));
+                }
+                let list_key = if art.kind == "quiz" { "questions" } else { "cards" };
+                let Some(items) = art.payload.get(list_key).and_then(|v| v.as_arr()).cloned() else {
+                    return Err(err(409, "not_a_deck", "this deck has no items to reorder"));
+                };
+                let ids: Vec<String> = items
+                    .iter()
+                    .filter_map(|c| c.str_of("id").map(|s| s.to_string()))
+                    .collect();
+                let mut cleared = 0u64;
+                #[allow(unused_assignments)]
+                let mut note = String::new();
+                match action.as_str() {
+                    "shuffle" => {
+                        // Keep the generation order once, so "restart" can undo a shuffle.
+                        let original = art
+                            .payload
+                            .get("original_order")
+                            .and_then(|v| v.as_arr())
+                            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>())
+                            .unwrap_or_else(|| ids.clone());
+                        let order = artifacts::study::permute(&ids, art.version as u64 + 977);
+                        if let Value::Obj(m) = &mut art.payload {
+                            m.insert(
+                                "original_order".into(),
+                                Value::Arr(original.iter().map(|s| Value::from(s.as_str())).collect()),
+                            );
+                        }
+                        artifacts::study::reorder(&mut art.payload, &order);
+                        note = "shuffled; restart restores the order it was generated in".to_string();
+                    }
+                    "restart" => {
+                        cleared = art.reviews.len() as u64;
+                        art.reviews.clear();
+                        let original = art
+                            .payload
+                            .get("original_order")
+                            .and_then(|v| v.as_arr())
+                            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>());
+                        match original {
+                            Some(order) => {
+                                artifacts::study::reorder(&mut art.payload, &order);
+                                if let Value::Obj(m) = &mut art.payload {
+                                    m.remove("original_order");
+                                }
+                            }
+                            None => {} // never shuffled: the order already is the generation order
+                        }
+                        note = format!("session restarted; {} review mark(s) cleared", cleared);
+                    }
+                    "delete_card" => {
+                        if !ids.iter().any(|i| i == &card_id) {
+                            return Err(err(404, "card_not_found", "no card with that id in this deck"));
+                        }
+                        let kept: Vec<Value> = items
+                            .iter()
+                            .filter(|c| c.str_of("id") != Some(card_id.as_str()))
+                            .cloned()
+                            .collect();
+                        let mut kept: Vec<Value> = kept;
+                        for (i, c) in kept.iter_mut().enumerate() {
+                            if let Value::Obj(m) = c {
+                                m.insert("n".into(), Value::from((i + 1) as f64));
+                            }
+                        }
+                        let kept_ids: Vec<String> = kept
+                            .iter()
+                            .filter_map(|c| c.str_of("id").map(|s| s.to_string()))
+                            .collect();
+                        let marks_removed = art.reviews.remove(&card_id).is_some();
+                        if let Value::Obj(m) = &mut art.payload {
+                            m.insert(list_key.into(), Value::Arr(kept.clone()));
+                            m.insert("count".into(), Value::from(kept.len() as f64));
+                            if m.contains_key("original_order") {
+                                m.insert(
+                                    "original_order".into(),
+                                    Value::Arr(kept_ids.iter().map(|s| Value::from(s.as_str())).collect()),
+                                );
+                            }
+                        }
+                        note = format!(
+                            "card {} removed from this deck{}; the source passage is untouched",
+                            card_id,
+                            if marks_removed { " (and its mark)" } else { "" }
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+                art.version += 1;
+                art.updated_at = now_iso();
+                let remaining = art
+                    .payload
+                    .get(list_key)
+                    .and_then(|v| v.as_arr())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                Ok(ok(obj! {
+                    "id" => aid,
+                    "kind" => art.kind.as_str(),
+                    "action" => action.as_str(),
+                    "version" => art.version as u64,
+                    "count" => remaining as u64,
+                    "marks_cleared" => cleared,
+                    "note" => note,
+                    "payload" => art.payload.clone(),
+                }))
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?
+    }
+
+    /// `POST /api/notebooks/:id/notes/to-sources` — convert every note that is not a source yet.
+    fn convert_all_notes(&self, nb: &str) -> Result<Response, Response> {
+        let notes: Vec<crate::domain::Note> = self.store.read(|db| {
+            db.notes
+                .iter()
+                .filter(|n| n.notebook_id == nb)
+                .cloned()
+                .collect()
+        });
+        let converted_ids = self.store.read(|db| {
+            db.sources
+                .iter()
+                .filter(|s| s.notebook_id == nb)
+                .map(|s| s.meta_of("converted_from").to_string())
+                .filter(|v| !v.is_empty())
+                .collect::<Vec<String>>()
+        });
+        let mut converted: Vec<Value> = Vec::new();
+        let mut skipped: Vec<Value> = Vec::new();
+        for note in &notes {
+            if converted_ids.contains(&note.id) {
+                skipped.push(obj! { "note_id" => note.id.as_str(), "reason" => "already_a_source" });
+                continue;
+            }
+            if note.body.trim().is_empty() {
+                skipped.push(obj! { "note_id" => note.id.as_str(), "reason" => "empty_note" });
+                continue;
+            }
+            let mut meta = BTreeMap::new();
+            meta.insert("converted_from".to_string(), note.id.clone());
+            meta.insert("converted_at".to_string(), now_iso());
+            let title = if note.title.trim().is_empty() {
+                format!("Note from {}", note.updated_at.chars().take(10).collect::<String>())
+            } else {
+                note.title.clone()
+            };
+            match self.ingest_source(
+                None,
+                meta,
+                &note.notebook_id,
+                &clip(&title, 120),
+                "text",
+                "note",
+                note.body.as_bytes(),
+            ) {
+                Ok(_) => converted.push(obj! { "note_id" => note.id.as_str(), "title" => title.as_str() }),
+                Err(e) => skipped.push(obj! {
+                    "note_id" => note.id.as_str(),
+                    "reason" => format!("failed: {}", e.status),
+                }),
+            }
+        }
+        Ok(ok(obj! {
+            "notes" => notes.len() as u64,
+            "converted" => converted.len() as u64,
+            "skipped" => skipped.len() as u64,
+            "converted_notes" => Value::Arr(converted),
+            "skipped_notes" => Value::Arr(skipped),
+            "note" => "notes become ordinary text sources, so they can be cited and used in artifacts",
+        }))
+    }
+
+    /// `DELETE /api/notebooks/:id/conversations` — clear this notebook's chat history.
+    fn clear_chat_history(&self, nb: &str) -> Result<Response, Response> {
+        self.store
+            .write(|db| {
+                let before = db.conversations.len();
+                let mut messages = 0usize;
+                db.conversations.retain(|c| {
+                    if c.notebook_id == nb {
+                        messages += c.messages.len();
+                        false
+                    } else {
+                        true
+                    }
+                });
+                obj! {
+                    "deleted" => (before - db.conversations.len()) as u64,
+                    "messages_deleted" => messages as u64,
+                    "note" => "conversation transcripts deleted; notes and artifacts are untouched",
+                }
+            })
+            .map(ok)
+            .map_err(|e| err(500, "storage", &e.to_string()))
     }
 
     /// `POST /api/notebooks/:id/research`
@@ -8614,6 +8962,16 @@ impl Api {
             }
         };
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
+        // Deck size is honoured for flashcards and quizzes only; every other kind ignores it.
+        let count_raw = body.str_of("count").unwrap_or("");
+        let count = if count_raw.is_empty() {
+            None
+        } else {
+            match artifacts::size_from(count_raw, 12) {
+                Ok(n) => Some(n),
+                Err(e) => return Err(err(422, "bad_size", &e)),
+            }
+        };
 
         // A data table is a projection of a grid that is already stored, so it is generated from
         // the tables rather than from chunk text — and it says so in its payload.
@@ -8698,7 +9056,7 @@ impl Api {
             return Err(err(409, "no_sources", "select at least one ready source"));
         }
         let (title, payload) =
-            artifacts::generate_full(&kind, &chunks, &sources, &topic, difficulty, audience)
+            artifacts::generate_full(&kind, &chunks, &sources, &topic, difficulty, audience, count)
                 .map_err(|e| err(422, "bad_kind", &e))?;
         let art = Artifact {
             id: new_id("art"),
@@ -8712,6 +9070,7 @@ impl Api {
             topic: topic.clone(),
             difficulty: difficulty.as_str().to_string(),
             audience: audience.to_string(),
+            count: count.unwrap_or(0) as u32,
             ..Artifact::default()
         };
         let id = art.id.clone();
@@ -8736,7 +9095,7 @@ impl Api {
     /// and loses its review marks — because `card-3` of the old deck is not `card-3` of the new
     /// one, and carrying a "known" mark across that boundary would invent a fact about the user.
     fn regenerate_artifact(&self, aid: &str) -> Result<Response, Response> {
-        let (kind, topic, difficulty_s, audience, source_ids) = self
+        let (kind, topic, difficulty_s, audience, source_ids, stored_count) = self
             .store
             .read(|db| match db.artifacts.iter().find(|a| a.id == aid) {
                 None => None,
@@ -8746,6 +9105,7 @@ impl Api {
                     a.difficulty.clone(),
                     a.audience.clone(),
                     a.source_ids.clone(),
+                    a.count,
                 )),
             })
             .ok_or_else(|| err(404, "not_found", "artifact not found"))?;
@@ -8842,7 +9202,15 @@ impl Api {
             return Err(err(409, "no_sources", "none of the sources this artifact used are still ready"));
         }
         let (title, payload) =
-            artifacts::generate_full(&kind, &chunks, &sources, &topic, difficulty, &audience)
+            artifacts::generate_full(
+                &kind,
+                &chunks,
+                &sources,
+                &topic,
+                difficulty,
+                &audience,
+                if stored_count > 0 { Some(stored_count as usize) } else { None },
+            )
                 .map_err(|e| err(422, "bad_kind", &e))?;
         let out = self
             .store
@@ -9116,9 +9484,17 @@ impl Api {
                     ),
                 },
                 "csv" => {
-                    // A projection of a grid exports as a grid: header row, then the projected
-                    // values, RFC 4180 quoted. Only for data tables, because a CSV of a deck's
-                    // quotations would pretend that prose is tabular data.
+                    // Two artifacts are genuinely tabular: a projection of a stored grid, and a
+                    // flashcard deck (one card per row, with its evidence and the learner's
+                    // mark) — which is what the reference UI downloads. A CSV of prose would
+                    // pretend that prose is a table, so every other kind is refused.
+                    if art.kind == "flashcards" {
+                        let body = crate::export::flashcards_csv(art);
+                        return Response::new(200, "text/csv; charset=utf-8", body.into_bytes()).with_header(
+                            "Content-Disposition",
+                            &format!("attachment; filename=\"{}.csv\"", base),
+                        );
+                    }
                     if art.kind != "data_table" {
                         return err(
                             409,
@@ -9309,6 +9685,7 @@ impl Api {
                     topic: a.str_of("topic").unwrap_or("").to_string(),
                     difficulty: a.str_of("difficulty").unwrap_or("").to_string(),
                     audience: a.str_of("audience").unwrap_or("").to_string(),
+                    count: a.get("count").and_then(|c| c.as_f64()).unwrap_or(0.0) as u32,
                 });
             }
         }
@@ -10025,12 +10402,20 @@ pub fn quiz(chunks: &[Chunk], sources: &[Source], limit: usize) -> Value {
             let answer_index = options.iter().position(|o| o == &correct).unwrap_or(0);
             let stem = s.replacen(&correct, "_____", 1);
             let cit = citation_for(chunk, sources, questions.len() + 1);
+            // A hint that reveals the answer is not a hint. This one says where the answer is
+            // stated, which is what the citation already knows.
+            let hint = format!(
+                "Look at {} of “{}”: the answer is stated in that passage.",
+                cit.locator.human(),
+                cit.source_title.clone()
+            );
             questions.push(obj! {
                 "id" => format!("q-{}", questions.len() + 1),
                 "question" => stem,
                 "options" => Value::Arr(options.iter().map(|o| Value::from(o.as_str())).collect()),
                 "answer_index" => answer_index,
                 "answer" => correct.clone(),
+                "hint" => hint,
                 "explanation" => s.clone(),
                 "citation" => cit.to_json(),
             });
@@ -10347,6 +10732,25 @@ pub fn audio_script(chunks: &[Chunk], sources: &[Source], topic: &str) -> Value 
     }
 }
 
+/// Deck size as the reference UI names it: fewer / standard / more. A raw number is also
+/// accepted so a client can ask for an exact count; it is clamped rather than trusted.
+pub fn size_from(raw: &str, default_limit: usize) -> Result<usize, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" => Ok(default_limit),
+        "fewer" | "small" | "short" => Ok(6),
+        "standard" | "normal" | "medium" => Ok(12),
+        "more" | "large" | "long" => Ok(24),
+        other => match other.parse::<usize>() {
+            Ok(n) if n >= 3 => Ok(n.min(24)),
+            Ok(_) => Err(format!("deck size {} is too small (use at least 3 cards)", other)),
+            Err(_) => Err(format!(
+                "unknown deck size \"{}\" (use fewer, standard, more or a number 3-24)",
+                other
+            )),
+        },
+    }
+}
+
 pub fn generate(
     kind: &str,
     chunks: &[Chunk],
@@ -10363,7 +10767,21 @@ pub fn generate_with(
     topic: &str,
     difficulty: Difficulty,
 ) -> Result<(String, Value), String> {
-    generate_full(kind, chunks, sources, topic, difficulty, "general")
+    generate_sized(kind, chunks, sources, topic, difficulty, "general", None)
+}
+
+/// `count` only means something for the two study artifacts; every other kind ignores it, so a
+/// client cannot make a report shorter by passing a deck size.
+pub fn generate_sized(
+    kind: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    topic: &str,
+    difficulty: Difficulty,
+    audience: &str,
+    count: Option<usize>,
+) -> Result<(String, Value), String> {
+    generate_full(kind, chunks, sources, topic, difficulty, audience, count)
 }
 
 pub fn generate_full(
@@ -10373,13 +10791,14 @@ pub fn generate_full(
     topic: &str,
     difficulty: Difficulty,
     audience: &str,
+    count: Option<usize>,
 ) -> Result<(String, Value), String> {
     let title = match kind {
         "flashcards" => (
             format!("Forge flashcards ({})", difficulty.as_str()),
-            flashcards_with(chunks, sources, 12, difficulty),
+            flashcards_with(chunks, sources, count.unwrap_or(12), difficulty),
         ),
-        "quiz" => ("Forge quiz".to_string(), quiz(chunks, sources, 8)),
+        "quiz" => ("Forge quiz".to_string(), quiz(chunks, sources, count.unwrap_or(8))),
         "report" => {
             let t = if topic.trim().is_empty() { "Research report".to_string() } else { format!("Research report: {}", topic.trim()) };
             (t.clone(), report(chunks, sources, topic))
@@ -10520,6 +10939,132 @@ mod tests {
             assert!(generate(k, &chunks, &sources, "topic").is_ok(), "kind {}", k);
         }
     }
+    #[test]
+    fn deck_size_accepts_names_numbers_and_refuses_nonsense() {
+        assert_eq!(size_from("", 12).unwrap(), 12);
+        assert_eq!(size_from("fewer", 12).unwrap(), 6);
+        assert_eq!(size_from("standard", 6).unwrap(), 12);
+        assert_eq!(size_from("more", 6).unwrap(), 24);
+        assert_eq!(size_from("17", 12).unwrap(), 17);
+        assert_eq!(size_from("99", 12).unwrap(), 24, "a raw number is clamped, not trusted");
+        assert!(size_from("2", 12).is_err());
+        assert!(size_from("dozen", 12).is_err());
+    }
+
+    #[test]
+    fn a_sized_deck_is_actually_that_long() {
+        let chunks: Vec<Chunk> = (0..30)
+            .map(|i| {
+                chunk(
+                    &format!("k{}", i),
+                    "s1",
+                    &format!("Term{} is a definition number {}.", i, i),
+                    1,
+                )
+            })
+            .collect();
+        let sources = vec![src("s1")];
+        let (_, small) = generate_sized("flashcards", &chunks, &sources, "", Difficulty::Normal, "general", Some(6)).unwrap();
+        assert_eq!(small.get("cards").and_then(|c| c.as_arr()).map(|a| a.len()), Some(6));
+        let (_, big) = generate_sized("flashcards", &chunks, &sources, "", Difficulty::Normal, "general", Some(10)).unwrap();
+        assert_eq!(big.get("cards").and_then(|c| c.as_arr()).map(|a| a.len()), Some(10));
+        // The size is ignored by kinds that are not decks.
+        let (_, report) = generate_sized("report", &chunks, &sources, "", Difficulty::Normal, "general", Some(6)).unwrap();
+        assert_eq!(report.str_of("kind"), Some("report"));
+    }
+
+    #[test]
+    fn shuffle_is_deterministic_and_keeps_every_card() {
+        let ids: Vec<String> = (0..8).map(|i| format!("card-{}", i)).collect();
+        let a = study::permute(&ids, 42);
+        let b = study::permute(&ids, 42);
+        assert_eq!(a, b, "the same deck and seed give the same order");
+        assert_ne!(a, ids, "a shuffle that does not move anything is not a shuffle");
+        let mut sorted = a.clone();
+        sorted.sort();
+        let mut original = ids.clone();
+        original.sort();
+        assert_eq!(sorted, original, "a shuffle never loses or invents a card");
+        assert_eq!(study::permute(&[], 7).len(), 0);
+        assert_eq!(study::permute(&["card-1".to_string()], 7), vec!["card-1".to_string()]);
+    }
+
+    #[test]
+    fn a_quiz_question_has_a_hint_that_does_not_give_the_answer_away() {
+        let (chunks, sources) = corpus();
+        let v = quiz(&chunks, &sources, 5);
+        let qs = v.get("questions").and_then(|q| q.as_arr()).cloned().unwrap_or_default();
+        assert!(!qs.is_empty());
+        for q in qs {
+            let hint = q.str_of("hint").expect("every question carries a hint");
+            let answer = q.str_of("answer").unwrap_or("");
+            assert!(hint.contains("Look at"), "the hint points at the evidence: {}", hint);
+            if answer.len() > 3 {
+                assert!(
+                    !hint.to_lowercase().contains(&format!(" {}", answer.to_lowercase())),
+                    "the hint must not contain the answer {:?}: {}",
+                    answer,
+                    hint
+                );
+            }
+        }
+    }
+
+}
+
+/// Study-deck operations that change a stored deck without regenerating it. They live here, not
+/// in the UI, because the order and the marks are the learner's data and must survive a reload.
+pub mod study {
+    use crate::json::Value;
+
+    /// Deterministic Fisher-Yates driven by a small xorshift. No `rand` crate is available
+    /// offline, and a seeded permutation is reproducible: the same deck and seed give the same
+    /// order, which is what makes the shuffle testable.
+    pub fn permute(ids: &[String], seed: u64) -> Vec<String> {
+        let mut out = ids.to_vec();
+        if out.len() < 2 {
+            return out;
+        }
+        let mut state = seed | 1;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for i in (1..out.len()).rev() {
+            let j = (next() % (i as u64 + 1)) as usize;
+            out.swap(i, j);
+        }
+        out
+    }
+
+    /// Apply an order (list of card ids) to a payload's `cards`, dropping ids that no longer
+    /// exist and appending cards the order does not mention. Numbering (`n`) is rewritten so the
+    /// rendered deck never shows two cards with the same number.
+    pub fn reorder(payload: &mut Value, order: &[String]) -> usize {
+        let Some(cards) = payload.get("cards").and_then(|c| c.as_arr()).cloned() else {
+            return 0;
+        };
+        let mut remaining: Vec<Value> = cards.clone();
+        let mut ordered: Vec<Value> = Vec::new();
+        for id in order {
+            if let Some(pos) = remaining.iter().position(|c| c.str_of("id") == Some(id.as_str())) {
+                ordered.push(remaining.remove(pos));
+            }
+        }
+        ordered.extend(remaining);
+        for (i, c) in ordered.iter_mut().enumerate() {
+            if let Value::Obj(m) = c {
+                m.insert("n".into(), Value::from((i + 1) as f64));
+            }
+        }
+        if let Value::Obj(m) = payload {
+            m.insert("cards".into(), Value::Arr(ordered));
+        }
+        0
+    }
+
 }
 ```
 
@@ -12632,6 +13177,9 @@ pub struct Artifact {
     pub topic: String,
     pub difficulty: String,
     pub audience: String,
+    /// Requested deck size for flashcards/quiz (0 = the default). Kept so a regeneration
+    /// reproduces the same deck length instead of silently resizing it.
+    pub count: u32,
 }
 
 impl Default for Artifact {
@@ -12651,6 +13199,7 @@ impl Default for Artifact {
             topic: String::new(),
             difficulty: String::new(),
             audience: String::new(),
+            count: 0,
         }
     }
 }
@@ -12871,6 +13420,38 @@ fn cite_md(c: &Value) -> String {
 
 /// Render an artifact as Markdown, kind-aware. Unknown payloads fall back to a labelled JSON
 /// block rather than an empty file — a silent empty export is a lie about the content.
+/// Flashcards as CSV — the format the reference UI downloads. The mark column is the
+/// learner's own review state, and the citation columns are the evidence the card came from,
+/// so a deck opened in a spreadsheet still says where every answer was found.
+pub fn flashcards_csv(art: &Artifact) -> String {
+    let quote = |value: &str| -> String {
+        if value.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", value.replace('"', "\"\""))
+        } else {
+            value.to_string()
+        }
+    };
+    let mut out = String::from("n,card_id,front,back,source,locator,quote,mark\r\n");
+    let cards = art.payload.get("cards").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    for (i, c) in cards.iter().enumerate() {
+        let id = c.str_of("id").unwrap_or("");
+        let cit = c.get("citation").cloned().unwrap_or(crate::json::Value::Null);
+        let row = [
+            (i + 1).to_string(),
+            id.to_string(),
+            c.str_of("front").unwrap_or("").to_string(),
+            c.str_of("back").unwrap_or("").to_string(),
+            cit.str_of("source_title").unwrap_or("").to_string(),
+            cit.str_of("locator_label").unwrap_or("").to_string(),
+            cit.str_of("quote").unwrap_or("").to_string(),
+            art.reviews.get(id).cloned().unwrap_or_default(),
+        ];
+        out.push_str(&row.iter().map(|v| quote(v)).collect::<Vec<_>>().join(","));
+        out.push_str("\r\n");
+    }
+    out
+}
+
 pub fn to_markdown(art: &Artifact, sources: &[Source]) -> String {
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", art.title));
@@ -24388,6 +24969,277 @@ mod tests {
 }
 ```
 
+## `crates/forge-core/src/settings.rs`
+
+```rust
+//! Server-stored preferences, and honest usage reporting.
+//!
+//! The spec's §7.17 asks for user control: theme, appearance, defaults, storage, privacy and
+//! accessibility. The temptation with a settings screen is to offer everything and wire up half
+//! of it. This module takes the opposite line: every field here **changes behaviour somewhere**,
+//! and the things Forge cannot do (interface languages, model selection without a provider,
+//! server-side font rendering) are named as unsupported in `/api/capabilities` instead of being
+//! shown as dead toggles.
+//!
+//! Settings are stored in the same `db.json` as everything else, so a backup carries them and a
+//! restart keeps them — a preference that resets on restart is not a preference.
+
+use crate::grounded::{Length, Style};
+use crate::json::Value;
+use crate::obj;
+
+/// Theme names the UI understands.
+pub const THEMES: [&str; 3] = ["dark", "light", "system"];
+/// Library sort orders the notebook list accepts.
+pub const SORTS: [&str; 4] = ["recent", "title", "created", "sources"];
+/// Font scale bounds. Below 0.9 the interface stops being readable; above 1.4 the layout breaks.
+pub const FONT_SCALE_MIN: f64 = 0.9;
+pub const FONT_SCALE_MAX: f64 = 1.4;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Settings {
+    pub theme: String,
+    /// Multiplier applied to the root font size by the client.
+    pub font_scale: f64,
+    /// Removes non-essential animation and smooth scrolling.
+    pub reduced_motion: bool,
+    /// Raises contrast for text and borders.
+    pub high_contrast: bool,
+    /// Default answer presentation for a new chat.
+    pub default_style: String,
+    /// Default citation budget for a new chat.
+    pub default_length: String,
+    /// Default order of the notebook library.
+    pub library_sort: String,
+    /// Whether the library hides archived notebooks by default.
+    pub hide_archived: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            theme: "dark".into(),
+            font_scale: 1.0,
+            reduced_motion: false,
+            high_contrast: false,
+            default_style: "evidence".into(),
+            default_length: "standard".into(),
+            library_sort: "recent".into(),
+            hide_archived: true,
+        }
+    }
+}
+
+impl Settings {
+    pub fn to_json(&self) -> Value {
+        obj! {
+            "theme" => self.theme.as_str(),
+            "font_scale" => self.font_scale,
+            "reduced_motion" => self.reduced_motion,
+            "high_contrast" => self.high_contrast,
+            "default_style" => self.default_style.as_str(),
+            "default_length" => self.default_length.as_str(),
+            "library_sort" => self.library_sort.as_str(),
+            "hide_archived" => self.hide_archived,
+        }
+    }
+
+    pub fn from_json(v: &Value) -> Settings {
+        let d = Settings::default();
+        Settings {
+            theme: v.str_of("theme").map(|s| s.to_string()).unwrap_or(d.theme),
+            font_scale: v.get("font_scale").and_then(|x| x.as_f64()).unwrap_or(d.font_scale),
+            reduced_motion: v.get("reduced_motion").and_then(|x| x.as_bool()).unwrap_or(d.reduced_motion),
+            high_contrast: v.get("high_contrast").and_then(|x| x.as_bool()).unwrap_or(d.high_contrast),
+            default_style: v.str_of("default_style").map(|s| s.to_string()).unwrap_or(d.default_style),
+            default_length: v.str_of("default_length").map(|s| s.to_string()).unwrap_or(d.default_length),
+            library_sort: v.str_of("library_sort").map(|s| s.to_string()).unwrap_or(d.library_sort),
+            hide_archived: v.get("hide_archived").and_then(|x| x.as_bool()).unwrap_or(d.hide_archived),
+        }
+    }
+
+    /// Apply a partial update. Each rejected value is reported by name, so a client that sends one
+    /// bad field learns which one it was instead of losing the whole update.
+    pub fn apply(&mut self, patch: &Value) -> Vec<String> {
+        let mut rejected: Vec<String> = Vec::new();
+        if let Some(theme) = patch.str_of("theme") {
+            let t = theme.trim().to_ascii_lowercase();
+            if THEMES.contains(&t.as_str()) {
+                self.theme = t;
+            } else {
+                rejected.push(format!("theme must be one of {}", THEMES.join(", ")));
+            }
+        }
+        if let Some(scale) = patch.get("font_scale").and_then(|v| v.as_f64()) {
+            if (FONT_SCALE_MIN..=FONT_SCALE_MAX).contains(&scale) {
+                // Two decimals is what the UI renders; keeping the raw value would round-trip noise.
+                self.font_scale = (scale * 100.0).round() / 100.0;
+            } else {
+                rejected.push(format!(
+                    "font_scale must be between {} and {}",
+                    FONT_SCALE_MIN, FONT_SCALE_MAX
+                ));
+            }
+        }
+        if let Some(flag) = patch.get("reduced_motion").and_then(|v| v.as_bool()) {
+            self.reduced_motion = flag;
+        }
+        if let Some(flag) = patch.get("high_contrast").and_then(|v| v.as_bool()) {
+            self.high_contrast = flag;
+        }
+        if let Some(style) = patch.str_of("default_style") {
+            match Style::parse(style) {
+                Some(s) => self.default_style = s.as_str().to_string(),
+                None => rejected.push("default_style must be evidence, concise or detailed".into()),
+            }
+        }
+        if let Some(length) = patch.str_of("default_length") {
+            match Length::parse(length) {
+                Some(l) => self.default_length = l.as_str().to_string(),
+                None => rejected.push("default_length must be brief, standard or thorough".into()),
+            }
+        }
+        if let Some(sort) = patch.str_of("library_sort") {
+            let s = sort.trim().to_ascii_lowercase();
+            if SORTS.contains(&s.as_str()) {
+                self.library_sort = s;
+            } else {
+                rejected.push(format!("library_sort must be one of {}", SORTS.join(", ")));
+            }
+        }
+        if let Some(flag) = patch.get("hide_archived").and_then(|v| v.as_bool()) {
+            self.hide_archived = flag;
+        }
+        rejected
+    }
+}
+
+/// Real on-disk usage, measured rather than estimated from record counts.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Usage {
+    pub database_bytes: u64,
+    pub blob_bytes: u64,
+    pub blob_count: u64,
+    pub backup_count: u64,
+    pub backup_bytes: u64,
+    pub notebook_count: u64,
+    pub source_count: u64,
+    pub chunk_count: u64,
+    pub artifact_count: u64,
+    pub conversation_count: u64,
+}
+
+impl Usage {
+    pub fn total_bytes(&self) -> u64 {
+        self.database_bytes + self.blob_bytes + self.backup_bytes
+    }
+
+    pub fn to_json(&self) -> Value {
+        obj! {
+            "database_bytes" => self.database_bytes,
+            "blob_bytes" => self.blob_bytes,
+            "blob_count" => self.blob_count,
+            "backup_bytes" => self.backup_bytes,
+            "backup_count" => self.backup_count,
+            "total_bytes" => self.total_bytes(),
+            "records" => obj! {
+                "notebooks" => self.notebook_count,
+                "sources" => self.source_count,
+                "chunks" => self.chunk_count,
+                "artifacts" => self.artifact_count,
+                "conversations" => self.conversation_count,
+            },
+            "note" => "measured from the data directory: db.json plus the retained source blobs and rolling backups",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_the_documented_defaults() {
+        let s = Settings::default();
+        assert_eq!(s.theme, "dark");
+        assert_eq!(s.default_style, "evidence");
+        assert_eq!(s.default_length, "standard");
+        assert!(s.hide_archived);
+        assert_eq!(Settings::from_json(&s.to_json()), s, "settings round-trip through JSON");
+    }
+
+    #[test]
+    fn a_patch_changes_only_what_it_names() {
+        let mut s = Settings::default();
+        let rejected = s.apply(&crate::obj! { "theme" => "light" });
+        assert!(rejected.is_empty());
+        assert_eq!(s.theme, "light");
+        assert_eq!(s.default_length, "standard", "untouched fields keep their value");
+    }
+
+    #[test]
+    fn bad_values_are_named_and_not_applied() {
+        let mut s = Settings::default();
+        let rejected = s.apply(&crate::obj! {
+            "theme" => "neon",
+            "font_scale" => 9.0,
+            "default_style" => "shouty",
+            "default_length" => "epic",
+            "library_sort" => "vibes",
+        });
+        assert_eq!(rejected.len(), 5, "{:?}", rejected);
+        assert!(rejected.iter().any(|r| r.contains("theme")));
+        assert!(rejected.iter().any(|r| r.contains("font_scale")));
+        assert!(rejected.iter().any(|r| r.contains("default_style")));
+        assert!(rejected.iter().any(|r| r.contains("default_length")));
+        assert!(rejected.iter().any(|r| r.contains("library_sort")));
+        // Nothing bad was applied.
+        assert_eq!(s, Settings::default());
+    }
+
+    #[test]
+    fn good_values_in_the_same_patch_still_apply_when_others_are_rejected() {
+        let mut s = Settings::default();
+        let rejected = s.apply(&crate::obj! { "theme" => "light", "font_scale" => 99.0 });
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(s.theme, "light", "a good field is not thrown away because a sibling was bad");
+    }
+
+    #[test]
+    fn font_scale_is_rounded_to_what_the_ui_renders() {
+        let mut s = Settings::default();
+        assert!(s.apply(&crate::obj! { "font_scale" => 1.234 }).is_empty());
+        assert_eq!(s.font_scale, 1.23);
+    }
+
+    #[test]
+    fn an_old_database_with_no_settings_decodes_to_defaults() {
+        let s = Settings::from_json(&Value::Null);
+        assert_eq!(s, Settings::default());
+        // A partial object fills the rest from defaults rather than zeroing them.
+        let partial = Settings::from_json(&crate::obj! { "theme" => "light" });
+        assert_eq!(partial.theme, "light");
+        assert_eq!(partial.font_scale, 1.0);
+        assert_eq!(partial.default_style, "evidence");
+    }
+
+    #[test]
+    fn usage_adds_up_and_reports_what_it_measured() {
+        let u = Usage {
+            database_bytes: 1000,
+            blob_bytes: 250,
+            backup_bytes: 500,
+            blob_count: 2,
+            ..Default::default()
+        };
+        assert_eq!(u.total_bytes(), 1750);
+        let json = u.to_json();
+        assert_eq!(json.get("total_bytes").and_then(|v| v.as_f64()), Some(1750.0));
+        assert!(json.str_of("note").unwrap_or("").contains("measured"));
+    }
+}
+```
+
 ## `crates/forge-core/src/store.rs`
 
 ```rust
@@ -24936,6 +25788,7 @@ fn artifact_json(a: &Artifact) -> Value {
     m.insert("topic".into(), Value::from(a.topic.as_str()));
     m.insert("difficulty".into(), Value::from(a.difficulty.as_str()));
     m.insert("audience".into(), Value::from(a.audience.as_str()));
+    m.insert("count".into(), Value::from(a.count as f64));
     m.insert("updated_at".into(), Value::from(a.updated_at.as_str()));
     m.insert(
         "reviews".into(),
@@ -24969,6 +25822,7 @@ fn artifact_from(v: &Value) -> Artifact {
         topic: s(v, "topic"),
         difficulty: s(v, "difficulty"),
         audience: s(v, "audience"),
+        count: v.get("count").and_then(|c| c.as_f64()).unwrap_or(0.0) as u32,
     }
 }
 
@@ -30229,7 +31083,7 @@ fn github_repositories_are_read_as_readme_and_numbered_issues() {
     assert_eq!(st, 200, "{:?}", answer);
     assert!(answer.str_of("answer").unwrap_or("").contains("2.75"), "{:?}", answer);
     let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
-    assert!(!cites.is_empty());
+    assert!(!cites.is_empty(), "answer was: {:?}", answer);
     assert_eq!(cites[0].str_of("locator_label"), Some("section README"), "the README answered this one");
 
     // A question whose answer only exists in an issue is cited to that issue's number and title.
@@ -30464,7 +31318,7 @@ fn instruction_like_source_text_is_reported_and_not_followed() {
 
     // The citation the answer used is the factual sentence, verified against the chunk.
     let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
-    assert!(!cites.is_empty());
+    assert!(!cites.is_empty(), "answer was: {:?}", answer);
     assert!(cites[0].str_of("quote").unwrap_or("").contains("thirty days"));
     let (_, chunks) = s.json("GET", &format!("/api/sources/{}/chunks", src_id), None);
     let chunk_texts: Vec<String> = chunks
@@ -30598,7 +31452,8 @@ fn data_table_artifacts_project_a_real_grid_with_per_cell_evidence() {
     assert_eq!(st, 422);
     assert!(err.str_of("error").unwrap_or("").contains("projection is empty"), "{:?}", err);
 
-    // An artifact that is not a data table refuses CSV rather than exporting prose as a grid.
+    // A deck exports as a card table (one card per row, with its evidence); an artifact that is
+    // neither a grid nor a deck refuses CSV rather than exporting prose as a table.
     let (st, cards) = s.json(
         "POST",
         &format!("/api/notebooks/{}/artifacts", nb_id),
@@ -30606,7 +31461,20 @@ fn data_table_artifacts_project_a_real_grid_with_per_cell_evidence() {
     );
     assert_eq!(st, 201, "{:?}", cards);
     let card_id = cards.str_of("id").unwrap().to_string();
-    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=csv", card_id), None);
+    let (st, headers, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=csv", card_id));
+    assert_eq!(st, 200);
+    assert!(headers.to_ascii_lowercase().contains("text/csv"), "{}", headers);
+    let deck_csv = String::from_utf8(body).unwrap();
+    assert!(deck_csv.starts_with("n,card_id,front,back,source,locator,quote,mark\r\n"), "{}", deck_csv);
+    assert_eq!(deck_csv.lines().count(), cards.get("payload").and_then(|p| p.get("cards")).and_then(|c| c.as_arr()).map(|a| a.len()).unwrap_or(0) + 1);
+
+    let (st, report) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("report"))])),
+    );
+    assert_eq!(st, 201, "{:?}", report);
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=csv", report.str_of("id").unwrap()), None);
     assert_eq!(st, 409, "{:?}", body);
     assert_eq!(body.str_of("code"), Some("format_unavailable"));
 }
@@ -30847,6 +31715,253 @@ fn the_capability_page_names_what_settings_cannot_do() {
     }
     let usage = caps.get("usage").cloned().unwrap_or(Value::Bool(false));
     assert_eq!(usage.str_of("status"), Some("supported"));
+}
+
+#[test]
+fn study_decks_can_be_sized_shuffled_restarted_and_trimmed() {
+    let dir = tempdir("study");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Study"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    // Enough definitional sentences that a deck can actually reach 24 cards.
+    let mut text = String::new();
+    for i in 0..30 {
+        text.push_str(&format!("Term{} is a concept numbered {} in this document. ", i, i));
+    }
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[("title", Value::from("Terms")), ("text", Value::from(text))])),
+    );
+    assert_eq!(st, 201);
+
+    // Deck size is honoured, recorded, and refuses nonsense.
+    let (st, small) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("flashcards")), ("count", Value::from("fewer"))])),
+    );
+    assert_eq!(st, 201, "{:?}", small);
+    let art_id = small.str_of("id").unwrap().to_string();
+    let cards_of = |v: &Value| -> Vec<String> {
+        v.get("payload")
+            .and_then(|p| p.get("cards"))
+            .and_then(|c| c.as_arr())
+            .map(|a| a.iter().filter_map(|c| c.str_of("id").map(|s| s.to_string())).collect())
+            .unwrap_or_default()
+    };
+    let original = cards_of(&small);
+    assert_eq!(original.len(), 6, "fewer means six cards: {:?}", original);
+
+    let (st, bad) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("flashcards")), ("count", Value::from("dozen"))])),
+    );
+    assert_eq!(st, 422, "{:?}", bad);
+    assert_eq!(bad.str_of("code"), Some("bad_size"));
+
+    // A mark, then a shuffle that must keep every card and move at least one.
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/review", art_id),
+        Some(obj(&[("card_id", Value::from(original[0].as_str())), ("known", Value::Bool(false))])),
+    );
+    assert_eq!(st, 200);
+
+    let (st, shuffled) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", art_id),
+        Some(obj(&[("action", Value::from("shuffle"))])),
+    );
+    assert_eq!(st, 200, "{:?}", shuffled);
+    let after = cards_of(&shuffled);
+    let mut a = after.clone();
+    let mut b = original.clone();
+    a.sort();
+    b.sort();
+    assert_eq!(a, b, "a shuffle never loses a card");
+    assert_ne!(after, original, "a shuffle moves the deck");
+    assert_eq!(shuffled.get("version").and_then(|v| v.as_f64()), Some(2.0), "the edit is versioned");
+    let marks = s.json("GET", &format!("/api/artifacts/{}", art_id), None).1;
+    assert_eq!(
+        marks.get("reviews").and_then(|r| r.str_of(&original[0])),
+        Some("unknown"),
+        "a shuffle does not clear the learner's marks"
+    );
+
+    // Restart clears the marks and restores the generated order.
+    let (st, restarted) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", art_id),
+        Some(obj(&[("action", Value::from("restart"))])),
+    );
+    assert_eq!(st, 200, "{:?}", restarted);
+    assert_eq!(restarted.get("marks_cleared").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(cards_of(&restarted), original, "restart puts the deck back the way it was generated");
+    let (_, reloaded) = s.json("GET", &format!("/api/artifacts/{}", art_id), None);
+    assert_eq!(reloaded.get("reviews").and_then(|r| r.as_obj()).map(|m| m.len()), Some(0));
+
+    // Deleting one card trims the deck, renumbers it, and leaves the source alone.
+    let doomed = original[1].clone();
+    let (st, trimmed) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", art_id),
+        Some(obj(&[("action", Value::from("delete_card")), ("card_id", Value::from(doomed.as_str()))])),
+    );
+    assert_eq!(st, 200, "{:?}", trimmed);
+    let kept = cards_of(&trimmed);
+    assert_eq!(kept.len(), 5);
+    assert!(!kept.contains(&doomed));
+    let nums: Vec<f64> = trimmed
+        .get("payload")
+        .and_then(|p| p.get("cards"))
+        .and_then(|c| c.as_arr())
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.get("n").and_then(|n| n.as_f64()))
+        .collect();
+    assert_eq!(nums, vec![1.0, 2.0, 3.0, 4.0, 5.0], "numbering stays contiguous");
+
+    let (st, missing) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", art_id),
+        Some(obj(&[("action", Value::from("delete_card")), ("card_id", Value::from("card-999"))])),
+    );
+    assert_eq!(st, 404);
+    assert_eq!(missing.str_of("code"), Some("card_not_found"));
+
+    // These operations exist for decks, not for prose.
+    let (_, report) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("report"))])),
+    );
+    let (st, refusal) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", report.str_of("id").unwrap()),
+        Some(obj(&[("action", Value::from("shuffle"))])),
+    );
+    assert_eq!(st, 409);
+    assert_eq!(refusal.str_of("code"), Some("not_a_deck"));
+
+    // A quiz carries a hint per question, and a deck regeneration keeps its size.
+    let (st, quiz) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("quiz")), ("count", Value::from("4"))])),
+    );
+    assert_eq!(st, 201, "{:?}", quiz);
+    let qs = quiz.get("payload").and_then(|p| p.get("questions")).and_then(|q| q.as_arr()).cloned().unwrap_or_default();
+    assert!(!qs.is_empty());
+    for q in &qs {
+        assert!(q.str_of("hint").unwrap_or("").contains("Look at"), "{:?}", q);
+    }
+    let (st, regen) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/regenerate", quiz.str_of("id").unwrap()),
+        Some(obj(&[])),
+    );
+    assert_eq!(st, 200, "{:?}", regen);
+    assert_eq!(
+        regen.get("payload").and_then(|p| p.get("questions")).and_then(|q| q.as_arr()).map(|a| a.len()),
+        Some(qs.len()),
+        "regeneration reproduces the recorded deck size"
+    );
+}
+
+#[test]
+fn notes_convert_in_bulk_and_chat_history_can_be_cleared() {
+    let dir = tempdir("notes-bulk");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Notes"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Policy")),
+            ("text", Value::from("Retention is thirty days. Deletion happens after the review.")),
+        ])),
+    );
+    assert_eq!(st, 201);
+
+    let (st, note_a) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/notes", nb_id),
+        Some(obj(&[("title", Value::from("Retention")), ("body", Value::from("Retention is thirty days for records."))])),
+    );
+    assert_eq!(st, 201, "{:?}", note_a);
+    // An empty note is refused at creation, so emptiness never reaches the bulk conversion.
+    let (st, empty) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/notes", nb_id),
+        Some(obj(&[("title", Value::from("Empty")), ("body", Value::from("   "))])),
+    );
+    assert_eq!(st, 422, "{:?}", empty);
+
+    // Bulk conversion: the note becomes a citable source.
+    let (st, bulk) = s.json("POST", &format!("/api/notebooks/{}/notes/to-sources", nb_id), Some(obj(&[])));
+    assert_eq!(st, 200, "{:?}", bulk);
+    assert_eq!(bulk.get("notes").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(bulk.get("converted").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(bulk.get("skipped").and_then(|v| v.as_f64()), Some(0.0));
+
+    // Running it again converts nothing and says why.
+    let (st, again) = s.json("POST", &format!("/api/notebooks/{}/notes/to-sources", nb_id), Some(obj(&[])));
+    assert_eq!(st, 200);
+    assert_eq!(again.get("converted").and_then(|v| v.as_f64()), Some(0.0));
+    let reasons: Vec<String> = again
+        .get("skipped_notes")
+        .and_then(|v| v.as_arr())
+        .unwrap()
+        .iter()
+        .map(|s| s.str_of("reason").unwrap_or("").to_string())
+        .collect();
+    assert!(reasons.contains(&"already_a_source".to_string()), "{:?}", reasons);
+
+    // The converted note is a real source: it answers a question about a word only it contains,
+    // and the citation names the note as the source.
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("records"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty(), "answer was: {:?}", answer);
+    assert_eq!(cites[0].str_of("source_title"), Some("Retention"), "the note is the cited source");
+
+    // Chat history clears for this notebook only, and leaves notes and artifacts alone.
+    let (st, other) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Other"))])));
+    assert_eq!(st, 201);
+    let other_id = other.str_of("id").unwrap().to_string();
+    let (_, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", other_id),
+        Some(obj(&[("title", Value::from("Other text")), ("text", Value::from("Other notebooks keep their history."))])),
+    );
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", other_id),
+        Some(obj(&[("question", Value::from("history"))])),
+    );
+    assert_eq!(st, 200);
+
+    let (st, cleared) = s.json("DELETE", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    assert_eq!(st, 200, "{:?}", cleared);
+    assert!(cleared.get("messages_deleted").and_then(|v| v.as_f64()).unwrap_or(0.0) >= 2.0);
+    let (_, mine) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    assert_eq!(mine.get("conversations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(0));
+    let (_, theirs) = s.json("GET", &format!("/api/notebooks/{}/conversations", other_id), None);
+    assert_eq!(theirs.get("conversations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(1), "other notebooks are untouched");
+    let (_, notes_left) = s.json("GET", &format!("/api/notebooks/{}/notes", nb_id), None);
+    assert_eq!(notes_left.get("notes").and_then(|n| n.as_arr()).map(|a| a.len()), Some(1), "deleting a transcript does not delete the notes");
 }
 ```
 
@@ -34815,6 +35930,63 @@ records what the reachability actually is, because it changed how the features w
 Consequence: RSS/Atom and GitHub moved from "planned" to implemented source kinds with their own
 locator kinds (`item`, `issue`), and `UNKNOWN_AND_LIMITATIONS.md` states exactly which parts of a
 feed and of a repository are *not* read.
+
+## 2026-11-02 — full reference sweep: every documented feature, page by page
+
+The user asked for the reverse engineering to be *complete*: every feature, nothing left out.
+Forge cannot observe the product (no route, no account), so "complete" here means **every
+behaviour Google documents in its help centre**, recorded with its evidence label and mapped to
+a Forge status. The result is `docs/reference/REFERENCE_SURFACE.md` (**120 rows across 7 sections**).
+
+### Pages read this session (`OFFICIAL_DOCUMENTED`)
+
+| Page | What it settled |
+|---|---|
+| `…/answer/16206563` (Create a notebook) | Studio inventory incl. **video overviews** and **infographics** (new since our matrix), auto-emoji, auto-labels at 5+ sources, "View custom prompt", web notifications (desktop + animated tab title + unread dot), Docs/Sheets export, data-table customisation, artifact feedback |
+| `…/answer/16215270` (Sources) | full source-type list (audio, images, Play Books, Gemini Chats, YouTube, ePub, Drive), 500k words / 200 MB / 50 sources, URL = text only, YouTube = captions only and auto-deleted within 30 days if the video goes away, Drive auto-sync + "Click to sync", **"outputs do not change"** when a source changes |
+| `…/answer/16179559` (Chat) | Configure Chat = style (Default / Learning Guide / Custom) + response length; Save to note keeps formatting; Delete Chat History; live voice chat (mobile 18+); agentic actions (web search, code, files, charts, thinking steps); Stop with keep-generating |
+| `…/answer/16212820` (Audio Overview) | formats Deep Dive / The Brief / The Critique / The Debate, language (80+), length, custom prompt, playback speed, interactive mode, share/download |
+| `…/answer/16454555` (Video Overview) | formats Cinematic / Explainer / Short, 8 visual styles, producer-notes review (AI Ultra), generate now/later |
+| `…/answer/16212283` (Mind Maps) | zoom/pan, expand-collapse, node → question, download, chat chip |
+| `…/answer/16757456` (Slide decks) | customise format/language/length/sources + description, Revise with instructions and pending changes, delete/restore/reorder slides, present, PDF download |
+| `…/answer/16958963` (Flashcards & quizzes) | difficulty easy/medium/hard, custom prompt, **number: fewer/standard/more**, Explain, progress marks, results screen, Same/All/Only-missed retake, controls (prev/next, full screen, shuffle, delete a card, restart, **CSV download**), quiz hint |
+| `…/answer/16758265` (Infographics) | orientation, detail level, visual styles, PNG download, 18+ |
+| `…/answer/16261963` (Output language) | 80+ languages for *generated text*, default from the account |
+| `…/answer/17670842` (Usage limits) | compute-based limits, 5-hour refresh up to a weekly cap, plan multipliers, usage meter in chat and Studio, Generate later |
+| `…/answer/16322204` (Public notebooks) | public links, globe indicator, revoke semantics, featured notebooks, analytics |
+| `…/answer/16262519` (Notes) | notes are sources by default, cited in chat, included in artifacts, convert one/all, export to Docs, "editable once citations are removed" |
+
+### What the sweep changed
+
+Four features were missing from our matrix entirely rather than merely unimplemented:
+**video overviews**, **infographics**, **web notifications**, and **public notebook links**.
+Three of them are now written down as `blocked`/`refused` with reasons; the fourth (public
+links) is a decision, recorded as D20's stricter sibling.
+
+Two behaviours we had implemented *differently* turned out to be improvements, not drift:
+
+* the reference leaves artifacts stale ("outputs do not change"); Forge flags `stale` and
+  regenerates with the recorded parameters;
+* the reference's editor can share further, while the Workspace page says editors cannot —
+  Forge keeps the stricter reading.
+
+Eight behaviours were implementable offline and were built in this increment (see
+`docs/STATUS.md`): deck size, shuffle/restart/delete-card, deck CSV, quiz hints, bulk
+note→source conversion, chat-history deletion, and the study/quiz capability disclosures.
+
+### Numbers we deliberately did not copy
+
+500,000 words, 200 MB, 50 sources, 50 viewers, 80+ languages, 100 slides, 100k tokens, the
+5-hour quota refresh and the plan multipliers are *the reference's* numbers. Forge enforces its
+own documented byte cap and reports it; it has no plan tiers, so it has nothing honest to
+display in a quota meter.
+
+### Still unread (no claim made)
+
+`…/answer/16296687` (mobile app differences), `…/answer/16164461` (what Gemini Notebook is),
+`…/answer/16225229` (mode switching), `…/answer/16179536` (report a problem),
+`…/answer/16213268` (upgrade). They are linked from the pages above and are listed as `UNREAD`
+in the surface document.
 ```
 
 ## `docs/RESEARCH_PLAN.md`
@@ -35009,8 +36181,12 @@ untested it says so.
 | Area | State | Evidence |
 |---|---|---|
 | Build | `cargo build --offline` clean | zero deps, no network |
-| Rust tests | **310 passing, 0 failing** (26 `bininspect` + 242 lib + 37 e2e + 5 server) | `cargo test --offline` |
-| UI drive-through | **191 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Rust tests | **316 passing, 0 failing** (26 `bininspect` + 246 lib + 39 e2e + 5 server) | `cargo test --offline` |
+| UI drive-through | **214 assertions passing** | `node tests/ui-smoke.js` against a live server |
+| Reference surface | **120 documented behaviours** inventoried page by page from Google's help centre, each with an evidence label and a Forge status (45 done · 36 partial · 18 refused · 12 blocked · 6 n/a · 3 unread) | `docs/reference/REFERENCE_SURFACE.md`, `docs/RESEARCH_LOG.md` |
+| Study decks (§4.6) | flashcards and quizzes take a **deck size** (`fewer` 6 / `standard` 12 / `more` 24, or 3–24) that is recorded and reproduced by regeneration; **shuffle** (seeded, deterministic), **restart** (clears marks, restores generated order) and **delete card** are stored, versioned operations at `POST /api/artifacts/:id/study`; decks download as **CSV** with each card's source, locator, quote and the learner's mark; quiz questions carry a **hint that names the passage and never the answer** | `artifacts::study`, `artifacts::size_from`, `export::flashcards_csv` + 3 unit + 1 e2e + 12 UI |
+| Notes as sources (§4.1) | `POST /api/notebooks/:id/notes/to-sources` converts every note that can be converted, returns a per-note reason for each skip (`already_a_source`, `empty_note`, `failed`), is idempotent, and keeps the notes | `api::convert_all_notes` + e2e + 4 UI |
+| Chat history | `DELETE /api/notebooks/:id/conversations` deletes this notebook's transcripts only, reports how many messages went, and leaves notes, artifacts and sources untouched | `api::clear_chat_history` + e2e + 3 UI |
 | Settings (§7.17) | `GET/PATCH/DELETE /api/settings` stores theme (dark/light/system), text size 90–140 %, reduced motion, high contrast, default answer style/length, library sort and hide-archived in `db.json`. They survive a restart and travel inside a backup; a database written before settings existed decodes to the documented defaults. A `PATCH` that names a bad value returns **422** listing the refused fields *and still applies the good ones*; the panel adopts the server's state and names the rest. Settings and usage are **owner-only** (`manage`): a share link gets 403 rather than repainting everyone else's UI | `settings` (7 unit tests) + e2e `settings_persist_across_a_restart_and_storage_is_measured`, Journey J + 22 UI assertions |
 | Appearance applied, not just stored | theme → `data-theme`, text size → `--font-scale` on the root font size, reduced motion → `html[data-motion="reduced"]` (animations and transitions collapse, the spinner stops), high contrast → `html[data-contrast="high"]` (stronger borders and muted text). The panel previews each change before saving | `apps/web/styles.css`, `applyAppearance`, UI smoke |
 | Storage / usage | `GET /api/storage` **measures** the data directory: `db.json`, retained `blobs/`, rolling `backups/`, plus notebook/source/passage/artifact/conversation counts and a `note` saying it is measured. `POST /api/backup` remains the way to write one | `settings::Usage`, `api::storage_usage` + e2e |
@@ -35158,7 +36334,7 @@ regressed. `cargo test --offline --test e2e journey_` runs them together.
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 310 tests: 242 lib + 37 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 316 tests: 246 lib + 39 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -35166,10 +36342,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 191 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 214 assertions
 ```
 
-## Unit tests (242) — exact names from `cargo test --lib -- --list`
+## Unit tests (246) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -35270,7 +36446,7 @@ them, because it is unreachable.
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
 
-## End-to-end HTTP tests (37, real sockets)
+## End-to-end HTTP tests (39, real sockets)
 
 | Test | Proves |
 |---|---|
@@ -35286,7 +36462,7 @@ them, because it is unreachable.
 | `the_capability_page_names_what_settings_cannot_do` | `settings.status = "partial"` with a non-empty reason for interface language, model selection, server-side fonts, keyboard shortcuts and per-user settings; `usage.status = "supported"` |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
-## UI assertions (191, jsdom + live server)
+## UI assertions (214, jsdom + live server)
 
 Library rendering · engine badge from `/api/capabilities` · notebook creation via the
 form · three-pane workspace · paste-import · source list with passage counts ·
@@ -35580,6 +36756,15 @@ absent from the module on purpose.
 What is **not** tested here: a real browser rendering (jsdom has no layout, so the CSS
 rules are asserted as root attributes and variables, not as painted pixels), and
 high-contrast/reduced-motion on an operating system that requests them natively.
+
+## Study decks, notes bulk conversion and chat-history deletion (2026-11-02)
+
+| Layer | Tests | Proves |
+|---|---|---|
+| unit (`artifacts::tests`, 4 new) | `deck_size_accepts_names_numbers_and_refuses_nonsense`, `a_sized_deck_is_actually_that_long`, `shuffle_is_deterministic_and_keeps_every_card`, `a_quiz_question_has_a_hint_that_does_not_give_the_answer_away` |
+| e2e | `study_decks_can_be_sized_shuffled_restarted_and_trimmed` — `fewer` = 6 cards, `dozen` → 422 `bad_size`, shuffle keeps the multiset and moves the order and **keeps the mark**, restart restores the generated order and reports `marks_cleared`, delete trims and renumbers contiguously, unknown card 404, a report refuses study ops (409 `not_a_deck`), quiz hints exist, regeneration reproduces the recorded size |
+| e2e | `notes_convert_in_bulk_and_chat_history_can_be_cleared` — bulk conversion counts, per-note skip reasons, idempotency, the converted note is a citable source (`source_title` is the note's title), clearing history empties only that notebook and leaves notes alone |
+| UI (12 new) | deck-size control · `fewer`/`more` lengths · shuffle reported + persisted + order changes · CSV header and row count · delete trims and is stored · restart clears marks · practise-missed says there is nothing to practise · quiz hint visible and points at the passage · bulk note conversion creates a note source without deleting the note · chat history deletion empties conversations and keeps sources |
 
 ## Not covered (honest gaps)
 
@@ -36011,6 +37196,32 @@ Not implemented, and not claimed:
 * `PATCH /api/settings` is deliberately not atomic: a request with one bad value stores the good
   ones and returns 422 with the refused field names. A client that assumes "422 means nothing
   changed" would misreport the state; the UI re-reads the settings from the error body.
+
+## Study decks, notes conversion and chat history (2026-11-02)
+
+* **Deck size is a generation parameter, not a crop.** `count` accepts `fewer`/`standard`/`more`
+  or a number 3–24; anything else is refused with 422 `bad_size`. The realized deck can be
+  *shorter* than requested when the corpus has fewer definitional or cloze-able sentences — the
+  artifact reports the count it actually has, and no card is invented to reach the number.
+* **Shuffle is deterministic, not random.** No `rand` crate is available offline, so the
+  permutation is a seeded xorshift Fisher–Yates keyed on the artifact version. The same deck and
+  version always produce the same order, which is what makes it testable; it is *not* a
+  cryptographic shuffle and it is not reshuffled on every view.
+* **Restart means "clear the marks and restore the generated order"** — it does not delete the
+  deck, and it does not restore cards you deleted.
+* **Delete card is a deck edit, not a source edit.** The source passage stays; regeneration
+  brings the card back. Marks on a deleted card are removed with it.
+* Only `flashcards` and `quiz` accept study operations; every other artifact returns
+  409 `not_a_deck`. Deleting is per card, never "delete the deck" (that is artifact deletion).
+* **Quiz hints name the passage** ("Look at page 2 of 'Policy'"). They are not model hints and
+  they never contain the answer — but they do tell you where to look, which is the whole point.
+* **No results screen, no paging, no full-screen mode.** The deck renders as a scrollable list;
+  "practise missed" filters by the stored marks and says so when nothing is marked.
+* **Bulk note conversion is best-effort and honest about skips**: `already_a_source`,
+  `empty_note`, and `failed: <status>` per note. It cannot convert a note that the ingest path
+  refuses (for example, one whose body exceeds the source byte cap).
+* **Deleting chat history deletes transcripts only.** There is no undo, no archive, and no
+  per-message deletion. Shares see the same history list scoped to their notebook.
 ```
 
 ## `docs/USER_REQUIREMENTS.md`
@@ -40275,6 +41486,10 @@ end-to-end URL test, which asserts the answer to "What is the evidence floor?" c
 # Feature matrix — reference feature → Forge status
 
 Schema per `MASTER_FORGE.md` §3.5, trimmed to the columns that carry information today.
+
+> This matrix lists the features we track as engineering items. The **exhaustive inventory** of
+> every documented Gemini Notebook behaviour — including the ones we refuse or cannot build —
+> lives in `reference/REFERENCE_SURFACE.md` (120 rows, read page by page on 2026-11-02).
 **Evidence** describes the *reference* claim; **Forge** describes our code, verified by
 running it. No row is `LIVE_OBSERVED` — see `docs/RESEARCH_BLOCKERS.md`.
 
@@ -40302,6 +41517,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-20 | hidden worksheets stored but never cited | own policy (safety) | **done** | `Table.hidden` | unit |
 | SRC-21 | video/audio **stream metadata** (duration, tracks, codec, fps, size, rotation, language) | documented (§7.12; `ffmpeg -i` on our own fixture) | **partial (honest)** — ISO base media parsed by hand; Matroska/MPEG-TS/AVI are named then refused; **no frame decoding, captions or transcript**, and video is not a source | `media.rs`, `POST /api/media/inspect` | 10 unit + 1 e2e + 2 UI |
 | SRC-10 | rename source + labels | documented | **done** | `PATCH /api/sources/:id` | e2e |
+| SRC-24 | artifacts from a deck export as CSV | documented (download flashcards as CSV) | **done** — flashcards export a card table (`n, card_id, front, back, source, locator, quote, mark`); every other non-grid artifact still refuses CSV with 409 rather than pretending prose is tabular | `export::flashcards_csv`, `api::export_artifact` | e2e |
 | SRC-11 | images / OCR | documented | blocked | — | no OCR engine |
 | SRC-12 | audio → transcript | documented | blocked | — | no ASR; audio *track metadata* is readable (SRC-21) but speech is not |
 | SRC-13 | YouTube captions | documented | blocked | — | `yt-dlp` installs, but no route to a platform host and no per-video licence decision |
@@ -40315,6 +41531,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |
 | CHAT-04 | source selection scopes chat | documented | done | `app.js` + api | UI |
 | CHAT-05 | conversation persistence / history | documented | done — plus `GET /api/conversations/:id/export` (md/json) with the evidence each answer used | `store.rs`, `export::conversation_markdown` | e2e + 3 UI |
+| CHAT-09 | delete chat history | documented ("Delete Chat History") | **done** — deletes this notebook's transcripts only, reports messages deleted, and leaves notes, artifacts and sources untouched; the button says so | `DELETE /api/notebooks/:id/conversations` | e2e + 3 UI |
 | CHAT-06 | streaming + stop | documented | **done** — real chunked delivery (`Transfer-Encoding: chunked`) of NDJSON frames, rendered progressively; Stop aborts and the turn is **not** persisted. Not token-by-token: the extractive answer is computed before the first frame and the protocol says so | `http::StreamReply`, `api::chat_stream`, `app.js` | 2 unit + 1 e2e + 7 UI |
 | SEC-01 | source text treated as data, instruction-like passages reported (§11) | documented (security is a release blocker) | **done** — ingest counts, answer skips and reports, abstains with the reason when only instructions matched; questions *about* instructions may quote them | `untrusted.rs`, `grounded::answer_limited` | 5 unit + e2e + 4 UI |
 | CHAT-07 | style / length / custom instructions | documented | **partial** — style (evidence/concise/detailed) and length (brief/standard/thorough) are real and validated over the extractive engine; custom instructions are stored and echoed but cannot steer a model that is not reachable | `grounded.rs`, `api::chat`, UI selects | 4 unit + e2e + 8 UI |
@@ -40322,9 +41539,13 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
 | NOTE-02 | save answer as note | documented | done | UI | UI smoke |
 | NOTE-03 | note used as chat context | documented | **done** via conversion to a source (reference also allows direct selection) | `POST /api/notes/:id/to-source` | e2e Journey D |
+| NOTE-04 | convert every note to a source at once | documented ("Convert all notes to source") | **done** — converts what can be converted and returns a per-note reason for every skip (`already_a_source`, `empty_note`, `failed`); idempotent | `POST /api/notebooks/:id/notes/to-sources` | e2e + 4 UI |
 | ART-01 | summary / report / study guide / FAQ | documented | done | `artifacts.rs` | lib |
 | ART-02 | mind map | documented | done | `artifacts.rs` | lib + UI |
-| ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |
+| ART-03 | flashcards / quiz | documented | **done** — difficulty (easy/normal/hard), **deck size (fewer 6 / standard 12 / more 24, or 3–24)**, corner-drawn distractors, per-question hint that names the passage and never the answer | `artifacts::flashcards_with`, `quiz`, `size_from` | lib + e2e + UI |
+| ART-11 | flashcard deck controls: shuffle, restart, delete a card, download CSV | documented (flashcard controls) | **done** — `POST /api/artifacts/:id/study` with `shuffle` / `restart` / `delete_card`, versioned and persisted; shuffle is a seeded deterministic permutation; restart restores the generated order and clears marks; CSV carries each card's source, locator, quote and the learner's mark | `artifacts::study`, `export::flashcards_csv` | 2 unit + e2e + 5 UI |
+| ART-12 | practise only the cards you missed | documented (retake: only missed) | **partial (honest)** — a filter over the stored review marks; there is no results screen and no "same cards" mode | `app.js` (`#deckMissed`) | UI |
+| ART-13 | deck size honoured by regeneration | documented (number is a generation parameter) | **done** — `Artifact.count` is stored and reused, so regenerating reproduces the deck length instead of silently resizing it | `Artifact.count`, `regenerate_artifact` | e2e |
 | ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** — staleness is set on refresh, and `POST /api/artifacts/:id/regenerate` re-runs the stored parameters against the current text, clearing the flag and the review marks (and reporting how many) | `Artifact.stale`, `api::regenerate_artifact` | e2e + 3 UI |
 | ART-05 | audio / video overviews | documented | blocked | — | no TTS/ASR or renderer |
 | ART-07 | slides deck: generate, edit, reorder, delete/restore, version, export | documented | **done** — quotation deck with per-bullet citations, audience setting, versioned slide ops, Markdown/JSON export, and a real **PPTX** package plus **PDF** written by hand (`render`). PNG still returns 501 rather than a fake file | `artifacts::slides`, `api::update_artifact`, `export.rs`, `render.rs` | 5 PPTX + 4 PDF unit + e2e Journey H + 6 UI |
@@ -43321,6 +44542,20 @@ async function main() {
   const countFinal = (convsFinal.conversations || []).reduce((n, c) => n + c.message_count, 0);
   check("a completed stream is saved once", countFinal === countBefore + 2,
     `messages before=${countBefore} after=${countFinal}`);
+  // --- clearing chat history is a real deletion, and it says what it keeps
+  const clearBtn = $("#clearChat");
+  check("chat offers a way to delete its history", !!clearBtn);
+  if (clearBtn) {
+    clearBtn.click();
+    await wait(900);
+    const convsCleared = await (await fetch(`${BASE}/api/notebooks/${nbId}/conversations`)).json();
+    check("deleting chat history empties the notebook's conversations",
+      (convsCleared.conversations || []).length === 0,
+      `conversations=${(convsCleared.conversations || []).length}`);
+    const sourcesStill = await (await fetch(`${BASE}/api/notebooks/${nbId}/sources`)).json();
+    check("deleting chat history keeps the sources", (sourcesStill.sources || []).length > 0);
+  }
+
   // --- contradictory sources are shown side by side (Journey C)
   for (const [title, text] of [
     ["Lab run A", "The Calvin cycle fixes 3 carbon dioxide molecules per turn of the cycle."],
@@ -43437,6 +44672,97 @@ async function main() {
     check("quiz reveals the correct answer", !!q.querySelector(".opt.correct") && opts.every((o) => o.disabled));
   }
 
+  // --- deck size and the study controls (all stored server-side)
+  const sizeSel = $("#artifactDeckSize");
+  check("study tab exposes a deck size control", !!sizeSel && !!sizeSel.getAttribute("aria-label"),
+    sizeSel?.outerHTML?.slice(0, 120));
+  sizeSel.value = "fewer";
+  byText("#sideContent button", "Flashcards").click();
+  await wait(900);
+  const fewer = $$("#deckCards .flashcard").length;
+  check("fewer builds a short deck", fewer > 0 && fewer <= 6, `cards=${fewer}`);
+  sizeSel.value = "more";
+  byText("#sideContent button", "Flashcards").click();
+  await wait(900);
+  const more = $$("#deckCards .flashcard").length;
+  check("more builds a deck at least as long as fewer", more >= fewer, `fewer=${fewer} more=${more}`);
+  // Go back to the short deck for the control tests below.
+  sizeSel.value = "fewer";
+  byText("#sideContent button", "Flashcards").click();
+  await wait(900);
+
+  check("a deck exposes shuffle, restart, practise-missed and CSV controls",
+    !!$("#deckShuffle") && !!$("#deckRestart") && !!$("#deckMissed") && !!$("#deckCsv"),
+    ["#deckShuffle", "#deckRestart", "#deckMissed", "#deckCsv"].map((sel) => !!$(sel)).join(","));
+
+  const deckOrder = () => $$("#deckCards .flashcard").map((c) => c.querySelector(".inner").textContent);
+  const beforeShuffle = deckOrder();
+  const deckArt = (await (await fetch(`${BASE}/api/notebooks/${nbId}/artifacts`)).json()).artifacts
+    .filter((a) => a.kind === "flashcards").pop();
+  $("#deckShuffle").click();
+  await wait(800);
+  check("shuffle is reported and stored", /shuffled/.test($("#studyNote")?.textContent || ""), $("#studyNote")?.textContent);
+  check("shuffling keeps every card", $$("#deckCards .flashcard").length === beforeShuffle.length,
+    `cards=${$$("#deckCards .flashcard").length}`);
+  check("shuffling changes the order the learner sees", deckOrder().join("|") !== beforeShuffle.join("|"));
+  const shuffledArt = await (await fetch(`${BASE}/api/artifacts/${deckArt.id}`)).json();
+  check("the shuffle is persisted on the artifact", shuffledArt.version > deckArt.version, `version=${shuffledArt.version}`);
+
+  // A deck exports as a card table, with the learner's mark in its own column.
+  const storedCards = (shuffledArt.payload?.cards || []).length;
+  const csvRes = await fetch(`${BASE}/api/artifacts/${deckArt.id}/export?format=csv`);
+  const csvText = await csvRes.text();
+  check("a deck downloads as CSV with citations and marks",
+    csvRes.ok && /^n,card_id,front,back,source,locator,quote,mark/.test(csvText) &&
+      csvText.trim().split("\n").length === storedCards + 1,
+    `${csvRes.status} rows=${csvText.trim().split("\n").length} cards=${storedCards}`);
+
+  // Deleting one card trims the deck and leaves the source alone.
+  const beforeCardDelete = $$("#deckCards .flashcard").length;
+  const delBtn = [...$$("#deckCards .flashcard button")].find((b) => b.textContent.trim() === "delete");
+  delBtn.click();
+  await wait(800);
+  check("deleting a card trims the deck", $$("#deckCards .flashcard").length === beforeCardDelete - 1,
+    `cards=${$$("#deckCards .flashcard").length}`);
+  const trimmed = await (await fetch(`${BASE}/api/artifacts/${deckArt.id}`)).json();
+  check("the trimmed deck is stored, not just hidden",
+    (trimmed.payload?.cards || []).length === beforeCardDelete - 1 && trimmed.payload.count === beforeCardDelete - 1,
+    `cards=${trimmed.payload?.cards?.length} count=${trimmed.payload?.count}`);
+
+  // Restart clears the marks and puts the generated order back.
+  const firstCard = $$("#deckCards .flashcard")[0];
+  [...firstCard.querySelectorAll("button")].find((b) => /knew it/.test(b.textContent)).click();
+  await wait(500);
+  $("#deckRestart").click();
+  await wait(900);
+  check("restart clears the marks and says so", /restarted/.test($("#studyNote")?.textContent || ""),
+    $("#studyNote")?.textContent);
+  const afterRestart = await (await fetch(`${BASE}/api/artifacts/${deckArt.id}`)).json();
+  check("restart leaves no marks on the stored deck", Object.keys(afterRestart.reviews || {}).length === 0,
+    JSON.stringify(afterRestart.reviews));
+
+  // Practise-missed is a view filter over the stored marks, and it never invents cards.
+  $("#deckMissed").click();
+  await wait(300);
+  check("practise-missed with no missed cards says so instead of showing everything",
+    /nothing to practise/i.test($("#deckCards")?.textContent || ""), $("#deckCards")?.textContent);
+  $("#deckMissed").click();
+  await wait(300);
+
+  // --- a quiz hint points at the evidence without giving the answer
+  byText("#sideContent button", "Quiz").click();
+  await wait(800);
+  const hintBtn = $("[data-hint-btn]");
+  check("every quiz question can show a hint", !!hintBtn);
+  if (hintBtn) {
+    const hintId = hintBtn.getAttribute("data-hint-btn");
+    hintBtn.click();
+    await wait(80);
+    const hintBox = $(`[data-hint="${hintId}"]`);
+    check("the hint points at the passage, not the answer",
+      !!hintBox && !hintBox.hidden && /Look at/.test(hintBox.textContent), hintBox?.textContent);
+  }
+
   // --- mind map
   byText("#sideContent button", "Concept map").click();
   await wait(700);
@@ -43542,6 +44868,22 @@ async function main() {
   check("note offers conversion to a source",
     [...window.document.querySelectorAll("#sideContent button")]
       .some((b) => /use as source/i.test(b.textContent)));
+  // Every note can be converted at once; the notes stay, and each becomes a citable source.
+  const convertAll = $("#convertAllNotes");
+  check("notes can be converted to sources in bulk", !!convertAll);
+  if (convertAll) {
+    convertAll.click();
+    await wait(1200);
+    const afterBulk = await (await fetch(`${BASE}/api/notebooks/${nbId}/sources`)).json();
+    const noteSources = (afterBulk.sources || []).filter((s0) => s0.origin === "note");
+    check("bulk conversion created a note source", noteSources.length >= 1,
+      `noteSources=${noteSources.length}`);
+    check("the note source is labelled as a note conversion",
+      (noteSources[0]?.meta || {}).converted_from?.length > 0, JSON.stringify(noteSources[0]?.meta));
+    const notesAfter = await (await fetch(`${BASE}/api/notebooks/${nbId}/notes`)).json();
+    check("converting does not delete the note", (notesAfter.notes || []).length >= 1,
+      `notes=${(notesAfter.notes || []).length}`);
+  }
 
   // --- report
   byText(".tabs button", "Report").click();

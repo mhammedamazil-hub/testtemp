@@ -441,7 +441,7 @@ async function openNotebook(app, id, artifactId) {
 
   // --- left: sources
   const sourcesPane = h("div", { class: "pane" });
-  const chatPane = h("div", { class: "pane", style: "padding:0;display:flex;flex-direction:column" });
+  const chatPane = h("div", { class: "pane chat", style: "padding:0;display:flex;flex-direction:column" });
   const sidePane = h("div", { class: "pane" });
   workspace.append(sourcesPane, chatPane, sidePane);
   app.replaceChildren(workspace);
@@ -1035,14 +1035,34 @@ function lengthHint(length) {
 /// the live message list rather than baked into the first render, because the conversation id
 /// only exists after the first answer lands.
 function ensureChatExport(scroll = document.getElementById("messages")) {
-  if (!scroll || !state.conversationId) return;
-  if (scroll.querySelector("#exportChat")) return;
-  scroll.prepend(h("div", { class: "row-between", style: "gap:8px;margin-bottom:8px" },
+  if (!scroll) return;
+  // Re-render rather than skip: the export button only exists once there is a conversation, and
+  // clearing the history must not leave a stale toolbar behind.
+  scroll.querySelector("#chatTools")?.remove();
+  const nb = state.nb;
+  scroll.prepend(h("div", { class: "row-between", style: "gap:8px;margin-bottom:8px", id: "chatTools" },
     h("span", { class: "hint" }, "conversation"),
-    h("button", {
-      class: "ghost", id: "exportChat", title: "Download this conversation with its citations",
-      onclick: () => downloadConversation(state.conversationId),
-    }, "Export transcript")));
+    h("div", { class: "row", style: "gap:6px" },
+      state.conversationId
+        ? h("button", {
+            class: "ghost", id: "exportChat", title: "Download this conversation with its citations",
+            onclick: () => downloadConversation(state.conversationId),
+          }, "Export transcript")
+        : null,
+      // Clearing history is a real deletion of the transcripts in this notebook — not of the
+      // notes, artifacts or sources built from them — and the button says so.
+      h("button", { class: "ghost danger", id: "clearChat", title: "Delete every chat transcript in this notebook",
+        onclick: async () => {
+          if (!nb) return;
+          if (!confirm("Delete this notebook's chat history? Notes, artifacts and sources are kept.")) return;
+          try {
+            const r = await api.del(`/notebooks/${nb.id}/conversations`);
+            state.messages = [];
+            state.conversationId = null;
+            renderChat(document.querySelector(".pane.chat"));
+            toast(`${r.deleted} conversation(s) deleted`);
+          } catch (e) { toast(e.message, "err"); }
+        } }, "Delete chat history"))));
 }
 
 function renderChat(pane, onlyComposer = false) {
@@ -1317,6 +1337,19 @@ function renderNotes(el) {
             state.tab = "notes";
           } }, "delete")))));
   }
+  if ((nb.notes || []).length) {
+    el.append(h("div", { class: "row-between", style: "margin-top:10px;flex-wrap:wrap;gap:6px" },
+      h("span", { class: "hint" }, "Converting a note turns it into a text source, so it can be cited and used in artifacts."),
+      h("button", { class: "ghost", id: "convertAllNotes", onclick: async (e) => {
+        e.target.disabled = true;
+        try {
+          const r = await api.post(`/notebooks/${nb.id}/notes/to-sources`, {});
+          toast(`${r.converted} note(s) became sources${r.skipped ? `, ${r.skipped} skipped` : ""}`);
+          await openNotebook(document.getElementById("app"), nb.id);
+          state.tab = "notes";
+        } catch (err) { toast(err.message, "err"); e.target.disabled = false; }
+      } }, "Convert all notes to sources")));
+  }
   if (!(nb.notes || []).length) el.append(h("p", { class: "empty" }, "No notes yet."));
 }
 
@@ -1329,6 +1362,7 @@ async function generate(kind, topic = "", extra = {}) {
     kind, topic,
     difficulty: extra.difficulty || "normal",
     audience: extra.audience || "general",
+    count: extra.count || "",
     source_ids: [...state.selected],
   });
   return r;
@@ -1424,6 +1458,10 @@ function renderStudy(el) {
         const r = await generate(kind, "", {
           difficulty: document.getElementById("artifactDifficulty")?.value || "normal",
           audience: document.getElementById("artifactAudience")?.value || "general",
+          // Deck size only reaches flashcards and quizzes; the server ignores it otherwise.
+          count: ["flashcards", "quiz"].includes(kind)
+            ? (document.getElementById("artifactDeckSize")?.value || "")
+            : "",
         });
         // Reload the stored artifact so review marks and the recorded difficulty are the
         // server's, not this tab's guess.
@@ -1440,6 +1478,9 @@ function renderStudy(el) {
   const difficulty = h("select", { id: "artifactDifficulty", "aria-label": "Difficulty" },
     [["easy", "easy"], ["normal", "normal"], ["hard", "hard"]]
       .map(([v, label]) => h("option", { value: v, selected: v === "normal" }, label)));
+  const deckSize = h("select", { id: "artifactDeckSize", "aria-label": "Deck size" },
+    [["fewer", "fewer (6)"], ["standard", "standard (12)"], ["more", "more (24)"]]
+      .map(([v, label]) => h("option", { value: v, selected: v === "standard" }, label)));
   const audience = h("select", { id: "artifactAudience", "aria-label": "Slide audience" },
     [["general", "general"], ["executive", "executive"], ["technical", "technical"]]
       .map(([v, label]) => h("option", { value: v }, label)));
@@ -1448,9 +1489,11 @@ function renderStudy(el) {
     row,
     h("div", { class: "row", style: "gap:8px;margin-top:8px;flex-wrap:wrap" },
       h("span", { class: "hint" }, "Difficulty"), difficulty,
+      h("span", { class: "hint" }, "Deck size"), deckSize,
       h("span", { class: "hint" }, "Slide audience"), audience),
     h("p", { class: "hint" },
-      "Difficulty changes how many cards are built and whether cloze recall comes first. " +
+      "Difficulty changes how the cards are built and whether cloze recall comes first; deck size " +
+      "changes how many cards a new flashcards or quiz artifact has (3-24). " +
       "Audience changes how many bullets go on a slide. Generated from the selected sources only; " +
       "click any citation marker to open its evidence."));
 }
@@ -1459,9 +1502,36 @@ function renderArtifact(payload, art = null) {
   const box = h("div", { class: "stack" });
   if (payload.kind === "flashcards") {
     // Review marks are the learner's own data: they live on the artifact (Journey F), so
-    // reopening it shows what was already marked instead of starting over.
+    // reopening it shows what was already marked instead of starting over. Order and cards are
+    // server state too — shuffle, restart and delete go through /study, never through the DOM.
     const marks = Object.assign({}, (art && art.reviews) || {});
     const summary = h("div", { class: "hint", id: "reviewSummary" });
+    let cards = (payload.cards || []).slice();
+    const cardList = h("div", { class: "stack", id: "deckCards" });
+    const studyNote = h("div", { class: "hint", id: "studyNote" });
+    let missedOnly = false;
+    const rerender = () => {
+      cardList.replaceChildren();
+      const visible = missedOnly ? cards.filter((c) => marks[c.id] === "unknown") : cards;
+      if (!visible.length) {
+        cardList.append(h("p", { class: "empty" },
+          missedOnly ? "No cards are marked for review — nothing to practise." : "This deck has no cards left."));
+      }
+      for (const c of visible) paintCard(c);
+    };
+    const studyOp = async (body, okMessage) => {
+      if (!art) { toast("Deck controls are stored with the artifact — reopen it from the notebook", "err"); return null; }
+      try {
+        const r = await api.post(`/artifacts/${art.id}/study`, body);
+        cards = ((r.payload && r.payload.cards) || []).slice();
+        for (const k of Object.keys(marks)) if (!cards.some((c) => c.id === k)) delete marks[k];
+        studyNote.textContent = `${r.note} · version ${r.version}`;
+        paint();
+        rerender();
+        toast(okMessage);
+        return r;
+      } catch (e) { toast(e.message, "err"); return null; }
+    };
     const paint = () => {
       const total = (payload.cards || []).length;
       const known = Object.values(marks).filter((v) => v === "known").length;
@@ -1486,7 +1556,7 @@ function renderArtifact(payload, art = null) {
         summary.dataset.serverKnown = String(r.counts.known);
       } catch (e) { toast(e.message, "err"); }
     };
-    for (const c of payload.cards || []) {
+    function paintCard(c) {
       const state0 = marks[c.id];
       const badge = h("span", {
         class: "badge" + (state0 === "known" ? " ok" : state0 === "unknown" ? " warn" : ""),
@@ -1498,7 +1568,7 @@ function renderArtifact(payload, art = null) {
         shown = !shown;
         inner.replaceChildren(h("div", { class: shown ? "back" : "" }, shown ? c.back : c.front));
       });
-      box.append(h("div", { class: "flashcard" }, inner,
+      cardList.append(h("div", { class: "flashcard" }, inner,
         h("div", { class: "row-between", style: "margin-top:4px" },
           h("span", { class: "hint" }, "click to flip"),
           h("button", { class: "cite", onclick: () => openViewer(c.citation.source_id, c.citation.chunk_id) },
@@ -1506,10 +1576,40 @@ function renderArtifact(payload, art = null) {
         h("div", { class: "row", style: "gap:6px;margin-top:6px;align-items:center" },
           h("button", { class: "ghost", title: "I knew this card", onclick: () => mark(c.id, true, badge) }, "knew it"),
           h("button", { class: "ghost", title: "Mark for another pass", onclick: () => mark(c.id, false, badge) }, "review again"),
+          h("button", { class: "ghost danger", title: "Remove this card from the deck", onclick: async () => {
+            if (!confirm("Remove this card from the deck? The source passage is untouched.")) return;
+            await studyOp({ action: "delete_card", card_id: c.id }, "Card removed from this deck");
+          } }, "delete"),
           badge)));
     }
     paint();
     box.append(summary);
+    box.append(h("div", { class: "row", style: "gap:6px;flex-wrap:wrap;margin:8px 0" },
+      h("button", { class: "ghost", id: "deckShuffle", onclick: () => studyOp({ action: "shuffle" }, "Deck shuffled") }, "shuffle"),
+      h("button", { class: "ghost", id: "deckRestart", title: "Clear the review marks and restore the original order", onclick: async () => {
+        if (!confirm("Restart this session? The review marks on this deck are cleared.")) return;
+        await studyOp({ action: "restart" }, "Session restarted");
+      } }, "restart"),
+      h("button", { class: "ghost", id: "deckMissed", onclick: () => {
+        missedOnly = !missedOnly;
+        document.getElementById("deckMissed").classList.toggle("primary", missedOnly);
+        rerender();
+      } }, "practise missed"),
+      art ? h("button", { class: "ghost", id: "deckCsv", title: "Download the deck as CSV", onclick: async () => {
+        try {
+          const res = await fetch(`/api/artifacts/${art.id}/export?format=csv`, { headers: authHeaders() });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          const a = h("a", { href: URL.createObjectURL(blob), download: `forge-deck-${art.id}.csv` });
+          document.body.append(a); a.click(); a.remove();
+        } catch (e) { toast(e.message, "err"); }
+      } }, "download CSV") : null));
+    box.append(studyNote);
+    box.append(cardList);
+    rerender();
+    box.append(h("p", { class: "hint" },
+      "Shuffle, restart and delete are stored on the artifact, so a reload keeps the deck you left. " +
+      "Review marks stay in the database; the CSV carries each card's source, locator and your mark."));
   } else if (payload.kind === "quiz") {
     for (const q of payload.questions || []) {
       const opts = h("div", { class: "opts" });
@@ -1523,8 +1623,12 @@ function renderArtifact(payload, art = null) {
         } }, o));
       });
       const expl = h("div", { class: "hint", hidden: true, style: "margin-top:6px" }, "Source: " + q.explanation);
+      // A hint points at the evidence; it never reveals the answer.
+      const hint = h("div", { class: "hint", hidden: true, "data-hint": q.id }, q.hint || "No hint was recorded for this question.");
       box.append(h("div", { class: "quiz-q" },
-        h("div", {}, q.question), opts, expl,
+        h("div", {}, q.question), opts,
+        h("button", { class: "ghost", "data-hint-btn": q.id, onclick: () => { hint.hidden = !hint.hidden; } }, "hint"),
+        hint, expl,
         h("button", { class: "cite", onclick: () => openViewer(q.citation.source_id, q.citation.chunk_id) },
           `[${q.citation.n}] ${q.citation.locator_label}`)));
     }

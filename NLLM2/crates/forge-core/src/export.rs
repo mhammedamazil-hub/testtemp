@@ -41,6 +41,38 @@ fn cite_md(c: &Value) -> String {
 
 /// Render an artifact as Markdown, kind-aware. Unknown payloads fall back to a labelled JSON
 /// block rather than an empty file — a silent empty export is a lie about the content.
+/// Flashcards as CSV — the format the reference UI downloads. The mark column is the
+/// learner's own review state, and the citation columns are the evidence the card came from,
+/// so a deck opened in a spreadsheet still says where every answer was found.
+pub fn flashcards_csv(art: &Artifact) -> String {
+    let quote = |value: &str| -> String {
+        if value.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", value.replace('"', "\"\""))
+        } else {
+            value.to_string()
+        }
+    };
+    let mut out = String::from("n,card_id,front,back,source,locator,quote,mark\r\n");
+    let cards = art.payload.get("cards").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    for (i, c) in cards.iter().enumerate() {
+        let id = c.str_of("id").unwrap_or("");
+        let cit = c.get("citation").cloned().unwrap_or(crate::json::Value::Null);
+        let row = [
+            (i + 1).to_string(),
+            id.to_string(),
+            c.str_of("front").unwrap_or("").to_string(),
+            c.str_of("back").unwrap_or("").to_string(),
+            cit.str_of("source_title").unwrap_or("").to_string(),
+            cit.str_of("locator_label").unwrap_or("").to_string(),
+            cit.str_of("quote").unwrap_or("").to_string(),
+            art.reviews.get(id).cloned().unwrap_or_default(),
+        ];
+        out.push_str(&row.iter().map(|v| quote(v)).collect::<Vec<_>>().join(","));
+        out.push_str("\r\n");
+    }
+    out
+}
+
 pub fn to_markdown(art: &Artifact, sources: &[Source]) -> String {
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", art.title));

@@ -136,3 +136,60 @@ records what the reachability actually is, because it changed how the features w
 Consequence: RSS/Atom and GitHub moved from "planned" to implemented source kinds with their own
 locator kinds (`item`, `issue`), and `UNKNOWN_AND_LIMITATIONS.md` states exactly which parts of a
 feed and of a repository are *not* read.
+
+## 2026-11-02 — full reference sweep: every documented feature, page by page
+
+The user asked for the reverse engineering to be *complete*: every feature, nothing left out.
+Forge cannot observe the product (no route, no account), so "complete" here means **every
+behaviour Google documents in its help centre**, recorded with its evidence label and mapped to
+a Forge status. The result is `docs/reference/REFERENCE_SURFACE.md` (**120 rows across 7 sections**).
+
+### Pages read this session (`OFFICIAL_DOCUMENTED`)
+
+| Page | What it settled |
+|---|---|
+| `…/answer/16206563` (Create a notebook) | Studio inventory incl. **video overviews** and **infographics** (new since our matrix), auto-emoji, auto-labels at 5+ sources, "View custom prompt", web notifications (desktop + animated tab title + unread dot), Docs/Sheets export, data-table customisation, artifact feedback |
+| `…/answer/16215270` (Sources) | full source-type list (audio, images, Play Books, Gemini Chats, YouTube, ePub, Drive), 500k words / 200 MB / 50 sources, URL = text only, YouTube = captions only and auto-deleted within 30 days if the video goes away, Drive auto-sync + "Click to sync", **"outputs do not change"** when a source changes |
+| `…/answer/16179559` (Chat) | Configure Chat = style (Default / Learning Guide / Custom) + response length; Save to note keeps formatting; Delete Chat History; live voice chat (mobile 18+); agentic actions (web search, code, files, charts, thinking steps); Stop with keep-generating |
+| `…/answer/16212820` (Audio Overview) | formats Deep Dive / The Brief / The Critique / The Debate, language (80+), length, custom prompt, playback speed, interactive mode, share/download |
+| `…/answer/16454555` (Video Overview) | formats Cinematic / Explainer / Short, 8 visual styles, producer-notes review (AI Ultra), generate now/later |
+| `…/answer/16212283` (Mind Maps) | zoom/pan, expand-collapse, node → question, download, chat chip |
+| `…/answer/16757456` (Slide decks) | customise format/language/length/sources + description, Revise with instructions and pending changes, delete/restore/reorder slides, present, PDF download |
+| `…/answer/16958963` (Flashcards & quizzes) | difficulty easy/medium/hard, custom prompt, **number: fewer/standard/more**, Explain, progress marks, results screen, Same/All/Only-missed retake, controls (prev/next, full screen, shuffle, delete a card, restart, **CSV download**), quiz hint |
+| `…/answer/16758265` (Infographics) | orientation, detail level, visual styles, PNG download, 18+ |
+| `…/answer/16261963` (Output language) | 80+ languages for *generated text*, default from the account |
+| `…/answer/17670842` (Usage limits) | compute-based limits, 5-hour refresh up to a weekly cap, plan multipliers, usage meter in chat and Studio, Generate later |
+| `…/answer/16322204` (Public notebooks) | public links, globe indicator, revoke semantics, featured notebooks, analytics |
+| `…/answer/16262519` (Notes) | notes are sources by default, cited in chat, included in artifacts, convert one/all, export to Docs, "editable once citations are removed" |
+
+### What the sweep changed
+
+Four features were missing from our matrix entirely rather than merely unimplemented:
+**video overviews**, **infographics**, **web notifications**, and **public notebook links**.
+Three of them are now written down as `blocked`/`refused` with reasons; the fourth (public
+links) is a decision, recorded as D20's stricter sibling.
+
+Two behaviours we had implemented *differently* turned out to be improvements, not drift:
+
+* the reference leaves artifacts stale ("outputs do not change"); Forge flags `stale` and
+  regenerates with the recorded parameters;
+* the reference's editor can share further, while the Workspace page says editors cannot —
+  Forge keeps the stricter reading.
+
+Eight behaviours were implementable offline and were built in this increment (see
+`docs/STATUS.md`): deck size, shuffle/restart/delete-card, deck CSV, quiz hints, bulk
+note→source conversion, chat-history deletion, and the study/quiz capability disclosures.
+
+### Numbers we deliberately did not copy
+
+500,000 words, 200 MB, 50 sources, 50 viewers, 80+ languages, 100 slides, 100k tokens, the
+5-hour quota refresh and the plan multipliers are *the reference's* numbers. Forge enforces its
+own documented byte cap and reports it; it has no plan tiers, so it has nothing honest to
+display in a quota meter.
+
+### Still unread (no claim made)
+
+`…/answer/16296687` (mobile app differences), `…/answer/16164461` (what Gemini Notebook is),
+`…/answer/16225229` (mode switching), `…/answer/16179536` (report a problem),
+`…/answer/16213268` (upgrade). They are linked from the pages above and are listed as `UNREAD`
+in the surface document.

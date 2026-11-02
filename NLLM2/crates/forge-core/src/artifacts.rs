@@ -241,12 +241,20 @@ pub fn quiz(chunks: &[Chunk], sources: &[Source], limit: usize) -> Value {
             let answer_index = options.iter().position(|o| o == &correct).unwrap_or(0);
             let stem = s.replacen(&correct, "_____", 1);
             let cit = citation_for(chunk, sources, questions.len() + 1);
+            // A hint that reveals the answer is not a hint. This one says where the answer is
+            // stated, which is what the citation already knows.
+            let hint = format!(
+                "Look at {} of “{}”: the answer is stated in that passage.",
+                cit.locator.human(),
+                cit.source_title.clone()
+            );
             questions.push(obj! {
                 "id" => format!("q-{}", questions.len() + 1),
                 "question" => stem,
                 "options" => Value::Arr(options.iter().map(|o| Value::from(o.as_str())).collect()),
                 "answer_index" => answer_index,
                 "answer" => correct.clone(),
+                "hint" => hint,
                 "explanation" => s.clone(),
                 "citation" => cit.to_json(),
             });
@@ -563,6 +571,25 @@ pub fn audio_script(chunks: &[Chunk], sources: &[Source], topic: &str) -> Value 
     }
 }
 
+/// Deck size as the reference UI names it: fewer / standard / more. A raw number is also
+/// accepted so a client can ask for an exact count; it is clamped rather than trusted.
+pub fn size_from(raw: &str, default_limit: usize) -> Result<usize, String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" => Ok(default_limit),
+        "fewer" | "small" | "short" => Ok(6),
+        "standard" | "normal" | "medium" => Ok(12),
+        "more" | "large" | "long" => Ok(24),
+        other => match other.parse::<usize>() {
+            Ok(n) if n >= 3 => Ok(n.min(24)),
+            Ok(_) => Err(format!("deck size {} is too small (use at least 3 cards)", other)),
+            Err(_) => Err(format!(
+                "unknown deck size \"{}\" (use fewer, standard, more or a number 3-24)",
+                other
+            )),
+        },
+    }
+}
+
 pub fn generate(
     kind: &str,
     chunks: &[Chunk],
@@ -579,7 +606,21 @@ pub fn generate_with(
     topic: &str,
     difficulty: Difficulty,
 ) -> Result<(String, Value), String> {
-    generate_full(kind, chunks, sources, topic, difficulty, "general")
+    generate_sized(kind, chunks, sources, topic, difficulty, "general", None)
+}
+
+/// `count` only means something for the two study artifacts; every other kind ignores it, so a
+/// client cannot make a report shorter by passing a deck size.
+pub fn generate_sized(
+    kind: &str,
+    chunks: &[Chunk],
+    sources: &[Source],
+    topic: &str,
+    difficulty: Difficulty,
+    audience: &str,
+    count: Option<usize>,
+) -> Result<(String, Value), String> {
+    generate_full(kind, chunks, sources, topic, difficulty, audience, count)
 }
 
 pub fn generate_full(
@@ -589,13 +630,14 @@ pub fn generate_full(
     topic: &str,
     difficulty: Difficulty,
     audience: &str,
+    count: Option<usize>,
 ) -> Result<(String, Value), String> {
     let title = match kind {
         "flashcards" => (
             format!("Forge flashcards ({})", difficulty.as_str()),
-            flashcards_with(chunks, sources, 12, difficulty),
+            flashcards_with(chunks, sources, count.unwrap_or(12), difficulty),
         ),
-        "quiz" => ("Forge quiz".to_string(), quiz(chunks, sources, 8)),
+        "quiz" => ("Forge quiz".to_string(), quiz(chunks, sources, count.unwrap_or(8))),
         "report" => {
             let t = if topic.trim().is_empty() { "Research report".to_string() } else { format!("Research report: {}", topic.trim()) };
             (t.clone(), report(chunks, sources, topic))
@@ -736,4 +778,130 @@ mod tests {
             assert!(generate(k, &chunks, &sources, "topic").is_ok(), "kind {}", k);
         }
     }
+    #[test]
+    fn deck_size_accepts_names_numbers_and_refuses_nonsense() {
+        assert_eq!(size_from("", 12).unwrap(), 12);
+        assert_eq!(size_from("fewer", 12).unwrap(), 6);
+        assert_eq!(size_from("standard", 6).unwrap(), 12);
+        assert_eq!(size_from("more", 6).unwrap(), 24);
+        assert_eq!(size_from("17", 12).unwrap(), 17);
+        assert_eq!(size_from("99", 12).unwrap(), 24, "a raw number is clamped, not trusted");
+        assert!(size_from("2", 12).is_err());
+        assert!(size_from("dozen", 12).is_err());
+    }
+
+    #[test]
+    fn a_sized_deck_is_actually_that_long() {
+        let chunks: Vec<Chunk> = (0..30)
+            .map(|i| {
+                chunk(
+                    &format!("k{}", i),
+                    "s1",
+                    &format!("Term{} is a definition number {}.", i, i),
+                    1,
+                )
+            })
+            .collect();
+        let sources = vec![src("s1")];
+        let (_, small) = generate_sized("flashcards", &chunks, &sources, "", Difficulty::Normal, "general", Some(6)).unwrap();
+        assert_eq!(small.get("cards").and_then(|c| c.as_arr()).map(|a| a.len()), Some(6));
+        let (_, big) = generate_sized("flashcards", &chunks, &sources, "", Difficulty::Normal, "general", Some(10)).unwrap();
+        assert_eq!(big.get("cards").and_then(|c| c.as_arr()).map(|a| a.len()), Some(10));
+        // The size is ignored by kinds that are not decks.
+        let (_, report) = generate_sized("report", &chunks, &sources, "", Difficulty::Normal, "general", Some(6)).unwrap();
+        assert_eq!(report.str_of("kind"), Some("report"));
+    }
+
+    #[test]
+    fn shuffle_is_deterministic_and_keeps_every_card() {
+        let ids: Vec<String> = (0..8).map(|i| format!("card-{}", i)).collect();
+        let a = study::permute(&ids, 42);
+        let b = study::permute(&ids, 42);
+        assert_eq!(a, b, "the same deck and seed give the same order");
+        assert_ne!(a, ids, "a shuffle that does not move anything is not a shuffle");
+        let mut sorted = a.clone();
+        sorted.sort();
+        let mut original = ids.clone();
+        original.sort();
+        assert_eq!(sorted, original, "a shuffle never loses or invents a card");
+        assert_eq!(study::permute(&[], 7).len(), 0);
+        assert_eq!(study::permute(&["card-1".to_string()], 7), vec!["card-1".to_string()]);
+    }
+
+    #[test]
+    fn a_quiz_question_has_a_hint_that_does_not_give_the_answer_away() {
+        let (chunks, sources) = corpus();
+        let v = quiz(&chunks, &sources, 5);
+        let qs = v.get("questions").and_then(|q| q.as_arr()).cloned().unwrap_or_default();
+        assert!(!qs.is_empty());
+        for q in qs {
+            let hint = q.str_of("hint").expect("every question carries a hint");
+            let answer = q.str_of("answer").unwrap_or("");
+            assert!(hint.contains("Look at"), "the hint points at the evidence: {}", hint);
+            if answer.len() > 3 {
+                assert!(
+                    !hint.to_lowercase().contains(&format!(" {}", answer.to_lowercase())),
+                    "the hint must not contain the answer {:?}: {}",
+                    answer,
+                    hint
+                );
+            }
+        }
+    }
+
+}
+
+/// Study-deck operations that change a stored deck without regenerating it. They live here, not
+/// in the UI, because the order and the marks are the learner's data and must survive a reload.
+pub mod study {
+    use crate::json::Value;
+
+    /// Deterministic Fisher-Yates driven by a small xorshift. No `rand` crate is available
+    /// offline, and a seeded permutation is reproducible: the same deck and seed give the same
+    /// order, which is what makes the shuffle testable.
+    pub fn permute(ids: &[String], seed: u64) -> Vec<String> {
+        let mut out = ids.to_vec();
+        if out.len() < 2 {
+            return out;
+        }
+        let mut state = seed | 1;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for i in (1..out.len()).rev() {
+            let j = (next() % (i as u64 + 1)) as usize;
+            out.swap(i, j);
+        }
+        out
+    }
+
+    /// Apply an order (list of card ids) to a payload's `cards`, dropping ids that no longer
+    /// exist and appending cards the order does not mention. Numbering (`n`) is rewritten so the
+    /// rendered deck never shows two cards with the same number.
+    pub fn reorder(payload: &mut Value, order: &[String]) -> usize {
+        let Some(cards) = payload.get("cards").and_then(|c| c.as_arr()).cloned() else {
+            return 0;
+        };
+        let mut remaining: Vec<Value> = cards.clone();
+        let mut ordered: Vec<Value> = Vec::new();
+        for id in order {
+            if let Some(pos) = remaining.iter().position(|c| c.str_of("id") == Some(id.as_str())) {
+                ordered.push(remaining.remove(pos));
+            }
+        }
+        ordered.extend(remaining);
+        for (i, c) in ordered.iter_mut().enumerate() {
+            if let Value::Obj(m) = c {
+                m.insert("n".into(), Value::from((i + 1) as f64));
+            }
+        }
+        if let Value::Obj(m) = payload {
+            m.insert("cards".into(), Value::Arr(ordered));
+        }
+        0
+    }
+
 }

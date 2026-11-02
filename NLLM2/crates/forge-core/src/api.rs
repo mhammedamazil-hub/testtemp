@@ -305,6 +305,9 @@ impl Api {
             ("POST", ["api", "notebooks", _, "shares"]) => "manage",
             ("POST", ["api", "notebooks", _, "duplicate"]) => "manage",
             ("POST", ["api", "artifacts", _, "regenerate"]) => "write",
+            ("POST", ["api", "artifacts", _, "study"]) => "write",
+            ("POST", ["api", "notebooks", _, "notes", "to-sources"]) => "write",
+            ("DELETE", ["api", "notebooks", _, "conversations"]) => "write",
             ("DELETE", ["api", "notebooks", ..]) => "manage",
             ("PATCH", ["api", "notebooks", ..]) => "manage",
             ("DELETE", ["api", "shares", ..]) => "manage",
@@ -401,6 +404,9 @@ impl Api {
             ("PATCH", ["api", "notes", nid]) => self.update_note(nid, req),
             ("DELETE", ["api", "notes", nid]) => Ok(self.delete_note(nid)),
             ("POST", ["api", "notes", nid, "to-source"]) => self.note_to_source(nid),
+            ("POST", ["api", "notebooks", id, "notes", "to-sources"]) => self.convert_all_notes(id),
+            ("POST", ["api", "artifacts", aid, "study"]) => self.study_op(aid, req),
+            ("DELETE", ["api", "notebooks", id, "conversations"]) => self.clear_chat_history(id),
             ("POST", ["api", "notebooks", id, "artifacts"]) => self.create_artifact(id, req),
             ("PATCH", ["api", "artifacts", aid]) => self.update_artifact(aid, req),
             ("POST", ["api", "artifacts", aid, "review"]) => self.review_card(aid, req),
@@ -484,7 +490,7 @@ impl Api {
             "artifact_lifecycle" => obj! {
                 "status" => "supported",
                 "regenerate" => "POST /api/artifacts/:id/regenerate re-runs the generator with the stored parameters against the current source text; review marks are cleared because the cards changed",
-                "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
+                "export" => "Markdown, JSON and PDF for every artifact; SVG for concept maps; PPTX for slide decks; CSV for data tables and flashcard decks (409 format_unavailable otherwise). PNG returns 501 format_unsupported because there is no rasteriser",
                 "export_note" => "the PPTX is a written-by-hand OPC package and the PDF a written-by-hand page tree, verified by reading both back with Forge's own readers and (one-off, outside the build) python-pptx and pypdf",
             },
             "settings" => obj! {
@@ -601,6 +607,11 @@ impl Api {
                 "report" => "supported",
                 "mindmap" => "supported",
                 "study_guide" => "supported",
+                "study_deck_controls" => obj!{ "status" => "supported", "note" => "deck size (fewer/standard/more or 3-24), shuffle (seeded, deterministic), restart (clears marks, restores generated order), per-card delete; review marks persist" },
+                "study_results_screen" => obj!{ "status" => "unsupported", "reason" => "no results screen, paging or full-screen mode; the deck is a scrollable list with a practise-missed filter" },
+                "audio_overview" => obj!{ "status" => "unsupported", "reason" => "no text-to-speech: a narration script with per-segment citations is produced instead, and the artifact says no audio file exists" },
+                "video_overview" => obj!{ "status" => "unsupported", "reason" => "no renderer, no speech synthesis and no image generation" },
+                "infographic" => obj!{ "status" => "unsupported", "reason" => "no image generation and no rasteriser; PNG export returns 501 rather than a placeholder" },
                 "faq" => "supported",
                 "summary" => "supported",
                 "audio_overview" => "unsupported",
@@ -1400,6 +1411,232 @@ impl Api {
             conversation_count: counts.4,
         }
         .to_json()
+    }
+
+    /// `POST /api/artifacts/:id/study` — shuffle, restart or drop one card of a stored deck.
+    ///
+    /// These are edits to the deck the learner is holding, so they bump the version and are
+    /// persisted. Nothing is regenerated: the quotations in the deck do not change, only their
+    /// order and the review marks.
+    fn study_op(&self, aid: &str, req: &Request) -> Result<Response, Response> {
+        let body = parse_body(req)?;
+        let action = body.str_of("action").unwrap_or("").to_ascii_lowercase();
+        let card_id = body.str_of("card_id").unwrap_or("").to_string();
+        if !matches!(action.as_str(), "shuffle" | "restart" | "delete_card") {
+            return Err(err(
+                422,
+                "bad_action",
+                &format!("unknown action \"{}\" (use shuffle, restart or delete_card)", action),
+            ));
+        }
+        if action == "delete_card" && card_id.is_empty() {
+            return Err(err(422, "missing_card", "delete_card needs a card_id"));
+        }
+        self.store
+            .write(|db| {
+                let Some(art) = db.artifacts.iter_mut().find(|a| a.id == aid) else {
+                    return Err(err(404, "not_found", "artifact not found"));
+                };
+                if art.kind != "flashcards" && art.kind != "quiz" {
+                    return Err(err(
+                        409,
+                        "not_a_deck",
+                        "study operations exist for flashcards and quizzes; this artifact is not a study deck",
+                    ));
+                }
+                let list_key = if art.kind == "quiz" { "questions" } else { "cards" };
+                let Some(items) = art.payload.get(list_key).and_then(|v| v.as_arr()).cloned() else {
+                    return Err(err(409, "not_a_deck", "this deck has no items to reorder"));
+                };
+                let ids: Vec<String> = items
+                    .iter()
+                    .filter_map(|c| c.str_of("id").map(|s| s.to_string()))
+                    .collect();
+                let mut cleared = 0u64;
+                #[allow(unused_assignments)]
+                let mut note = String::new();
+                match action.as_str() {
+                    "shuffle" => {
+                        // Keep the generation order once, so "restart" can undo a shuffle.
+                        let original = art
+                            .payload
+                            .get("original_order")
+                            .and_then(|v| v.as_arr())
+                            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>())
+                            .unwrap_or_else(|| ids.clone());
+                        let order = artifacts::study::permute(&ids, art.version as u64 + 977);
+                        if let Value::Obj(m) = &mut art.payload {
+                            m.insert(
+                                "original_order".into(),
+                                Value::Arr(original.iter().map(|s| Value::from(s.as_str())).collect()),
+                            );
+                        }
+                        artifacts::study::reorder(&mut art.payload, &order);
+                        note = "shuffled; restart restores the order it was generated in".to_string();
+                    }
+                    "restart" => {
+                        cleared = art.reviews.len() as u64;
+                        art.reviews.clear();
+                        let original = art
+                            .payload
+                            .get("original_order")
+                            .and_then(|v| v.as_arr())
+                            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>());
+                        match original {
+                            Some(order) => {
+                                artifacts::study::reorder(&mut art.payload, &order);
+                                if let Value::Obj(m) = &mut art.payload {
+                                    m.remove("original_order");
+                                }
+                            }
+                            None => {} // never shuffled: the order already is the generation order
+                        }
+                        note = format!("session restarted; {} review mark(s) cleared", cleared);
+                    }
+                    "delete_card" => {
+                        if !ids.iter().any(|i| i == &card_id) {
+                            return Err(err(404, "card_not_found", "no card with that id in this deck"));
+                        }
+                        let kept: Vec<Value> = items
+                            .iter()
+                            .filter(|c| c.str_of("id") != Some(card_id.as_str()))
+                            .cloned()
+                            .collect();
+                        let mut kept: Vec<Value> = kept;
+                        for (i, c) in kept.iter_mut().enumerate() {
+                            if let Value::Obj(m) = c {
+                                m.insert("n".into(), Value::from((i + 1) as f64));
+                            }
+                        }
+                        let kept_ids: Vec<String> = kept
+                            .iter()
+                            .filter_map(|c| c.str_of("id").map(|s| s.to_string()))
+                            .collect();
+                        let marks_removed = art.reviews.remove(&card_id).is_some();
+                        if let Value::Obj(m) = &mut art.payload {
+                            m.insert(list_key.into(), Value::Arr(kept.clone()));
+                            m.insert("count".into(), Value::from(kept.len() as f64));
+                            if m.contains_key("original_order") {
+                                m.insert(
+                                    "original_order".into(),
+                                    Value::Arr(kept_ids.iter().map(|s| Value::from(s.as_str())).collect()),
+                                );
+                            }
+                        }
+                        note = format!(
+                            "card {} removed from this deck{}; the source passage is untouched",
+                            card_id,
+                            if marks_removed { " (and its mark)" } else { "" }
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+                art.version += 1;
+                art.updated_at = now_iso();
+                let remaining = art
+                    .payload
+                    .get(list_key)
+                    .and_then(|v| v.as_arr())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                Ok(ok(obj! {
+                    "id" => aid,
+                    "kind" => art.kind.as_str(),
+                    "action" => action.as_str(),
+                    "version" => art.version as u64,
+                    "count" => remaining as u64,
+                    "marks_cleared" => cleared,
+                    "note" => note,
+                    "payload" => art.payload.clone(),
+                }))
+            })
+            .map_err(|e| err(500, "storage", &e.to_string()))?
+    }
+
+    /// `POST /api/notebooks/:id/notes/to-sources` — convert every note that is not a source yet.
+    fn convert_all_notes(&self, nb: &str) -> Result<Response, Response> {
+        let notes: Vec<crate::domain::Note> = self.store.read(|db| {
+            db.notes
+                .iter()
+                .filter(|n| n.notebook_id == nb)
+                .cloned()
+                .collect()
+        });
+        let converted_ids = self.store.read(|db| {
+            db.sources
+                .iter()
+                .filter(|s| s.notebook_id == nb)
+                .map(|s| s.meta_of("converted_from").to_string())
+                .filter(|v| !v.is_empty())
+                .collect::<Vec<String>>()
+        });
+        let mut converted: Vec<Value> = Vec::new();
+        let mut skipped: Vec<Value> = Vec::new();
+        for note in &notes {
+            if converted_ids.contains(&note.id) {
+                skipped.push(obj! { "note_id" => note.id.as_str(), "reason" => "already_a_source" });
+                continue;
+            }
+            if note.body.trim().is_empty() {
+                skipped.push(obj! { "note_id" => note.id.as_str(), "reason" => "empty_note" });
+                continue;
+            }
+            let mut meta = BTreeMap::new();
+            meta.insert("converted_from".to_string(), note.id.clone());
+            meta.insert("converted_at".to_string(), now_iso());
+            let title = if note.title.trim().is_empty() {
+                format!("Note from {}", note.updated_at.chars().take(10).collect::<String>())
+            } else {
+                note.title.clone()
+            };
+            match self.ingest_source(
+                None,
+                meta,
+                &note.notebook_id,
+                &clip(&title, 120),
+                "text",
+                "note",
+                note.body.as_bytes(),
+            ) {
+                Ok(_) => converted.push(obj! { "note_id" => note.id.as_str(), "title" => title.as_str() }),
+                Err(e) => skipped.push(obj! {
+                    "note_id" => note.id.as_str(),
+                    "reason" => format!("failed: {}", e.status),
+                }),
+            }
+        }
+        Ok(ok(obj! {
+            "notes" => notes.len() as u64,
+            "converted" => converted.len() as u64,
+            "skipped" => skipped.len() as u64,
+            "converted_notes" => Value::Arr(converted),
+            "skipped_notes" => Value::Arr(skipped),
+            "note" => "notes become ordinary text sources, so they can be cited and used in artifacts",
+        }))
+    }
+
+    /// `DELETE /api/notebooks/:id/conversations` — clear this notebook's chat history.
+    fn clear_chat_history(&self, nb: &str) -> Result<Response, Response> {
+        self.store
+            .write(|db| {
+                let before = db.conversations.len();
+                let mut messages = 0usize;
+                db.conversations.retain(|c| {
+                    if c.notebook_id == nb {
+                        messages += c.messages.len();
+                        false
+                    } else {
+                        true
+                    }
+                });
+                obj! {
+                    "deleted" => (before - db.conversations.len()) as u64,
+                    "messages_deleted" => messages as u64,
+                    "note" => "conversation transcripts deleted; notes and artifacts are untouched",
+                }
+            })
+            .map(ok)
+            .map_err(|e| err(500, "storage", &e.to_string()))
     }
 
     /// `POST /api/notebooks/:id/research`
@@ -2783,6 +3020,16 @@ impl Api {
             }
         };
         let selected: Vec<String> = parse_str_list(body.get("source_ids"));
+        // Deck size is honoured for flashcards and quizzes only; every other kind ignores it.
+        let count_raw = body.str_of("count").unwrap_or("");
+        let count = if count_raw.is_empty() {
+            None
+        } else {
+            match artifacts::size_from(count_raw, 12) {
+                Ok(n) => Some(n),
+                Err(e) => return Err(err(422, "bad_size", &e)),
+            }
+        };
 
         // A data table is a projection of a grid that is already stored, so it is generated from
         // the tables rather than from chunk text — and it says so in its payload.
@@ -2867,7 +3114,7 @@ impl Api {
             return Err(err(409, "no_sources", "select at least one ready source"));
         }
         let (title, payload) =
-            artifacts::generate_full(&kind, &chunks, &sources, &topic, difficulty, audience)
+            artifacts::generate_full(&kind, &chunks, &sources, &topic, difficulty, audience, count)
                 .map_err(|e| err(422, "bad_kind", &e))?;
         let art = Artifact {
             id: new_id("art"),
@@ -2881,6 +3128,7 @@ impl Api {
             topic: topic.clone(),
             difficulty: difficulty.as_str().to_string(),
             audience: audience.to_string(),
+            count: count.unwrap_or(0) as u32,
             ..Artifact::default()
         };
         let id = art.id.clone();
@@ -2905,7 +3153,7 @@ impl Api {
     /// and loses its review marks — because `card-3` of the old deck is not `card-3` of the new
     /// one, and carrying a "known" mark across that boundary would invent a fact about the user.
     fn regenerate_artifact(&self, aid: &str) -> Result<Response, Response> {
-        let (kind, topic, difficulty_s, audience, source_ids) = self
+        let (kind, topic, difficulty_s, audience, source_ids, stored_count) = self
             .store
             .read(|db| match db.artifacts.iter().find(|a| a.id == aid) {
                 None => None,
@@ -2915,6 +3163,7 @@ impl Api {
                     a.difficulty.clone(),
                     a.audience.clone(),
                     a.source_ids.clone(),
+                    a.count,
                 )),
             })
             .ok_or_else(|| err(404, "not_found", "artifact not found"))?;
@@ -3011,7 +3260,15 @@ impl Api {
             return Err(err(409, "no_sources", "none of the sources this artifact used are still ready"));
         }
         let (title, payload) =
-            artifacts::generate_full(&kind, &chunks, &sources, &topic, difficulty, &audience)
+            artifacts::generate_full(
+                &kind,
+                &chunks,
+                &sources,
+                &topic,
+                difficulty,
+                &audience,
+                if stored_count > 0 { Some(stored_count as usize) } else { None },
+            )
                 .map_err(|e| err(422, "bad_kind", &e))?;
         let out = self
             .store
@@ -3285,9 +3542,17 @@ impl Api {
                     ),
                 },
                 "csv" => {
-                    // A projection of a grid exports as a grid: header row, then the projected
-                    // values, RFC 4180 quoted. Only for data tables, because a CSV of a deck's
-                    // quotations would pretend that prose is tabular data.
+                    // Two artifacts are genuinely tabular: a projection of a stored grid, and a
+                    // flashcard deck (one card per row, with its evidence and the learner's
+                    // mark) — which is what the reference UI downloads. A CSV of prose would
+                    // pretend that prose is a table, so every other kind is refused.
+                    if art.kind == "flashcards" {
+                        let body = crate::export::flashcards_csv(art);
+                        return Response::new(200, "text/csv; charset=utf-8", body.into_bytes()).with_header(
+                            "Content-Disposition",
+                            &format!("attachment; filename=\"{}.csv\"", base),
+                        );
+                    }
                     if art.kind != "data_table" {
                         return err(
                             409,
@@ -3478,6 +3743,7 @@ impl Api {
                     topic: a.str_of("topic").unwrap_or("").to_string(),
                     difficulty: a.str_of("difficulty").unwrap_or("").to_string(),
                     audience: a.str_of("audience").unwrap_or("").to_string(),
+                    count: a.get("count").and_then(|c| c.as_f64()).unwrap_or(0.0) as u32,
                 });
             }
         }

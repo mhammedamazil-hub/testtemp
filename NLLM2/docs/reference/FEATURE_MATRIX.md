@@ -1,6 +1,10 @@
 # Feature matrix — reference feature → Forge status
 
 Schema per `MASTER_FORGE.md` §3.5, trimmed to the columns that carry information today.
+
+> This matrix lists the features we track as engineering items. The **exhaustive inventory** of
+> every documented Gemini Notebook behaviour — including the ones we refuse or cannot build —
+> lives in `reference/REFERENCE_SURFACE.md` (120 rows, read page by page on 2026-11-02).
 **Evidence** describes the *reference* claim; **Forge** describes our code, verified by
 running it. No row is `LIVE_OBSERVED` — see `docs/RESEARCH_BLOCKERS.md`.
 
@@ -28,6 +32,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | SRC-20 | hidden worksheets stored but never cited | own policy (safety) | **done** | `Table.hidden` | unit |
 | SRC-21 | video/audio **stream metadata** (duration, tracks, codec, fps, size, rotation, language) | documented (§7.12; `ffmpeg -i` on our own fixture) | **partial (honest)** — ISO base media parsed by hand; Matroska/MPEG-TS/AVI are named then refused; **no frame decoding, captions or transcript**, and video is not a source | `media.rs`, `POST /api/media/inspect` | 10 unit + 1 e2e + 2 UI |
 | SRC-10 | rename source + labels | documented | **done** | `PATCH /api/sources/:id` | e2e |
+| SRC-24 | artifacts from a deck export as CSV | documented (download flashcards as CSV) | **done** — flashcards export a card table (`n, card_id, front, back, source, locator, quote, mark`); every other non-grid artifact still refuses CSV with 409 rather than pretending prose is tabular | `export::flashcards_csv`, `api::export_artifact` | e2e |
 | SRC-11 | images / OCR | documented | blocked | — | no OCR engine |
 | SRC-12 | audio → transcript | documented | blocked | — | no ASR; audio *track metadata* is readable (SRC-21) but speech is not |
 | SRC-13 | YouTube captions | documented | blocked | — | `yt-dlp` installs, but no route to a platform host and no per-video licence decision |
@@ -41,6 +46,7 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | CHAT-03 | abstain when unsupported | documented | done | `grounded::answer` | lib + e2e |
 | CHAT-04 | source selection scopes chat | documented | done | `app.js` + api | UI |
 | CHAT-05 | conversation persistence / history | documented | done — plus `GET /api/conversations/:id/export` (md/json) with the evidence each answer used | `store.rs`, `export::conversation_markdown` | e2e + 3 UI |
+| CHAT-09 | delete chat history | documented ("Delete Chat History") | **done** — deletes this notebook's transcripts only, reports messages deleted, and leaves notes, artifacts and sources untouched; the button says so | `DELETE /api/notebooks/:id/conversations` | e2e + 3 UI |
 | CHAT-06 | streaming + stop | documented | **done** — real chunked delivery (`Transfer-Encoding: chunked`) of NDJSON frames, rendered progressively; Stop aborts and the turn is **not** persisted. Not token-by-token: the extractive answer is computed before the first frame and the protocol says so | `http::StreamReply`, `api::chat_stream`, `app.js` | 2 unit + 1 e2e + 7 UI |
 | SEC-01 | source text treated as data, instruction-like passages reported (§11) | documented (security is a release blocker) | **done** — ingest counts, answer skips and reports, abstains with the reason when only instructions matched; questions *about* instructions may quote them | `untrusted.rs`, `grounded::answer_limited` | 5 unit + e2e + 4 UI |
 | CHAT-07 | style / length / custom instructions | documented | **partial** — style (evidence/concise/detailed) and length (brief/standard/thorough) are real and validated over the extractive engine; custom instructions are stored and echoed but cannot steer a model that is not reachable | `grounded.rs`, `api::chat`, UI selects | 4 unit + e2e + 8 UI |
@@ -48,9 +54,13 @@ Statuses: `done` (works + tested) · `partial` · `planned` · `blocked` (enviro
 | NOTE-01 | notes CRUD, autosave | documented | done | `api.rs`, UI | e2e |
 | NOTE-02 | save answer as note | documented | done | UI | UI smoke |
 | NOTE-03 | note used as chat context | documented | **done** via conversion to a source (reference also allows direct selection) | `POST /api/notes/:id/to-source` | e2e Journey D |
+| NOTE-04 | convert every note to a source at once | documented ("Convert all notes to source") | **done** — converts what can be converted and returns a per-note reason for every skip (`already_a_source`, `empty_note`, `failed`); idempotent | `POST /api/notebooks/:id/notes/to-sources` | e2e + 4 UI |
 | ART-01 | summary / report / study guide / FAQ | documented | done | `artifacts.rs` | lib |
 | ART-02 | mind map | documented | done | `artifacts.rs` | lib + UI |
-| ART-03 | flashcards / quiz | documented | done | `artifacts.rs` | lib + UI |
+| ART-03 | flashcards / quiz | documented | **done** — difficulty (easy/normal/hard), **deck size (fewer 6 / standard 12 / more 24, or 3–24)**, corner-drawn distractors, per-question hint that names the passage and never the answer | `artifacts::flashcards_with`, `quiz`, `size_from` | lib + e2e + UI |
+| ART-11 | flashcard deck controls: shuffle, restart, delete a card, download CSV | documented (flashcard controls) | **done** — `POST /api/artifacts/:id/study` with `shuffle` / `restart` / `delete_card`, versioned and persisted; shuffle is a seeded deterministic permutation; restart restores the generated order and clears marks; CSV carries each card's source, locator, quote and the learner's mark | `artifacts::study`, `export::flashcards_csv` | 2 unit + e2e + 5 UI |
+| ART-12 | practise only the cards you missed | documented (retake: only missed) | **partial (honest)** — a filter over the stored review marks; there is no results screen and no "same cards" mode | `app.js` (`#deckMissed`) | UI |
+| ART-13 | deck size honoured by regeneration | documented (number is a generation parameter) | **done** — `Artifact.count` is stored and reused, so regenerating reproduces the deck length instead of silently resizing it | `Artifact.count`, `regenerate_artifact` | e2e |
 | ART-04 | artifact staleness when a source changes | documented ("outputs do not change") | **done** — staleness is set on refresh, and `POST /api/artifacts/:id/regenerate` re-runs the stored parameters against the current text, clearing the flag and the review marks (and reporting how many) | `Artifact.stale`, `api::regenerate_artifact` | e2e + 3 UI |
 | ART-05 | audio / video overviews | documented | blocked | — | no TTS/ASR or renderer |
 | ART-07 | slides deck: generate, edit, reorder, delete/restore, version, export | documented | **done** — quotation deck with per-bullet citations, audience setting, versioned slide ops, Markdown/JSON export, and a real **PPTX** package plus **PDF** written by hand (`render`). PNG still returns 501 rather than a fake file | `artifacts::slides`, `api::update_artifact`, `export.rs`, `render.rs` | 5 PPTX + 4 PDF unit + e2e Journey H + 6 UI |

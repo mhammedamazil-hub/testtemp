@@ -397,3 +397,29 @@ Not implemented, and not claimed:
 * `PATCH /api/settings` is deliberately not atomic: a request with one bad value stores the good
   ones and returns 422 with the refused field names. A client that assumes "422 means nothing
   changed" would misreport the state; the UI re-reads the settings from the error body.
+
+## Study decks, notes conversion and chat history (2026-11-02)
+
+* **Deck size is a generation parameter, not a crop.** `count` accepts `fewer`/`standard`/`more`
+  or a number 3–24; anything else is refused with 422 `bad_size`. The realized deck can be
+  *shorter* than requested when the corpus has fewer definitional or cloze-able sentences — the
+  artifact reports the count it actually has, and no card is invented to reach the number.
+* **Shuffle is deterministic, not random.** No `rand` crate is available offline, so the
+  permutation is a seeded xorshift Fisher–Yates keyed on the artifact version. The same deck and
+  version always produce the same order, which is what makes it testable; it is *not* a
+  cryptographic shuffle and it is not reshuffled on every view.
+* **Restart means "clear the marks and restore the generated order"** — it does not delete the
+  deck, and it does not restore cards you deleted.
+* **Delete card is a deck edit, not a source edit.** The source passage stays; regeneration
+  brings the card back. Marks on a deleted card are removed with it.
+* Only `flashcards` and `quiz` accept study operations; every other artifact returns
+  409 `not_a_deck`. Deleting is per card, never "delete the deck" (that is artifact deletion).
+* **Quiz hints name the passage** ("Look at page 2 of 'Policy'"). They are not model hints and
+  they never contain the answer — but they do tell you where to look, which is the whole point.
+* **No results screen, no paging, no full-screen mode.** The deck renders as a scrollable list;
+  "practise missed" filters by the stored marks and says so when nothing is marked.
+* **Bulk note conversion is best-effort and honest about skips**: `already_a_source`,
+  `empty_note`, and `failed: <status>` per note. It cannot convert a note that the ingest path
+  refuses (for example, one whose body exceeds the source byte cap).
+* **Deleting chat history deletes transcripts only.** There is no undo, no archive, and no
+  per-message deletion. Shares see the same history list scoped to their notebook.

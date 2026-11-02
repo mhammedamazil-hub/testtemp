@@ -309,6 +309,20 @@ async function main() {
   const countFinal = (convsFinal.conversations || []).reduce((n, c) => n + c.message_count, 0);
   check("a completed stream is saved once", countFinal === countBefore + 2,
     `messages before=${countBefore} after=${countFinal}`);
+  // --- clearing chat history is a real deletion, and it says what it keeps
+  const clearBtn = $("#clearChat");
+  check("chat offers a way to delete its history", !!clearBtn);
+  if (clearBtn) {
+    clearBtn.click();
+    await wait(900);
+    const convsCleared = await (await fetch(`${BASE}/api/notebooks/${nbId}/conversations`)).json();
+    check("deleting chat history empties the notebook's conversations",
+      (convsCleared.conversations || []).length === 0,
+      `conversations=${(convsCleared.conversations || []).length}`);
+    const sourcesStill = await (await fetch(`${BASE}/api/notebooks/${nbId}/sources`)).json();
+    check("deleting chat history keeps the sources", (sourcesStill.sources || []).length > 0);
+  }
+
   // --- contradictory sources are shown side by side (Journey C)
   for (const [title, text] of [
     ["Lab run A", "The Calvin cycle fixes 3 carbon dioxide molecules per turn of the cycle."],
@@ -425,6 +439,97 @@ async function main() {
     check("quiz reveals the correct answer", !!q.querySelector(".opt.correct") && opts.every((o) => o.disabled));
   }
 
+  // --- deck size and the study controls (all stored server-side)
+  const sizeSel = $("#artifactDeckSize");
+  check("study tab exposes a deck size control", !!sizeSel && !!sizeSel.getAttribute("aria-label"),
+    sizeSel?.outerHTML?.slice(0, 120));
+  sizeSel.value = "fewer";
+  byText("#sideContent button", "Flashcards").click();
+  await wait(900);
+  const fewer = $$("#deckCards .flashcard").length;
+  check("fewer builds a short deck", fewer > 0 && fewer <= 6, `cards=${fewer}`);
+  sizeSel.value = "more";
+  byText("#sideContent button", "Flashcards").click();
+  await wait(900);
+  const more = $$("#deckCards .flashcard").length;
+  check("more builds a deck at least as long as fewer", more >= fewer, `fewer=${fewer} more=${more}`);
+  // Go back to the short deck for the control tests below.
+  sizeSel.value = "fewer";
+  byText("#sideContent button", "Flashcards").click();
+  await wait(900);
+
+  check("a deck exposes shuffle, restart, practise-missed and CSV controls",
+    !!$("#deckShuffle") && !!$("#deckRestart") && !!$("#deckMissed") && !!$("#deckCsv"),
+    ["#deckShuffle", "#deckRestart", "#deckMissed", "#deckCsv"].map((sel) => !!$(sel)).join(","));
+
+  const deckOrder = () => $$("#deckCards .flashcard").map((c) => c.querySelector(".inner").textContent);
+  const beforeShuffle = deckOrder();
+  const deckArt = (await (await fetch(`${BASE}/api/notebooks/${nbId}/artifacts`)).json()).artifacts
+    .filter((a) => a.kind === "flashcards").pop();
+  $("#deckShuffle").click();
+  await wait(800);
+  check("shuffle is reported and stored", /shuffled/.test($("#studyNote")?.textContent || ""), $("#studyNote")?.textContent);
+  check("shuffling keeps every card", $$("#deckCards .flashcard").length === beforeShuffle.length,
+    `cards=${$$("#deckCards .flashcard").length}`);
+  check("shuffling changes the order the learner sees", deckOrder().join("|") !== beforeShuffle.join("|"));
+  const shuffledArt = await (await fetch(`${BASE}/api/artifacts/${deckArt.id}`)).json();
+  check("the shuffle is persisted on the artifact", shuffledArt.version > deckArt.version, `version=${shuffledArt.version}`);
+
+  // A deck exports as a card table, with the learner's mark in its own column.
+  const storedCards = (shuffledArt.payload?.cards || []).length;
+  const csvRes = await fetch(`${BASE}/api/artifacts/${deckArt.id}/export?format=csv`);
+  const csvText = await csvRes.text();
+  check("a deck downloads as CSV with citations and marks",
+    csvRes.ok && /^n,card_id,front,back,source,locator,quote,mark/.test(csvText) &&
+      csvText.trim().split("\n").length === storedCards + 1,
+    `${csvRes.status} rows=${csvText.trim().split("\n").length} cards=${storedCards}`);
+
+  // Deleting one card trims the deck and leaves the source alone.
+  const beforeCardDelete = $$("#deckCards .flashcard").length;
+  const delBtn = [...$$("#deckCards .flashcard button")].find((b) => b.textContent.trim() === "delete");
+  delBtn.click();
+  await wait(800);
+  check("deleting a card trims the deck", $$("#deckCards .flashcard").length === beforeCardDelete - 1,
+    `cards=${$$("#deckCards .flashcard").length}`);
+  const trimmed = await (await fetch(`${BASE}/api/artifacts/${deckArt.id}`)).json();
+  check("the trimmed deck is stored, not just hidden",
+    (trimmed.payload?.cards || []).length === beforeCardDelete - 1 && trimmed.payload.count === beforeCardDelete - 1,
+    `cards=${trimmed.payload?.cards?.length} count=${trimmed.payload?.count}`);
+
+  // Restart clears the marks and puts the generated order back.
+  const firstCard = $$("#deckCards .flashcard")[0];
+  [...firstCard.querySelectorAll("button")].find((b) => /knew it/.test(b.textContent)).click();
+  await wait(500);
+  $("#deckRestart").click();
+  await wait(900);
+  check("restart clears the marks and says so", /restarted/.test($("#studyNote")?.textContent || ""),
+    $("#studyNote")?.textContent);
+  const afterRestart = await (await fetch(`${BASE}/api/artifacts/${deckArt.id}`)).json();
+  check("restart leaves no marks on the stored deck", Object.keys(afterRestart.reviews || {}).length === 0,
+    JSON.stringify(afterRestart.reviews));
+
+  // Practise-missed is a view filter over the stored marks, and it never invents cards.
+  $("#deckMissed").click();
+  await wait(300);
+  check("practise-missed with no missed cards says so instead of showing everything",
+    /nothing to practise/i.test($("#deckCards")?.textContent || ""), $("#deckCards")?.textContent);
+  $("#deckMissed").click();
+  await wait(300);
+
+  // --- a quiz hint points at the evidence without giving the answer
+  byText("#sideContent button", "Quiz").click();
+  await wait(800);
+  const hintBtn = $("[data-hint-btn]");
+  check("every quiz question can show a hint", !!hintBtn);
+  if (hintBtn) {
+    const hintId = hintBtn.getAttribute("data-hint-btn");
+    hintBtn.click();
+    await wait(80);
+    const hintBox = $(`[data-hint="${hintId}"]`);
+    check("the hint points at the passage, not the answer",
+      !!hintBox && !hintBox.hidden && /Look at/.test(hintBox.textContent), hintBox?.textContent);
+  }
+
   // --- mind map
   byText("#sideContent button", "Concept map").click();
   await wait(700);
@@ -530,6 +635,22 @@ async function main() {
   check("note offers conversion to a source",
     [...window.document.querySelectorAll("#sideContent button")]
       .some((b) => /use as source/i.test(b.textContent)));
+  // Every note can be converted at once; the notes stay, and each becomes a citable source.
+  const convertAll = $("#convertAllNotes");
+  check("notes can be converted to sources in bulk", !!convertAll);
+  if (convertAll) {
+    convertAll.click();
+    await wait(1200);
+    const afterBulk = await (await fetch(`${BASE}/api/notebooks/${nbId}/sources`)).json();
+    const noteSources = (afterBulk.sources || []).filter((s0) => s0.origin === "note");
+    check("bulk conversion created a note source", noteSources.length >= 1,
+      `noteSources=${noteSources.length}`);
+    check("the note source is labelled as a note conversion",
+      (noteSources[0]?.meta || {}).converted_from?.length > 0, JSON.stringify(noteSources[0]?.meta));
+    const notesAfter = await (await fetch(`${BASE}/api/notebooks/${nbId}/notes`)).json();
+    check("converting does not delete the note", (notesAfter.notes || []).length >= 1,
+      `notes=${(notesAfter.notes || []).length}`);
+  }
 
   // --- report
   byText(".tabs button", "Report").click();

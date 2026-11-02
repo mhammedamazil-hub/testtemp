@@ -525,6 +525,9 @@ pub struct Artifact {
     pub topic: String,
     pub difficulty: String,
     pub audience: String,
+    /// Requested deck size for flashcards/quiz (0 = the default). Kept so a regeneration
+    /// reproduces the same deck length instead of silently resizing it.
+    pub count: u32,
 }
 
 impl Default for Artifact {
@@ -544,6 +547,7 @@ impl Default for Artifact {
             topic: String::new(),
             difficulty: String::new(),
             audience: String::new(),
+            count: 0,
         }
     }
 }

@@ -5,7 +5,7 @@
 ```bash
 export PATH=/tmp/forge-rust/bin:$PATH      # this sandbox's Rust install
 cd NLLM2
-cargo test --offline                        # 310 tests: 242 lib + 37 e2e + 26 bininspect + 5 server
+cargo test --offline                        # 316 tests: 246 lib + 39 e2e + 26 bininspect + 5 server
 ```
 
 UI drive-through (needs a running server and jsdom, dev-only):
@@ -13,10 +13,10 @@ UI drive-through (needs a running server and jsdom, dev-only):
 ```bash
 FORGE_ADDR=0.0.0.0:8099 FORGE_DATA_DIR=/tmp/forge-live/data \
   FORGE_WEB_DIR=apps/web ./target/debug/forge-server &
-FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 191 assertions
+FORGE_URL=http://127.0.0.1:8099 NODE_PATH=/tmp/uitest/node_modules node tests/ui-smoke.js   # 214 assertions
 ```
 
-## Unit tests (242) — exact names from `cargo test --lib -- --list`
+## Unit tests (246) — exact names from `cargo test --lib -- --list`
 
 ### `json` (6)
 `roundtrip_primitives`, `numbers`, `unicode_escapes`, `utf8_passthrough`,
@@ -117,7 +117,7 @@ them, because it is unreachable.
 `serves_the_shell_and_assets`, `deep_links_fall_back_to_shell`,
 `traversal_and_missing_assets_are_refused`.
 
-## End-to-end HTTP tests (37, real sockets)
+## End-to-end HTTP tests (39, real sockets)
 
 | Test | Proves |
 |---|---|
@@ -133,7 +133,7 @@ them, because it is unreachable.
 | `the_capability_page_names_what_settings_cannot_do` | `settings.status = "partial"` with a non-empty reason for interface language, model selection, server-side fonts, keyboard shortcuts and per-user settings; `usage.status = "supported"` |
 | `provider_keys_are_write_only_and_never_used_unsafely` | http endpoint refused, valid config stored, list response contains no key, chat falls back with an `engine_note` mentioning TLS, backup created and listed |
 
-## UI assertions (191, jsdom + live server)
+## UI assertions (214, jsdom + live server)
 
 Library rendering · engine badge from `/api/capabilities` · notebook creation via the
 form · three-pane workspace · paste-import · source list with passage counts ·
@@ -427,6 +427,15 @@ absent from the module on purpose.
 What is **not** tested here: a real browser rendering (jsdom has no layout, so the CSS
 rules are asserted as root attributes and variables, not as painted pixels), and
 high-contrast/reduced-motion on an operating system that requests them natively.
+
+## Study decks, notes bulk conversion and chat-history deletion (2026-11-02)
+
+| Layer | Tests | Proves |
+|---|---|---|
+| unit (`artifacts::tests`, 4 new) | `deck_size_accepts_names_numbers_and_refuses_nonsense`, `a_sized_deck_is_actually_that_long`, `shuffle_is_deterministic_and_keeps_every_card`, `a_quiz_question_has_a_hint_that_does_not_give_the_answer_away` |
+| e2e | `study_decks_can_be_sized_shuffled_restarted_and_trimmed` — `fewer` = 6 cards, `dozen` → 422 `bad_size`, shuffle keeps the multiset and moves the order and **keeps the mark**, restart restores the generated order and reports `marks_cleared`, delete trims and renumbers contiguously, unknown card 404, a report refuses study ops (409 `not_a_deck`), quiz hints exist, regeneration reproduces the recorded size |
+| e2e | `notes_convert_in_bulk_and_chat_history_can_be_cleared` — bulk conversion counts, per-note skip reasons, idempotency, the converted note is a citable source (`source_title` is the note's title), clearing history empties only that notebook and leaves notes alone |
+| UI (12 new) | deck-size control · `fewer`/`more` lengths · shuffle reported + persisted + order changes · CSV header and row count · delete trims and is stored · restart clears marks · practise-missed says there is nothing to practise · quiz hint visible and points at the passage · bulk note conversion creates a note source without deleting the note · chat history deletion empties conversations and keeps sources |
 
 ## Not covered (honest gaps)
 

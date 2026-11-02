@@ -3131,7 +3131,7 @@ fn github_repositories_are_read_as_readme_and_numbered_issues() {
     assert_eq!(st, 200, "{:?}", answer);
     assert!(answer.str_of("answer").unwrap_or("").contains("2.75"), "{:?}", answer);
     let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
-    assert!(!cites.is_empty());
+    assert!(!cites.is_empty(), "answer was: {:?}", answer);
     assert_eq!(cites[0].str_of("locator_label"), Some("section README"), "the README answered this one");
 
     // A question whose answer only exists in an issue is cited to that issue's number and title.
@@ -3366,7 +3366,7 @@ fn instruction_like_source_text_is_reported_and_not_followed() {
 
     // The citation the answer used is the factual sentence, verified against the chunk.
     let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
-    assert!(!cites.is_empty());
+    assert!(!cites.is_empty(), "answer was: {:?}", answer);
     assert!(cites[0].str_of("quote").unwrap_or("").contains("thirty days"));
     let (_, chunks) = s.json("GET", &format!("/api/sources/{}/chunks", src_id), None);
     let chunk_texts: Vec<String> = chunks
@@ -3500,7 +3500,8 @@ fn data_table_artifacts_project_a_real_grid_with_per_cell_evidence() {
     assert_eq!(st, 422);
     assert!(err.str_of("error").unwrap_or("").contains("projection is empty"), "{:?}", err);
 
-    // An artifact that is not a data table refuses CSV rather than exporting prose as a grid.
+    // A deck exports as a card table (one card per row, with its evidence); an artifact that is
+    // neither a grid nor a deck refuses CSV rather than exporting prose as a table.
     let (st, cards) = s.json(
         "POST",
         &format!("/api/notebooks/{}/artifacts", nb_id),
@@ -3508,7 +3509,20 @@ fn data_table_artifacts_project_a_real_grid_with_per_cell_evidence() {
     );
     assert_eq!(st, 201, "{:?}", cards);
     let card_id = cards.str_of("id").unwrap().to_string();
-    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=csv", card_id), None);
+    let (st, headers, body) = s.raw_bytes("GET", &format!("/api/artifacts/{}/export?format=csv", card_id));
+    assert_eq!(st, 200);
+    assert!(headers.to_ascii_lowercase().contains("text/csv"), "{}", headers);
+    let deck_csv = String::from_utf8(body).unwrap();
+    assert!(deck_csv.starts_with("n,card_id,front,back,source,locator,quote,mark\r\n"), "{}", deck_csv);
+    assert_eq!(deck_csv.lines().count(), cards.get("payload").and_then(|p| p.get("cards")).and_then(|c| c.as_arr()).map(|a| a.len()).unwrap_or(0) + 1);
+
+    let (st, report) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("report"))])),
+    );
+    assert_eq!(st, 201, "{:?}", report);
+    let (st, body) = s.json("GET", &format!("/api/artifacts/{}/export?format=csv", report.str_of("id").unwrap()), None);
     assert_eq!(st, 409, "{:?}", body);
     assert_eq!(body.str_of("code"), Some("format_unavailable"));
 }
@@ -3749,4 +3763,251 @@ fn the_capability_page_names_what_settings_cannot_do() {
     }
     let usage = caps.get("usage").cloned().unwrap_or(Value::Bool(false));
     assert_eq!(usage.str_of("status"), Some("supported"));
+}
+
+#[test]
+fn study_decks_can_be_sized_shuffled_restarted_and_trimmed() {
+    let dir = tempdir("study");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Study"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+
+    // Enough definitional sentences that a deck can actually reach 24 cards.
+    let mut text = String::new();
+    for i in 0..30 {
+        text.push_str(&format!("Term{} is a concept numbered {} in this document. ", i, i));
+    }
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[("title", Value::from("Terms")), ("text", Value::from(text))])),
+    );
+    assert_eq!(st, 201);
+
+    // Deck size is honoured, recorded, and refuses nonsense.
+    let (st, small) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("flashcards")), ("count", Value::from("fewer"))])),
+    );
+    assert_eq!(st, 201, "{:?}", small);
+    let art_id = small.str_of("id").unwrap().to_string();
+    let cards_of = |v: &Value| -> Vec<String> {
+        v.get("payload")
+            .and_then(|p| p.get("cards"))
+            .and_then(|c| c.as_arr())
+            .map(|a| a.iter().filter_map(|c| c.str_of("id").map(|s| s.to_string())).collect())
+            .unwrap_or_default()
+    };
+    let original = cards_of(&small);
+    assert_eq!(original.len(), 6, "fewer means six cards: {:?}", original);
+
+    let (st, bad) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("flashcards")), ("count", Value::from("dozen"))])),
+    );
+    assert_eq!(st, 422, "{:?}", bad);
+    assert_eq!(bad.str_of("code"), Some("bad_size"));
+
+    // A mark, then a shuffle that must keep every card and move at least one.
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/review", art_id),
+        Some(obj(&[("card_id", Value::from(original[0].as_str())), ("known", Value::Bool(false))])),
+    );
+    assert_eq!(st, 200);
+
+    let (st, shuffled) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", art_id),
+        Some(obj(&[("action", Value::from("shuffle"))])),
+    );
+    assert_eq!(st, 200, "{:?}", shuffled);
+    let after = cards_of(&shuffled);
+    let mut a = after.clone();
+    let mut b = original.clone();
+    a.sort();
+    b.sort();
+    assert_eq!(a, b, "a shuffle never loses a card");
+    assert_ne!(after, original, "a shuffle moves the deck");
+    assert_eq!(shuffled.get("version").and_then(|v| v.as_f64()), Some(2.0), "the edit is versioned");
+    let marks = s.json("GET", &format!("/api/artifacts/{}", art_id), None).1;
+    assert_eq!(
+        marks.get("reviews").and_then(|r| r.str_of(&original[0])),
+        Some("unknown"),
+        "a shuffle does not clear the learner's marks"
+    );
+
+    // Restart clears the marks and restores the generated order.
+    let (st, restarted) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", art_id),
+        Some(obj(&[("action", Value::from("restart"))])),
+    );
+    assert_eq!(st, 200, "{:?}", restarted);
+    assert_eq!(restarted.get("marks_cleared").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(cards_of(&restarted), original, "restart puts the deck back the way it was generated");
+    let (_, reloaded) = s.json("GET", &format!("/api/artifacts/{}", art_id), None);
+    assert_eq!(reloaded.get("reviews").and_then(|r| r.as_obj()).map(|m| m.len()), Some(0));
+
+    // Deleting one card trims the deck, renumbers it, and leaves the source alone.
+    let doomed = original[1].clone();
+    let (st, trimmed) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", art_id),
+        Some(obj(&[("action", Value::from("delete_card")), ("card_id", Value::from(doomed.as_str()))])),
+    );
+    assert_eq!(st, 200, "{:?}", trimmed);
+    let kept = cards_of(&trimmed);
+    assert_eq!(kept.len(), 5);
+    assert!(!kept.contains(&doomed));
+    let nums: Vec<f64> = trimmed
+        .get("payload")
+        .and_then(|p| p.get("cards"))
+        .and_then(|c| c.as_arr())
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.get("n").and_then(|n| n.as_f64()))
+        .collect();
+    assert_eq!(nums, vec![1.0, 2.0, 3.0, 4.0, 5.0], "numbering stays contiguous");
+
+    let (st, missing) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", art_id),
+        Some(obj(&[("action", Value::from("delete_card")), ("card_id", Value::from("card-999"))])),
+    );
+    assert_eq!(st, 404);
+    assert_eq!(missing.str_of("code"), Some("card_not_found"));
+
+    // These operations exist for decks, not for prose.
+    let (_, report) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("report"))])),
+    );
+    let (st, refusal) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/study", report.str_of("id").unwrap()),
+        Some(obj(&[("action", Value::from("shuffle"))])),
+    );
+    assert_eq!(st, 409);
+    assert_eq!(refusal.str_of("code"), Some("not_a_deck"));
+
+    // A quiz carries a hint per question, and a deck regeneration keeps its size.
+    let (st, quiz) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/artifacts", nb_id),
+        Some(obj(&[("kind", Value::from("quiz")), ("count", Value::from("4"))])),
+    );
+    assert_eq!(st, 201, "{:?}", quiz);
+    let qs = quiz.get("payload").and_then(|p| p.get("questions")).and_then(|q| q.as_arr()).cloned().unwrap_or_default();
+    assert!(!qs.is_empty());
+    for q in &qs {
+        assert!(q.str_of("hint").unwrap_or("").contains("Look at"), "{:?}", q);
+    }
+    let (st, regen) = s.json(
+        "POST",
+        &format!("/api/artifacts/{}/regenerate", quiz.str_of("id").unwrap()),
+        Some(obj(&[])),
+    );
+    assert_eq!(st, 200, "{:?}", regen);
+    assert_eq!(
+        regen.get("payload").and_then(|p| p.get("questions")).and_then(|q| q.as_arr()).map(|a| a.len()),
+        Some(qs.len()),
+        "regeneration reproduces the recorded deck size"
+    );
+}
+
+#[test]
+fn notes_convert_in_bulk_and_chat_history_can_be_cleared() {
+    let dir = tempdir("notes-bulk");
+    let s = Server::start(dir.clone());
+
+    let (st, nb) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Notes"))])));
+    assert_eq!(st, 201);
+    let nb_id = nb.str_of("id").unwrap().to_string();
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", nb_id),
+        Some(obj(&[
+            ("title", Value::from("Policy")),
+            ("text", Value::from("Retention is thirty days. Deletion happens after the review.")),
+        ])),
+    );
+    assert_eq!(st, 201);
+
+    let (st, note_a) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/notes", nb_id),
+        Some(obj(&[("title", Value::from("Retention")), ("body", Value::from("Retention is thirty days for records."))])),
+    );
+    assert_eq!(st, 201, "{:?}", note_a);
+    // An empty note is refused at creation, so emptiness never reaches the bulk conversion.
+    let (st, empty) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/notes", nb_id),
+        Some(obj(&[("title", Value::from("Empty")), ("body", Value::from("   "))])),
+    );
+    assert_eq!(st, 422, "{:?}", empty);
+
+    // Bulk conversion: the note becomes a citable source.
+    let (st, bulk) = s.json("POST", &format!("/api/notebooks/{}/notes/to-sources", nb_id), Some(obj(&[])));
+    assert_eq!(st, 200, "{:?}", bulk);
+    assert_eq!(bulk.get("notes").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(bulk.get("converted").and_then(|v| v.as_f64()), Some(1.0));
+    assert_eq!(bulk.get("skipped").and_then(|v| v.as_f64()), Some(0.0));
+
+    // Running it again converts nothing and says why.
+    let (st, again) = s.json("POST", &format!("/api/notebooks/{}/notes/to-sources", nb_id), Some(obj(&[])));
+    assert_eq!(st, 200);
+    assert_eq!(again.get("converted").and_then(|v| v.as_f64()), Some(0.0));
+    let reasons: Vec<String> = again
+        .get("skipped_notes")
+        .and_then(|v| v.as_arr())
+        .unwrap()
+        .iter()
+        .map(|s| s.str_of("reason").unwrap_or("").to_string())
+        .collect();
+    assert!(reasons.contains(&"already_a_source".to_string()), "{:?}", reasons);
+
+    // The converted note is a real source: it answers a question about a word only it contains,
+    // and the citation names the note as the source.
+    let (st, answer) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", nb_id),
+        Some(obj(&[("question", Value::from("records"))])),
+    );
+    assert_eq!(st, 200, "{:?}", answer);
+    let cites = answer.get("citations").and_then(|c| c.as_arr()).cloned().unwrap_or_default();
+    assert!(!cites.is_empty(), "answer was: {:?}", answer);
+    assert_eq!(cites[0].str_of("source_title"), Some("Retention"), "the note is the cited source");
+
+    // Chat history clears for this notebook only, and leaves notes and artifacts alone.
+    let (st, other) = s.json("POST", "/api/notebooks", Some(obj(&[("title", Value::from("Other"))])));
+    assert_eq!(st, 201);
+    let other_id = other.str_of("id").unwrap().to_string();
+    let (_, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/sources/text", other_id),
+        Some(obj(&[("title", Value::from("Other text")), ("text", Value::from("Other notebooks keep their history."))])),
+    );
+    let (st, _) = s.json(
+        "POST",
+        &format!("/api/notebooks/{}/chat", other_id),
+        Some(obj(&[("question", Value::from("history"))])),
+    );
+    assert_eq!(st, 200);
+
+    let (st, cleared) = s.json("DELETE", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    assert_eq!(st, 200, "{:?}", cleared);
+    assert!(cleared.get("messages_deleted").and_then(|v| v.as_f64()).unwrap_or(0.0) >= 2.0);
+    let (_, mine) = s.json("GET", &format!("/api/notebooks/{}/conversations", nb_id), None);
+    assert_eq!(mine.get("conversations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(0));
+    let (_, theirs) = s.json("GET", &format!("/api/notebooks/{}/conversations", other_id), None);
+    assert_eq!(theirs.get("conversations").and_then(|c| c.as_arr()).map(|a| a.len()), Some(1), "other notebooks are untouched");
+    let (_, notes_left) = s.json("GET", &format!("/api/notebooks/{}/notes", nb_id), None);
+    assert_eq!(notes_left.get("notes").and_then(|n| n.as_arr()).map(|a| a.len()), Some(1), "deleting a transcript does not delete the notes");
 }
