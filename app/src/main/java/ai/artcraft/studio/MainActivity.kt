@@ -206,20 +206,22 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun localAssetHandler() = WebViewAssetLoader.PathHandler { path ->
-        val relative = path.removePrefix("/")
-        if (relative.isBlank() || relative.split('/').any { it == ".." || it.isBlank() }) {
-            return@PathHandler WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), "Not found".byteInputStream())
+    private fun localAssetHandler(): WebViewAssetLoader.PathHandler = object : WebViewAssetLoader.PathHandler {
+        override fun handle(path: String): WebResourceResponse? {
+            val relative = path.removePrefix("/")
+            if (relative.isBlank() || relative.split('/').any { it == ".." || it.isBlank() }) {
+                return WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), "Not found".byteInputStream())
+            }
+            val extension = relative.substringAfterLast('.', "").lowercase()
+            val mime = when (extension) {
+                "wasm" -> "application/wasm"
+                "js", "mjs" -> "text/javascript"
+                "html" -> "text/html"
+                else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
+            }
+            return runCatching { assets.open(relative) }.getOrNull()?.let { WebResourceResponse(mime, null, it) }
+                ?: WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), "Not found".byteInputStream())
         }
-        val extension = relative.substringAfterLast('.', "").lowercase()
-        val mime = when (extension) {
-            "wasm" -> "application/wasm"
-            "js", "mjs" -> "text/javascript"
-            "html" -> "text/html"
-            else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
-        }
-        runCatching { assets.open(relative) }.getOrNull()?.let { WebResourceResponse(mime, null, it) }
-            ?: WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), "Not found".byteInputStream())
     }
 
     private fun blockedResponse() = WebResourceResponse(

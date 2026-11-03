@@ -138,7 +138,30 @@ jobs:
         with:
           gradle-version: "8.11.1"
       - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee gradle-build.log
+      - name: Publish Gradle failure details
+        if: failure()
+        shell: bash
+        run: |
+          if [[ -f gradle-build.log ]]; then
+            tail -n 60 gradle-build.log | tr '\n' ' ' | head -c 12000 | sed 's/%/%25/g; s/\r/%0D/g' > /tmp/gradle-tail.txt
+            echo "::error title=Gradle build failed::$(cat /tmp/gradle-tail.txt)"
+            echo '### Gradle failure log' >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            tail -n 120 gradle-build.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload Gradle log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-gradle-build-log
+          path: gradle-build.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Verify APK and editor payloads
         shell: bash
         run: |
