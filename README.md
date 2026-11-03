@@ -1,16 +1,19 @@
 # ARTCRAFT STUDIO
 
-An Android host for the seven original ArtCraft editing engines. The editors are kept as exact, pinned Git submodules; the Android build workflow compiles each upstream WebAssembly frontend and packages those genuine editor bundles into one debug APK. The host loads only the selected editor and serves its local assets from AndroidX WebViewAssetLoader, not from a remote web page.
+An Android host for the seven original ArtCraft editing engines: PhotoCraft, VectorCraft, FilmCraft, LightCraft, PdfCraft, EffectCraft and DesignCraft. The editors remain exact, pinned upstream Git submodules; the Android workflow builds their WebAssembly frontends and packages them into one APK. The host loads only the selected editor from local assets through AndroidX WebViewAssetLoader.
 
 ## Current status
 
-- **Upstream checkout:** all 7 official source repositories shallow-cloned as submodules and pinned in `UPSTREAM_LOCK.json`.
-- **Android host:** initial launcher/workspace and local WebView hosting implementation added.
-- **Import/export bridge:** SAF open picker and a host-mediated blob export path are implemented in source; Android runtime behavior is not yet tested.
-- **Provider settings:** Gemini, Anthropic/Claude and OpenAI-compatible endpoint/model/key settings and an explicit connection test are implemented. API keys use Android Keystore-backed AES-GCM encryption. No key is hardcoded or logged.
-- **Editor operations through a shared AI agent:** **NOT STARTED / not claimed.** See [`AI_INTEGRATION.md`](AI_INTEGRATION.md): web command APIs exist for four upstream apps; PhotoCraft, PdfCraft and DesignCraft need reviewed adapters. The provider settings screen alone does not make an AI editor.
-- **Phone/tablet editor responsiveness:** the suite launcher adapts to its viewport. Each embedded upstream editor still needs real phone/tablet usability and touch testing; a desktop UI scaled to a phone is not counted as mobile support.
-- **APK:** no APK is claimed until the Android workflow succeeds and its artifact is verified. This checkout environment does not have Java, Gradle, Android SDK or Rust installed.
+- **Upstream sources:** all seven official repositories are pinned in `UPSTREAM_LOCK.json`; `python3 scripts/verify_checkout.py` verifies the pins.
+- **Studio shell:** responsive dark launcher/workspace, new launcher mark, focus mode, expandable diagnostics/agent panels, selected-editor-only iframe loading and startup surface watchdog are implemented in source.
+- **Editor UI:** the upstream editors and their real tools are preserved. Their internal mobile/touch usability has not been redesigned or runtime-validated; the wrapper's focus mode gives a larger canvas without closing the current project.
+- **Import/export:** Android SAF file-open and host-mediated export code is present. Real project round-trips have not yet been validated on Android.
+- **Provider settings:** Gemini, Anthropic/Claude and OpenAI-compatible endpoint/model/key settings are implemented; keys are encrypted with an Android Keystore-backed AES-GCM key. The generic connection test sends no project content.
+- **Experimental visual agent:** native per-workflow screenshot consent, provider-backed planning, user plan approval, a visible cursor and bounded UI-action bridge are implemented in source. It dispatches synthetic pointer/keyboard events into the selected real editor, does not run generated scripts, and rechecks the screen between approved steps. **This has not yet been built or runtime-tested**; editor-specific task coverage, action reliability, undo/recovery and project save outcomes are not claimed.
+- **Diagnostics:** local startup diagnostics retain only redacted error categories and safe bundled-resource paths; arbitrary JavaScript error text is omitted to avoid project-content/API-key leakage.
+- **Emulator smoke tests:** CI now launches all seven editors on an Android emulator and waits for a visible canvas while checking fatal startup reports. This is a startup-surface smoke test, not proof of editing/export correctness. The updated workflow has not yet run.
+- **APK:** a baseline debug APK build succeeded in earlier run [41580239517](https://github.com/mhammedamazil-hub/testtemp/actions/runs/41580239517), before the current UI/agent/test changes. The updated source has not been rebuilt. The earlier artifact is available from the Actions run, not stored in this repository.
+- **Device testing:** this environment has no Java/JDK, Gradle, Android SDK, adb/emulator or physical device. No physical-device or Galaxy Tab A9 test is claimed.
 
 ## Get the exact upstream sources
 
@@ -19,29 +22,24 @@ git submodule update --init --recursive
 python3 scripts/verify_checkout.py
 ```
 
-`UPSTREAM_LOCK.json` pins each checkout to an exact reviewed commit. Each upstream's own license applies; the projects are dual MIT OR Apache-2.0, and bundled fonts, media, model assets and third-party dependencies may have additional notices.
+Each upstream's license applies. The repositories offer MIT OR Apache-2.0 for core code; bundled fonts, media, model assets and third-party dependencies may have separate notices.
 
-## Build the Android APK in GitHub Actions
+## Build and smoke-test in GitHub Actions
 
-Run the **Android APK** workflow from the Actions tab using `workflow_dispatch`, or push a change on an `arena/**` branch that touches the listed source/build paths. The workflow:
+Run the **Android APK** workflow from the Actions tab or push a change on an `arena/**` branch that touches the listed source/build paths. The workflow builds each upstream web/WASM editor in a separate job, assembles the real bundles into the Android app, builds a debug APK, runs the all-seven Android-emulator startup smoke test, verifies APK payloads and uploads the APK artifact. Smoke-test reports are uploaded on failure.
 
-1. checks out all pinned submodules;
-2. builds each original web/WASM editor in a separate job;
-3. assembles each build into the Android app's editor asset directory;
-4. builds and structurally checks one Android debug APK;
-5. uploads `artcraft-studio-debug-apk` as a workflow artifact.
-
-A GitHub Actions artifact is a debug-signed APK suitable for test installation, not a release-signed public distribution. Signing/release management is deliberately not configured.
+The debug-signed APK is for testing, not public distribution. Release signing is not configured.
 
 ## Android project
 
-The native Android host is under `app/`. It requires JDK 17, Android SDK platform/build-tools 35, and Gradle 8.11.1. The app's editor assets are generated by the workflow and intentionally ignored by Git; do not check compiled `.wasm` bundles or APK outputs into the repository.
+The native host is under `app/`. It requires JDK 17, Android SDK platform/build-tools 35 and Gradle 8.11.1. Built editor assets and APK outputs are generated by CI and intentionally ignored; do not check compiled bundles or APKs into the repository.
 
 ## Audit and integration notes
 
-- `AUDIT_REPORT.md` — source, licensing, Android feasibility, blockers, test scope and sequence.
+- `AUDIT_REPORT.md` — source, licensing, Android feasibility, blockers and verification status.
 - `AUDIT/` — the seven editor-specific source audits.
+- `AI_INTEGRATION.md` — current experimental visual-agent design, safeguards and unverified coverage.
 - `UPSTREAM_LOCK.json` — exact submodule pins.
-- `.github/workflows/android-apk.yml` — WASM and one-APK build pipeline.
+- `.github/workflows/android-apk.yml` — upstream WASM builds, APK packaging and emulator smoke tests.
 
-This is an incremental engineering build, not the completed Definition of Done. Each editor's command adapter, mobile/touch review, real project round-trip tests, device memory measurements and the shared AI execution/approval/undo pipeline remain required before those capabilities can be marked tested or verified.
+This remains an incremental engineering build. Passing the new startup smoke tests will not prove real editing, undo, save/reopen/export, video workflows, memory headroom or phone/tablet usability. Those still need separate validation on emulators and target devices.

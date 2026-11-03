@@ -192,6 +192,26 @@ jobs:
           path: gradle-build.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: Run Android emulator startup smoke tests for all seven editors
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 3072 -cores 2 -no-snapshot
+          disable-animations: true
+          script: gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
+      - name: Upload emulator smoke-test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-emulator-smoke-test-reports
+          path: |
+            app/build/reports/androidTests/connected/**
+            app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Verify APK and editor payloads
         shell: bash
         run: |

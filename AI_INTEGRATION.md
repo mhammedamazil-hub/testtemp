@@ -1,47 +1,55 @@
-# Shared AI integration — evidence and status
+# Experimental visual-agent status
 
-**Overall:** NOT STARTED for real editor execution. The provider configuration UI is a source scaffold; it is not yet an editing agent.
+**Source status:** native provider request, per-workflow screenshot consent, plan review, visible-cursor UI-action bridge and bounded action validation have been implemented. They have **not** been built, emulator-tested, connected to a live provider or verified against real editing workflows. The agent is experimental and must not be described as a reliable editor operator yet.
 
-## Provider settings implemented in source
+## Interaction and consent model
 
-- User-editable provider: Gemini, Claude/Anthropic, or OpenAI-compatible.
-- User-editable HTTPS endpoint and model ID (no guessed model is hardcoded).
-- API key encrypted with an Android Keystore AES-GCM key; key is never written to logs.
-- User-triggered generic connectivity request; no project content is sent by that screen.
-- Status: **IMPLEMENTED in source, NOT BUILT or VERIFIED**. No live provider connection has been tested.
-- Not implemented: model discovery, token/usage accounting, assistant conversation, tool calling, consent dialogs for project data, action planning/execution, operation history, or undo integration.
+- The selected real editor stays open in its own WebView iframe. The host loads no inactive editor.
+- Before each planning workflow, Android asks permission to send the task text and a screenshot of the visible editor to the selected provider. If the user approves the plan, updated screenshots are sent for subsequent visual re-planning under that same workflow consent. Screenshots are not written to app storage by the agent; the provider may retain them under its own policy.
+- The provider returns a bounded JSON plan. The user must approve that plan before any editor action. Destructive edits/exports may run after that approval without another confirmation, as requested.
+- The experimental action vocabulary is limited to in-editor click, drag, scroll, short plain-text typing, a small key allowlist, wait and stop/done. Coordinates are normalized and confined to the iframe. Typed text rejects code-like punctuation and multiline input. The agent never executes generated JavaScript, shell commands, arbitrary URLs or arbitrary file paths.
+- After the initial approved plan, visual re-planning is constrained to each approved step and its action type; approved typed text and keys are kept unchanged. A visible cursor, progress status, Stop control and conservative stop-on-error behavior are provided.
+- These protections constrain the protocol, not the model's understanding. Synthetic DOM pointer/keyboard events may be ignored or interpreted differently by an editor. No undo/checkpoint integration or operation history is implemented. Verify the project state and save/export through the editor's own controls.
 
-## Upstream automation surfaces inspected
+## Provider configuration
 
-| Editor | Existing source evidence | Adapter state in ArtCraft Studio |
+- Providers: Gemini, Anthropic/Claude and OpenAI-compatible.
+- Endpoint and model are user-configurable; API endpoints must use HTTPS and cannot embed credentials in the URL.
+- API keys are stored encrypted with an Android Keystore AES-GCM key and are not exposed to the WebView or written to app diagnostics. Provider requests run in the Android process.
+- The Settings connection test sends a generic short prompt only; it does not include screenshots or project data.
+- No model discovery, usage accounting or provider-side retention controls are implemented. Only use a vision-capable model. Live API requests have not been tested.
+
+## Editor coverage and constraints
+
+The native bridge targets the actual open WebView UI for all seven pinned upstream editors. It does **not** use their MCP servers or web command APIs. It therefore has no verified editor-specific capability registry, parameter schemas or operation-level verification. Coverage is presently **experimental and unverified for every editor**:
+
+| Editor | Current source-level path | Not verified |
 |---|---|---|
-| PhotoCraft | Desktop UI/CLI/MCP share an engine command registry. Its inspected web frontend has browser file open/save but no JavaScript command bridge. | **BLOCKED** pending a real web/engine adapter; do not emulate editor clicks. |
-| VectorCraft | `window.vectorcraft` web API exposes command execution/discovery, UI inspection, screenshots and file capture/readback. | **INVESTIGATING**; no Android adapter or action tests yet. |
-| FilmCraft | `window.filmcraft` web API and command catalog exist. Web build has limitations: single-threaded per instance and some operations report unavailable. | **INVESTIGATING**; no Android adapter or action tests yet. |
-| LightCraft | `lightcraft.command(id, params)` is documented for the WebAssembly UI; browser storage and worker rendering are editor-managed. | **INVESTIGATING**; no Android adapter or action tests yet. |
-| PdfCraft | Desktop CLI/MCP automation exists. The web host `postMessage` bridge handles open/save/dirty state, not the full command catalog. | **BLOCKED** pending real engine/web command adapter. |
-| EffectCraft | `window.effectcraft` web API exposes editor commands and render/file operations. Web jobs/workers have platform-specific limitations. | **INVESTIGATING**; no Android adapter or action tests yet. |
-| DesignCraft | Desktop command/control/MCP support exists. The upstream explicitly says its web build has no control channel. | **BLOCKED** pending real engine/web command adapter. |
+| PhotoCraft | Visible pointer/keyboard actions in the genuine WebAssembly UI | Tool targeting, image import/edit/save/export, undo and mobile usability |
+| VectorCraft | Visible pointer/keyboard actions in the genuine WebAssembly UI | Shape/path operations, SVG round-trip and mobile usability |
+| FilmCraft | Visible pointer/keyboard actions in the genuine WebAssembly UI | Timeline, video/audio, keyframe, render/export and playback workflows |
+| LightCraft | Visible pointer/keyboard actions in the genuine WebAssembly UI | Library/RAW import, color development, worker/GPU behavior and export |
+| PdfCraft | Visible pointer/keyboard actions plus existing host PDF save-message handling | Document open/edit/save, page operations and PDF round-trip |
+| EffectCraft | Visible pointer/keyboard actions in the genuine WebAssembly UI | Node/effect editing, worker/GPU and rendering/export workflows |
+| DesignCraft | Visible pointer/keyboard actions in the genuine WebAssembly UI | Layout/typography tasks and document round-trip |
 
-These findings describe source surfaces, not tested capabilities. A command is not eligible for the AI capability registry until its exact ID, parameter schema, validation, cancellation behavior, undo/checkpoint behavior and output verification have tests against the real editor session.
+The new CI smoke test checks only that each editor reaches a visible canvas and does not report a fatal startup error within its initial observation window. It does not test the AI agent or prove editing/export success. The updated workflow has not yet run. No Android emulator or physical-device runtime result is currently available.
 
-## Required execution design
+## Security and data handling
 
-1. Ask before any external provider request that includes project content or selected assets; default to sending only the user prompt and tested capability metadata.
-2. Query the active editor adapter for real typed capabilities. Never let the model invent executable code or arbitrary filesystem/network operations.
-3. Have the model return a multi-step plan/tool request with strict editor-specific JSON Schema.
-4. Validate every command/parameter locally against the active editor's current command catalog and project state.
-5. Ask explicit approval for destructive operations; checkpoint using the editor's native history/save model where supported.
-6. Execute one operation at a time through the actual upstream command API, report progress, support cancellation and verify each result from the engine response/project state.
-7. Keep provider credentials in native secure storage and call providers from the Android process. Do not expose keys to the WebView or embed secrets in JS, assets, logs, workflow files or Git.
-8. Record redacted operation history and provide a user-facing undo/recovery path. Do not claim undo if an editor cannot restore the operation.
-9. Cross-editor workflows require explicit asset handoff, native project preservation and verification at every boundary.
+- No API key is embedded in HTML/JavaScript/assets, logged, or sent to the WebView. Gemini credentials are placed in a request header rather than a URL query.
+- No external screenshot/project upload occurs before an explicit per-workflow native consent dialog. Consent text states that follow-up screenshots are also sent if the user later approves execution.
+- Local WebView diagnostics keep category-only error messages and bundled asset paths, not arbitrary console text that could include project content or secrets.
+- Generated code and shell commands are not an allowed action type; text entry is bounded to short plain-language text/simple names.
+- The user can approve destructive operations as part of the full plan; therefore review the plan carefully. The Stop control interrupts between visual actions where feasible, but cannot guarantee immediate interruption of a provider network request or an editor action already in progress.
 
-## Status vocabulary
+## Required next validation
 
-- Provider fields/key storage/connection-test code: **IMPLEMENTED in source**, not built/tested.
-- Shared agent UI and task planning: **NOT STARTED**.
-- Seven-editor capability registry: **NOT STARTED**.
-- Real tool execution adapters: **NOT STARTED** (four existing web APIs identified; three need adapter work).
-- Destructive approval, undo/checkpoint, cancellation and execution history: **NOT STARTED**.
-- Cross-editor automation: **NOT STARTED**.
+1. Build the updated debug APK in Actions; fix any Kotlin/Gradle errors.
+2. Run the seven-editor Android emulator startup smoke test and inspect the diagnostics/report artifact.
+3. Verify screenshot capture quality (including WebGL/WebGPU canvases), UI cursor alignment, and consent/cancel behavior on the emulator.
+4. With consent, test one simple, reversible task in each editor; verify real UI actions, stop/recovery and editor-native undo.
+5. Test actual project open/edit/save/reopen/export, including FilmCraft video/motion and LightCraft/EffectCraft resource-heavy paths.
+6. Measure startup, memory and interaction on a 4 GB-class tablet such as Galaxy Tab A9 when a device becomes available.
+
+Do not mark any editor task as supported until it has repeatable end-to-end tests against the genuine upstream engine and its real project files.

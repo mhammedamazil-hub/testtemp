@@ -9,6 +9,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import java.net.URI
 
 /** Stores provider API secrets encrypted with an Android Keystore AES-GCM key. */
 internal class SecureProviderStore(context: Context) {
@@ -24,14 +25,26 @@ internal class SecureProviderStore(context: Context) {
 
     fun save(provider: String, endpoint: String, model: String, apiKey: String) {
         require(provider in PROVIDERS)
-        require(endpoint.startsWith("https://")) { "Provider endpoint must use HTTPS." }
-        require(model.isNotBlank()) { "Model is required." }
-        prefs.edit().putString("$provider.endpoint", endpoint.trim()).putString("$provider.model", model.trim()).apply()
+        val endpointValue = endpoint.trim()
+        val uri = runCatching { URI(endpointValue.replace("{model}", "model")) }.getOrNull()
+        require(uri != null && uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() && uri.userInfo == null) { "Provider endpoint must be a valid HTTPS URL without embedded credentials." }
+        require(endpointValue.length <= 1_000 && !Regex("(?i)(?:^|[?&])(?:key|api[_-]?key|token|access[_-]?token|authorization)=").containsMatchIn(endpointValue)) { "Keep credentials in the encrypted API key field, not in the endpoint URL." }
+        require(model.isNotBlank() && model.length <= 200) { "Model is required and must be at most 200 characters." }
+        require(apiKey.length <= 512 && apiKey.none { it.code < 0x20 }) { "API key is invalid or too long." }
+        prefs.edit().putString("$provider.endpoint", endpointValue).putString("$provider.model", model.trim()).apply()
         if (apiKey.isNotBlank()) keyPrefs.edit().putString(provider, encrypt(apiKey.trim())).apply()
     }
 
     fun clearKey(provider: String) {
         keyPrefs.edit().remove(provider).apply()
+    }
+
+    fun activeProvider(): String = prefs.getString("active.provider", "gemini")
+        ?.takeIf { it in PROVIDERS } ?: "gemini"
+
+    fun setActiveProvider(provider: String) {
+        require(provider in PROVIDERS)
+        prefs.edit().putString("active.provider", provider).apply()
     }
 
     private fun encrypt(value: String): String {

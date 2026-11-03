@@ -89,7 +89,7 @@ class SettingsActivity : Activity() {
             }
         }, matchWrap())
         fields.addView(TextView(this).apply {
-            text = "Provider keys are local to this installation. Requests to external providers happen only after an explicit user action. The shared editing agent is being integrated separately; configuring a key alone does not enable unverified editor actions."
+            text = "Provider keys are local to this installation. Visual control is experimental: each task that shares a screenshot requires separate consent, and the agent shows a plan for your approval before any editor action. Use a vision-capable model."
             textSize = 12f
             setTextColor(Color.rgb(139, 148, 162))
             setPadding(0, dp(12), 0, dp(12))
@@ -103,10 +103,13 @@ class SettingsActivity : Activity() {
         provider.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (!loading) loadConfig()
+                if (!loading) {
+                    store.setActiveProvider(providerId())
+                    loadConfig()
+                }
             }
         }
-        provider.setSelection(0)
+        provider.setSelection(SecureProviderStore.PROVIDERS.indexOf(store.activeProvider()).coerceAtLeast(0))
         loadConfig()
     }
 
@@ -122,6 +125,7 @@ class SettingsActivity : Activity() {
 
     private fun saveConfig(): Boolean {
         return try {
+            store.setActiveProvider(providerId())
             store.save(providerId(), endpoint.text.toString(), model.text.toString(), apiKey.text.toString())
             apiKey.setText("")
             apiKey.hint = "Key saved (hidden); enter replacement or leave blank"
@@ -161,11 +165,7 @@ class SettingsActivity : Activity() {
             "anthropic" -> """{"model":${JSONObject.quote(modelName)},"max_tokens":4,"messages":[{"role":"user","content":"Reply with OK."}]}"""
             else -> """{"model":${JSONObject.quote(modelName)},"messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":4}"""
         }
-        val target = if (provider == "gemini") {
-            val withModel = config.endpoint.replace("{model}", URLEncoder.encode(modelName, "UTF-8"))
-            val separator = if (withModel.contains('?')) "&" else "?"
-            "$withModel${separator}key=${URLEncoder.encode(config.apiKey, "UTF-8")}"
-        } else config.endpoint
+        val target = config.endpoint.replace("{model}", URLEncoder.encode(modelName, "UTF-8"))
         val connection = (URL(target).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 12_000
@@ -173,11 +173,13 @@ class SettingsActivity : Activity() {
             instanceFollowRedirects = false
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
-            if (provider == "anthropic") {
-                setRequestProperty("x-api-key", config.apiKey)
-                setRequestProperty("anthropic-version", "2023-06-01")
-            } else if (provider == "openai") {
-                setRequestProperty("Authorization", "Bearer ${config.apiKey}")
+            when (provider) {
+                "gemini" -> setRequestProperty("x-goog-api-key", config.apiKey)
+                "anthropic" -> {
+                    setRequestProperty("x-api-key", config.apiKey)
+                    setRequestProperty("anthropic-version", "2023-06-01")
+                }
+                "openai" -> setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             }
         }
         try {
