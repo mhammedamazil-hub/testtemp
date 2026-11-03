@@ -145,6 +145,15 @@ jobs:
               rm -rf "app/src/main/assets/editors/${editor}/licenses"
             fi
           done
+          # Android's asset merger treats a .gz sidecar and its plain file as duplicate entries.
+          # The WebView serves the uncompressed upstream asset directly, so drop only redundant sidecars.
+          while IFS= read -r -d '' compressed; do
+            original="${compressed%.gz}"
+            if [[ -f "$original" ]]; then
+              echo "Dropping redundant gzip sidecar: $compressed"
+              rm -- "$compressed"
+            fi
+          done < <(find app/src/main/assets/editors -type f -name '*.gz' -print0)
           test -s app/src/main/assets/studio/index.html
       - uses: actions/setup-java@v6
         with:
