@@ -108,6 +108,7 @@ jobs:
 
   apk:
     name: Package single installable APK
+    timeout-minutes: 60
     needs: editor-web
     if: ${{ always() && (needs.editor-web.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.editor_artifacts_from_run != '')) }}
     runs-on: ubuntu-24.04
@@ -199,6 +200,7 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          emulator-boot-timeout: 1200
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 3072 -cores 2 -no-snapshot
           disable-animations: true
           script: gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
