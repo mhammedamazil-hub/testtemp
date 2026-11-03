@@ -1,0 +1,19 @@
+# VectorCraft source audit
+
+**Status:** INVESTIGATING (source/license identified; Android integration and local builds unverified).
+**Pinned source:** [`storytold/vectorcraft`](https://github.com/storytold/vectorcraft/tree/aaca80c961048161a3c7ab3ed8079727ac82b020) · commit `aaca80c961048161a3c7ab3ed8079727ac82b020` on `main` (shallow submodule checked out 2026-11-03; not a release tag).
+
+1. **Verified repository:** https://github.com/storytold/vectorcraft . Canonical repository for VectorCraft.
+2. **Exact commit/version:** `aaca80c961048161a3c7ab3ed8079727ac82b020`; no semantic release tag inferred.
+3. **License:** Dual MIT OR Apache-2.0 per README and root `LICENSE-MIT`/`LICENSE-APACHE`; API-selected metadata is Apache-2.0. Some vendored PDF backend files and assets carry their own notices; preserve and audit these.
+4. **Main languages:** Rust workspace; web frontend compiles to WebAssembly. Rust 1.95+ is declared in the workspace.
+5. **Build instructions:** Upstream examples include `cargo run --release -p vectorcraft`, `cargo run --release -p vectorcraft-cli ...` and `cargo xtask ci` (includes format/lint/test/layering/WASM checks). Font assets may be an optional external build input. These were not run here. No Android APK/Gradle build recipe is present in the canonical tree.
+6. **Android compatibility:** Native desktop and web/WASM platforms are advertised. Tree inspection found no official Android app module, manifest, Gradle project or Android packaging. A Rust/WASM target is a possible route to evaluate but is not proof of Android input, filesystem, GPU or lifecycle integration.
+7. **Existing editing functionality:** The web frontend exposes `window.vectorcraft` with typed control methods including command execution, command discovery, UI inspection, screenshot, file input and captured-save/file readback. It is the strongest verified browser automation surface in this set; Android host mediation and destructive-operation safeguards still need implementation. Upstream describes vector paths and Bézier tools, shapes, fills/strokes/gradients, layers and groups, text, transforms, path operations, SVG/PDF import/export and other interchange. The actual breadth and fidelity are upstream feature claims; Android operations remain untested.
+8. **Dependencies:** Separate Cargo workspace with app/CLI/web frontends and geometry, document, effects, rendering, text, path and PDF-related crates; README describes a Rust UI. Workspace minimum is Rust 1.95. Full transitive and asset-license inventory and Android build compatibility remain outstanding.
+9. **Memory requirements:** No verified Android device peak-RAM measurements or minimum Android hardware requirements located. Vector documents, font shaping, raster effects and rendered surfaces need realistic memory tests.
+10. **Integration strategy:** The new host/workflow is configured to bundle this pinned upstream web build lazily; runtime is unverified. Test path editing, save/reopen, SVG/PDF export, touch/stylus and SAF before registering any AI path/object operations. Adapt the existing `window.vectorcraft` API through a typed native adapter; keep command validation and destructive-action approval outside model-generated code.
+11. **Known blockers:** No official Android packaging; native graphics/windowing portability and touch/stylus behavior unknown; third-party PDF backend notices; fonts and asset bundling; memory/performance; no verified Android typed action API.
+12. **Test evidence:** GitHub API verified canonical repo, pinned commit, root license files, Rust workspace and documented build commands. No source compilation, cargo tests, browser build, APK build, editor operation or device test was performed here. Local test status: **NOT RUN**.
+
+**Capability registry status:** None registered as tested for ArtCraft Studio.

@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark" />
+    <title>ARTCRAFT STUDIO</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        background: #121419;
+        color: #f3f4f6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      body {
+        background: #121419;
+      }
+      #home {
+        height: 100%;
+        overflow: auto;
+        padding: clamp(18px, 4vw, 48px);
+      }
+      .intro {
+        max-width: 880px;
+        margin: 0 auto 26px;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(25px, 4vw, 38px);
+        letter-spacing: 0.02em;
+      }
+      .sub {
+        color: #aeb5c2;
+        line-height: 1.5;
+        margin-top: 10px;
+        max-width: 700px;
+      }
+      .grid {
+        max-width: 1080px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+        gap: 12px;
+      }
+      .editor {
+        min-height: 122px;
+        border: 1px solid #353b46;
+        border-radius: 12px;
+        background: #1b1e25;
+        color: #f3f4f6;
+        text-align: left;
+        padding: 18px;
+        cursor: pointer;
+      }
+      .editor:focus-visible,
+      .home-btn:focus-visible {
+        outline: 3px solid #72a7ff;
+        outline-offset: 2px;
+      }
+      .editor:hover {
+        border-color: #75859e;
+        background: #20242d;
+      }
+      .editor strong {
+        display: block;
+        font-size: 17px;
+        margin-bottom: 8px;
+      }
+      .editor span {
+        color: #aeb5c2;
+        line-height: 1.4;
+        font-size: 13px;
+      }
+      #workspace {
+        display: none;
+        width: 100%;
+        height: 100%;
+        flex-direction: column;
+      }
+      #workspace-head {
+        min-height: 46px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 4px 12px;
+        background: #1b1e25;
+        border-bottom: 1px solid #353b46;
+      }
+      .home-btn {
+        border: 1px solid #4a5260;
+        background: #272c35;
+        color: #fff;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font: inherit;
+      }
+      #title {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      #frame-wrap {
+        min-height: 0;
+        flex: 1;
+        position: relative;
+      }
+      #editor-frame {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        display: block;
+        background: #202124;
+      }
+      #error {
+        display: none;
+        position: absolute;
+        inset: 0;
+        padding: 24px;
+        background: #121419;
+        color: #f3f4f6;
+        overflow: auto;
+      }
+      #error p {
+        color: #aeb5c2;
+        max-width: 640px;
+        line-height: 1.5;
+      }
+      @media (max-width: 420px) {
+        .editor {
+          min-height: 104px;
+          padding: 14px;
+        }
+        .grid {
+          gap: 9px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="home">
+      <section class="intro">
+        <h1>ARTCRAFT STUDIO</h1>
+        <p class="sub">
+          Seven independent creative editors, using their upstream Rust engines
+          and project workflows. Editors load one at a time to limit memory use.
+          Choose an editor to open its bundled application.
+        </p>
+      </section>
+      <nav class="grid" aria-label="Editors">
+        <button class="editor" data-editor="photocraft">
+          <strong>PhotoCraft</strong
+          ><span>Raster, layers, masks and image processing</span>
+        </button>
+        <button class="editor" data-editor="vectorcraft">
+          <strong>VectorCraft</strong
+          ><span>Vector illustration and SVG workflows</span>
+        </button>
+        <button class="editor" data-editor="filmcraft">
+          <strong>FilmCraft</strong
+          ><span>Multitrack video, audio and rendering</span>
+        </button>
+        <button class="editor" data-editor="lightcraft">
+          <strong>LightCraft</strong
+          ><span>Non-destructive photo and RAW development</span>
+        </button>
+        <button class="editor" data-editor="pdfcraft">
+          <strong>PdfCraft</strong
+          ><span>PDF reading, annotation and page operations</span>
+        </button>
+        <button class="editor" data-editor="effectcraft">
+          <strong>EffectCraft</strong
+          ><span>Compositions, keyframes and visual effects</span>
+        </button>
+        <button class="editor" data-editor="designcraft">
+          <strong>DesignCraft</strong
+          ><span>Multi-page layout and publishing</span>
+        </button>
+      </nav>
+    </main>
+    <section id="workspace" aria-label="Editor workspace">
+      <header id="workspace-head">
+        <button id="home-button" class="home-btn" type="button">
+          ‹ Studio
+        </button>
+        <span id="title"></span>
+      </header>
+      <div id="frame-wrap">
+        <iframe
+          id="editor-frame"
+          title="Creative editor"
+          allow="clipboard-read; clipboard-write; fullscreen"
+          allowfullscreen
+        ></iframe>
+        <div id="error">
+          <h2>Editor could not start</h2>
+          <p>
+            The original editor bundle did not load. Rebuild the Android package
+            using the upstream editor workflow, then check the build logs. No
+            substitute editor is displayed.
+          </p>
+        </div>
+      </div>
+    </section>
+    <script>
+      (() => {
+        const names = {
+          photocraft: "PhotoCraft",
+          vectorcraft: "VectorCraft",
+          filmcraft: "FilmCraft",
+          lightcraft: "LightCraft",
+          pdfcraft: "PdfCraft",
+          effectcraft: "EffectCraft",
+          designcraft: "DesignCraft",
+        };
+        const home = document.getElementById("home");
+        const workspace = document.getElementById("workspace");
+        const frame = document.getElementById("editor-frame");
+        const error = document.getElementById("error");
+        let active = false;
+        let loadTimer;
+
+        function toBase64(bytes) {
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++)
+            binary += String.fromCharCode(bytes[i]);
+          return btoa(binary);
+        }
+        async function sendBlob(name, blob) {
+          if (!window.ArtCraftFiles || !blob)
+            throw new Error("Android save bridge unavailable");
+          const id = window.ArtCraftFiles.beginSave(
+            name || "artcraft-export",
+            blob.type || "application/octet-stream",
+          );
+          try {
+            const partSize = 48 * 1024;
+            for (let offset = 0; offset < blob.size; offset += partSize) {
+              const bytes = new Uint8Array(
+                await blob
+                  .slice(offset, Math.min(offset + partSize, blob.size))
+                  .arrayBuffer(),
+              );
+              if (!window.ArtCraftFiles.writeChunk(id, toBase64(bytes)))
+                throw new Error("Android export write failed");
+            }
+            window.ArtCraftFiles.finishSave(id);
+          } catch (e) {
+            window.ArtCraftFiles.cancelSave(id);
+            throw e;
+          }
+        }
+        function installDownloadBridge() {
+          try {
+            const doc = frame.contentDocument;
+            if (!doc || doc.__artcraftSaveHook) return;
+            doc.__artcraftSaveHook = true;
+            doc.addEventListener(
+              "click",
+              (event) => {
+                const anchor =
+                  event.target && event.target.closest
+                    ? event.target.closest("a[download]")
+                    : null;
+                if (!anchor || !anchor.href || !anchor.href.startsWith("blob:"))
+                  return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                fetch(anchor.href)
+                  .then((response) => response.blob())
+                  .then((blob) => sendBlob(anchor.download, blob))
+                  .catch(() => {
+                    window.parent.postMessage(
+                      {
+                        type: "artcraft:save-error",
+                        message: "Could not transfer this export to Android.",
+                      },
+                      location.origin,
+                    );
+                  });
+              },
+              true,
+            );
+          } catch (_) {
+            /* Cross-origin content is intentionally not instrumented. */
+          }
+        }
+        function openEditor(id) {
+          if (!names[id]) return;
+          active = true;
+          home.style.display = "none";
+          workspace.style.display = "flex";
+          error.style.display = "none";
+          document.getElementById("title").textContent = names[id];
+          clearTimeout(loadTimer);
+          frame.onload = () => {
+            clearTimeout(loadTimer);
+            error.style.display = "none";
+            installDownloadBridge();
+          };
+          frame.onerror = () => {
+            error.style.display = "block";
+          };
+          const query = id === "pdfcraft" ? "?host=parent&webgl" : "?webgl";
+          frame.src = `../editors/${id}/index.html${query}`;
+          loadTimer = setTimeout(() => {
+            if (
+              !frame.contentWindow ||
+              frame.contentDocument?.readyState !== "complete"
+            )
+              error.style.display = "block";
+          }, 45000);
+        }
+        function goHome() {
+          if (!active) return false;
+          if (
+            !window.confirm(
+              "Leave this editor? Save or export your work first; unsaved changes may be lost.",
+            )
+          )
+            return true;
+          active = false;
+          clearTimeout(loadTimer);
+          frame.src = "about:blank";
+          workspace.style.display = "none";
+          home.style.display = "block";
+          return true;
+        }
+        document
+          .querySelectorAll("[data-editor]")
+          .forEach((button) =>
+            button.addEventListener("click", () =>
+              openEditor(button.dataset.editor),
+            ),
+          );
+        document
+          .getElementById("home-button")
+          .addEventListener("click", goHome);
+        window.ArtCraftStudio = { openEditor, goHome };
+        window.addEventListener("message", (event) => {
+          if (
+            event.source !== frame.contentWindow ||
+            event.origin !== location.origin ||
+            !event.data
+          )
+            return;
+          if (event.data.type === "pdfcraft:save" && event.data.bytes) {
+            sendBlob(
+              event.data.name || "document.pdf",
+              new Blob([event.data.bytes], { type: "application/pdf" }),
+            ).catch(() => {});
+          } else if (event.data.type === "artcraft:save-error") {
+            error.style.display = "block";
+            error.querySelector("p").textContent =
+              event.data.message || "Export transfer failed.";
+          }
+        });
+        window.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && active) goHome();
+        });
+      })();
+    </script>
+  </body>
+</html>

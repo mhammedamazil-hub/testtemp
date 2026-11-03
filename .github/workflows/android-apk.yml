@@ -1,0 +1,160 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["arena/**"]
+    paths:
+      - ".gitmodules"
+      - "upstream/**"
+      - "app/**"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: read
+
+env:
+  RUST_TOOLCHAIN: "1.95.0"
+  TRUNK_VERSION: "0.21.14"
+
+jobs:
+  editor-web:
+    name: Build ${{ matrix.editor }} from upstream
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - editor: photocraft
+            build: trunk
+          - editor: vectorcraft
+            build: trunk
+          - editor: filmcraft
+            build: xtask
+          - editor: lightcraft
+            build: xtask
+          - editor: pdfcraft
+            build: trunk
+          - editor: effectcraft
+            build: xtask
+          - editor: designcraft
+            build: trunk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Fetch only the editor under test
+        run: git submodule update --init --depth 1 upstream/${{ matrix.editor }}
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream/${{ matrix.editor }} -> upstream/${{ matrix.editor }}/target
+      - name: Install web build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binaryen
+          if [[ "${{ matrix.build }}" == "trunk" ]]; then
+            cargo install trunk --version "$TRUNK_VERSION" --locked
+          else
+            cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          fi
+      - name: Build upstream WebAssembly editor
+        working-directory: upstream/${{ matrix.editor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.editor }}" in
+            photocraft) cd apps/photocraft-web && trunk build --release; output=../../dist/web ;;
+            vectorcraft) cd apps/vectorcraft-web && trunk build --release; output=../../dist/web ;;
+            filmcraft) cargo xtask web; output=target/web/dist ;;
+            lightcraft) cargo xtask web; output=target/web-site ;;
+            pdfcraft) cd apps/pdfcraft-web && trunk build --release; output=../../dist/web ;;
+            effectcraft) cargo xtask web; output=target/web/dist ;;
+            designcraft) cd apps/designcraft-web && trunk build --release; output=../../dist/web ;;
+            *) echo "Unknown editor: ${{ matrix.editor }}" >&2; exit 2 ;;
+          esac
+          test -s "$output/index.html"
+          find "$output" -type f -size +0c -print | sed -n '1,20p'
+          root="$GITHUB_WORKSPACE/upstream/${{ matrix.editor }}"
+          bundle="$GITHUB_WORKSPACE/editor-artifacts/${{ matrix.editor }}"
+          mkdir -p "$bundle" "$bundle/licenses"
+          cp -a "$output/." "$bundle/"
+          cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$bundle/licenses/"
+          for notice in ATTRIBUTION.md ASSETS.md ATTRIBUTION.toml LICENSES.toml; do
+            if [[ -f "$root/$notice" ]]; then cp "$root/$notice" "$bundle/licenses/"; fi
+          done
+          if [[ -d "$root/licenses" ]]; then mkdir -p "$bundle/licenses/third-party"; cp -a "$root/licenses/." "$bundle/licenses/third-party/"; fi
+          if [[ -f "$root/assets/ATTRIBUTION.md" ]]; then cp "$root/assets/ATTRIBUTION.md" "$bundle/licenses/"; fi
+      - name: Upload built editor bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-web-${{ matrix.editor }}
+          path: editor-artifacts/${{ matrix.editor }}/
+          if-no-files-found: error
+          retention-days: 7
+
+  apk:
+    name: Package single installable APK
+    needs: editor-web
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: editor-web-*
+          path: editor-artifacts
+          merge-multiple: false
+      - name: Assemble real upstream editor assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
+            source="editor-artifacts/editor-web-${editor}"
+            test -s "$source/index.html"
+            mkdir -p "app/src/main/assets/editors/${editor}" "app/src/main/assets/licenses/${editor}"
+            cp -a "$source/." "app/src/main/assets/editors/${editor}/"
+            if [[ -d "$source/licenses" ]]; then
+              cp -a "$source/licenses/." "app/src/main/assets/licenses/${editor}/"
+              rm -rf "app/src/main/assets/editors/${editor}/licenses"
+            fi
+          done
+          test -s app/src/main/assets/studio/index.html
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+      - name: Build debug APK
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Verify APK and editor payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          unzip -l "$apk" | grep -q 'assets/studio/index.html'
+          for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
+            unzip -l "$apk" | grep -q "assets/editors/${editor}/index.html"
+            unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-MIT"
+            unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-APACHE"
+          done
+          sha256sum "$apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artcraft-studio-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

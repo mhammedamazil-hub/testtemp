@@ -1,0 +1,8 @@
+.gradle/
+local.properties
+**/build/
+**/target/
+app/src/main/assets/editors/*/
+!app/src/main/assets/editors/.gitkeep
+*.jks
+*.keystore
