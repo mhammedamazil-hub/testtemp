@@ -42,7 +42,7 @@ jobs:
           - editor: designcraft
             build: trunk
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: false
       - name: Fetch only the editor under test
@@ -92,7 +92,7 @@ jobs:
           if [[ -d "$root/licenses" ]]; then mkdir -p "$bundle/licenses/third-party"; cp -a "$root/licenses/." "$bundle/licenses/third-party/"; fi
           if [[ -f "$root/assets/ATTRIBUTION.md" ]]; then cp "$root/assets/ATTRIBUTION.md" "$bundle/licenses/"; fi
       - name: Upload built editor bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: editor-web-${{ matrix.editor }}
           path: editor-artifacts/${{ matrix.editor }}/
@@ -104,10 +104,10 @@ jobs:
     needs: editor-web
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: editor-web-*
           path: editor-artifacts
@@ -127,14 +127,14 @@ jobs:
             fi
           done
           test -s app/src/main/assets/studio/index.html
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
       - name: Install Android SDK platform
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.11.1"
       - name: Build debug APK
@@ -152,7 +152,7 @@ jobs:
             unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-APACHE"
           done
           sha256sum "$apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: artcraft-studio-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
