@@ -2,6 +2,11 @@ name: Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      editor_artifacts_from_run:
+        description: "Optional successful/partially successful source-build run ID to reuse its editor-web-* artifacts"
+        required: false
+        type: string
   push:
     branches: ["arena/**"]
     paths:
@@ -10,9 +15,9 @@ on:
       - "app/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
-      - ".github/workflows/android-apk.yml"
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -21,6 +26,7 @@ env:
 
 jobs:
   editor-web:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.editor_artifacts_from_run == '' }}
     name: Build ${{ matrix.editor }} from upstream
     runs-on: ubuntu-24.04
     strategy:
@@ -102,13 +108,25 @@ jobs:
   apk:
     name: Package single installable APK
     needs: editor-web
+    if: ${{ always() && (needs.editor-web.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.editor_artifacts_from_run != '')) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: false
-      - uses: actions/download-artifact@v8
+      - name: Download editor bundles from this run
+        if: ${{ inputs.editor_artifacts_from_run == '' }}
+        uses: actions/download-artifact@v8
         with:
+          pattern: editor-web-*
+          path: editor-artifacts
+          merge-multiple: false
+      - name: Reuse editor bundles from an earlier run
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.editor_artifacts_from_run != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ inputs.editor_artifacts_from_run }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           pattern: editor-web-*
           path: editor-artifacts
           merge-multiple: false
@@ -147,7 +165,9 @@ jobs:
         shell: bash
         run: |
           if [[ -f gradle-build.log ]]; then
-            tail -n 60 gradle-build.log | tr '\n' ' ' | head -c 12000 | sed 's/%/%25/g; s/\r/%0D/g' > /tmp/gradle-tail.txt
+            details=$(grep -E '(^e: |^FAILURE:|^\* What went wrong:|^Execution failed for task|^Could not resolve|^A problem occurred|^error:)' gradle-build.log | tail -n 30 || true)
+            if [[ -z "$details" ]]; then details=$(tail -n 30 gradle-build.log); fi
+            printf '%s' "$details" | tr '\n' ' ' | head -c 12000 | sed 's/%/%25/g; s/\r/%0D/g' > /tmp/gradle-tail.txt
             echo "::error title=Gradle build failed::$(cat /tmp/gradle-tail.txt)"
             echo '### Gradle failure log' >> "$GITHUB_STEP_SUMMARY"
             echo '```text' >> "$GITHUB_STEP_SUMMARY"
