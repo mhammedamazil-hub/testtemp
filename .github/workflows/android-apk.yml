@@ -171,6 +171,26 @@ jobs:
         run: |
           set -o pipefail
           gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee gradle-build.log
+      - name: Verify APK and editor payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          unzip -l "$apk" | grep -q 'assets/studio/index.html'
+          for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
+            unzip -l "$apk" | grep -q "assets/editors/${editor}/index.html"
+            unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-MIT"
+            unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-APACHE"
+          done
+          sha256sum "$apk"
+      - name: Upload installable debug APK before smoke tests
+        uses: actions/upload-artifact@v7
+        with:
+          name: artcraft-studio-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
       - name: Publish Gradle failure details
         if: failure()
         shell: bash
@@ -309,22 +329,3 @@ jobs:
             app/build/outputs/androidTest-results/connected/**
           if-no-files-found: ignore
           retention-days: 7
-      - name: Verify APK and editor payloads
-        shell: bash
-        run: |
-          set -euo pipefail
-          apk=app/build/outputs/apk/debug/app-debug.apk
-          test -s "$apk"
-          unzip -l "$apk" | grep -q 'assets/studio/index.html'
-          for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
-            unzip -l "$apk" | grep -q "assets/editors/${editor}/index.html"
-            unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-MIT"
-            unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-APACHE"
-          done
-          sha256sum "$apk"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: artcraft-studio-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 30
