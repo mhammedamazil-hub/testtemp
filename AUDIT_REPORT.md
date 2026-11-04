@@ -36,7 +36,7 @@ The repository root licenses do not clear bundled fonts, icons, models, codecs o
 
 ## Important integration gaps
 
-1. The native app currently uses default upstream host services. Android Storage Access Framework (SAF) file picking, URI grants, save/export flows and document lifecycle/recovery are not integrated or verified.
+1. The native app currently uses default upstream host services. The host's Android-only `rfd` patch returns cancellation rather than pretending to show a dialog; Android Storage Access Framework (SAF) file picking, URI grants, save/export flows and document lifecycle/recovery are not integrated or verified. Dialog-based file operations are therefore unavailable in this build attempt.
 2. Android-specific input, IME, status/navigation bars, touch/stylus pressure, GPU/backend initialization, rotation, pause/resume and low-memory behavior are unverified.
 3. Video/audio codecs, hardware acceleration, camera/RAW import, font discovery and other desktop service assumptions may need Android-native adapters. No feature parity claim is made.
 4. The native UI intentionally uses the upstream egui editor types. It is not a mock implementation, but each editor still needs build/startup and real editing/save/reopen/export tests on Android.

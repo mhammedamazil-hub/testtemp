@@ -41,6 +41,8 @@ eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc79968157
 egui_demo_lib = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 egui_inspection = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 
+rfd = { path = "../../patches/rfd" }
+
 [package.metadata.android]
 
 build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
