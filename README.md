@@ -1,45 +1,31 @@
 # ARTCRAFT STUDIO
 
-An Android host for six original ArtCraft editing engines: VectorCraft, FilmCraft, LightCraft, PdfCraft, EffectCraft and DesignCraft. PhotoCraft remains in the pinned upstream sources but is intentionally omitted from this trial APK while its Android WebView startup failure is investigated. The editors remain exact, pinned upstream Git submodules; the Android workflow builds their WebAssembly frontends and packages them into one APK. The host loads only the selected editor from local assets through AndroidX WebViewAssetLoader.
+ArtCraft Studio is being rebuilt as a **native Android Rust app**. The Android process runs `eframe`/`winit` through `NativeActivity` and links the seven pinned upstream `*-ui-egui` frontends and their Rust engine crates directly into one Rust shared library. The APK is not intended to contain an editor website, WebView, HTML, JavaScript or WebAssembly.
 
-## Current status
+The launcher and editor selection are Rust/egui. Each selected editor is created from its upstream Rust UI and engine API: PhotoCraft, VectorCraft, FilmCraft, LightCraft, PdfCraft, EffectCraft and DesignCraft. Upstream sources remain pinned Git submodules; they are not copied or substituted with mock editors.
 
-- **Upstream sources:** all seven official repositories are pinned in `UPSTREAM_LOCK.json`; `python3 scripts/verify_checkout.py` verifies the pins.
-- **Studio shell:** responsive dark launcher/workspace, new launcher mark, focus mode, expandable diagnostics/agent panels, selected-editor-only iframe loading and startup surface watchdog are implemented in source.
-- **Editor UI:** the upstream editors and their real tools are preserved. Their internal mobile/touch usability has not been redesigned or runtime-validated; the wrapper's focus mode gives a larger canvas without closing the current project.
-- **Import/export:** Android SAF file-open and host-mediated export code is present. Real project round-trips have not yet been validated on Android.
-- **Provider settings:** Gemini, Anthropic/Claude and OpenAI-compatible endpoint/model/key settings are implemented; keys are encrypted with an Android Keystore-backed AES-GCM key. The generic connection test sends no project content.
-- **Experimental visual agent:** native per-workflow screenshot consent, provider-backed planning, user plan approval, a visible cursor and bounded UI-action bridge are implemented in source. It dispatches synthetic pointer/keyboard events into the selected real editor, does not run generated scripts, and rechecks the screen between approved steps. **This has not yet been built or runtime-tested**; editor-specific task coverage, action reliability, undo/recovery and project save outcomes are not claimed.
-- **Diagnostics:** local startup diagnostics retain only redacted error categories and safe bundled-resource paths; arbitrary JavaScript error text is omitted to avoid project-content/API-key leakage.
-- **Emulator smoke tests:** CI launches all six editors included in this trial APK on an Android emulator and waits for a visible canvas while checking fatal startup reports. This is a startup-surface smoke test, not proof of editing/export correctness. The updated workflow has not yet run.
-- **APK:** a baseline debug APK build succeeded in earlier run [41580239517](https://github.com/mhammedamazil-hub/testtemp/actions/runs/41580239517), before the current UI/agent/test changes. The updated source has not been rebuilt. The earlier artifact is available from the Actions run, not stored in this repository.
-- **Device testing:** this environment has no Java/JDK, Gradle, Android SDK, adb/emulator or physical device. No physical-device or Galaxy Tab A9 test is claimed.
+## Status — native port in progress
 
-## Get the exact upstream sources
+- **Native Android host:** source scaffold is in `native-android/`; the current build attempts to cross-compile the seven upstream Rust UI/engine crates for Android ARM64 and x86_64. A successful cross-compile and emulator first-frame test have not yet been reported.
+- **APK:** no working native APK is claimed yet. The earlier WebView/WASM debug APK is not the requested deliverable and is no longer built by the workflow.
+- **Device/file integration:** Android SAF import/export, lifecycle recovery, media permissions, audio/video routing and touch/stylus behavior are not yet validated. Default upstream service hooks are currently used; treat editing and file round-trips as unverified until they are tested.
+- **Editor functionality:** the intended integration reuses authentic upstream Rust/egui editor UIs and Rust engines. It does not convert the editors to HTML or JavaScript. Feature parity on Android is not claimed until each native editor and its platform services are verified.
+- **Privacy:** editor execution is intended to be local. The native host adds no hosted editor or browser dependency; network behavior in upstream features (for example optional update/model services) still needs review. Provider-backed AI and the earlier WebView cursor agent are not part of this native build.
+- **Upstream source pins:** all seven official repositories are recorded in `UPSTREAM_LOCK.json`; run `python3 scripts/verify_checkout.py` after `git submodule update --init --recursive` to verify them.
+
+## Build and verify
+
+The **Native Android APK** workflow cross-compiles the Rust library for Android, packages it in a single debug APK, checks for the native shared libraries and absence of web/WASM editor payloads, uploads the APK, and attempts an emulator first-frame test. The APK artifact is only a native candidate; a successful build is not proof that all seven editors are usable.
+
+For a local source checkout:
 
 ```sh
 git submodule update --init --recursive
 python3 scripts/verify_checkout.py
 ```
 
-Each upstream's license applies. The repositories offer MIT OR Apache-2.0 for core code; bundled fonts, media, model assets and third-party dependencies may have separate notices.
+The Android project is under `app/`; the Rust Android host is under `native-android/`. The workflow uses JDK 17, Android SDK/build-tools 35, NDK 27.2, Rust 1.95, and Gradle 8.11.1. Release signing is not configured. Upstream and bundled third-party licenses still apply.
 
-## Build and smoke-test in GitHub Actions
+## Important limitations
 
-Run the **Android APK** workflow from the Actions tab or push a change on an `arena/**` branch that touches the listed source/build paths. The workflow builds each upstream web/WASM editor in a separate job, assembles the real bundles into the Android app, builds a debug APK, runs the six-editor Android-emulator startup smoke test, verifies APK payloads and uploads the APK artifact. Smoke-test reports are uploaded on failure.
-
-The debug-signed APK is for testing, not public distribution. Release signing is not configured.
-
-## Android project
-
-The native host is under `app/`. It requires JDK 17, Android SDK platform/build-tools 35 and Gradle 8.11.1. Built editor assets and APK outputs are generated by CI and intentionally ignored; do not check compiled bundles or APKs into the repository.
-
-## Audit and integration notes
-
-- `AUDIT_REPORT.md` — source, licensing, Android feasibility, blockers and verification status.
-- `AUDIT/` — the seven editor-specific source audits.
-- `AI_INTEGRATION.md` — current experimental visual-agent design, safeguards and unverified coverage.
-- `UPSTREAM_LOCK.json` — exact submodule pins.
-- `.github/workflows/android-apk.yml` — upstream WASM builds, APK packaging and emulator smoke tests.
-
-This remains an incremental engineering build. Passing the new startup smoke tests will not prove real editing, undo, save/reopen/export, video workflows, memory headroom or phone/tablet usability. Those still need separate validation on emulators and target devices.
+No native Android build, emulator run, physical-device test, or Galaxy Tab A9 test is claimed until the new workflow completes and device validation is performed. Passing a native first-frame smoke test alone would not prove file open/save, export, media editing, recovery, memory behavior, or touch usability.

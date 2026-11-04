@@ -1,0 +1,54 @@
+[package]
+name = "artcraft-android"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a", default-features = false, features = ["default_fonts", "wgpu", "android-native-activity"] }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a", default-features = false, features = ["default_fonts"] }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+android_logger = "0.15"
+log = "0.4"
+
+photocraft-engine = { path = "../upstream/photocraft/crates/engine" }
+photocraft-ui-egui = { path = "../upstream/photocraft/crates/ui-egui" }
+vectorcraft-engine = { path = "../upstream/vectorcraft/crates/engine", features = ["bundled-fonts"] }
+vectorcraft-ui-egui = { path = "../upstream/vectorcraft/crates/ui-egui" }
+filmcraft-engine = { path = "../upstream/filmcraft/crates/engine" }
+filmcraft-ui-egui = { path = "../upstream/filmcraft/crates/ui-egui" }
+lightcraft-engine = { path = "../upstream/lightcraft/crates/engine" }
+lightcraft-ui-egui = { path = "../upstream/lightcraft/crates/ui-egui" }
+pdfcraft-ui-egui = { path = "../upstream/pdfcraft/crates/ui-egui" }
+effectcraft-engine = { path = "../upstream/effectcraft/crates/engine" }
+effectcraft-ui-egui = { path = "../upstream/effectcraft/crates/ui-egui" }
+designcraft-engine = { path = "../upstream/designcraft/crates/engine" }
+designcraft-ui-egui = { path = "../upstream/designcraft/crates/ui-egui" }
+
+# Upstream UI crates pin the shared native egui/winit backend to these reviewed source revisions.
+[patch.crates-io]
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_extras = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+
+[package.metadata.android]
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[profile.release]
+strip = "debuginfo"

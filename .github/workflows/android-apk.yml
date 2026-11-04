@@ -1,220 +1,109 @@
-name: Android APK
+name: Native Android APK
 
 on:
   workflow_dispatch:
-    inputs:
-      editor_artifacts_from_run:
-        description: "Optional successful/partially successful source-build run ID to reuse its editor-web-* artifacts"
-        required: false
-        type: string
   push:
     branches: ["arena/**"]
     paths:
       - ".gitmodules"
       - "upstream/**"
+      - "native-android/**"
       - "app/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - ".github/workflows/android-apk.yml"
 
 permissions:
-  actions: read
   contents: read
 
 env:
-  RUST_TOOLCHAIN: "1.95.0"
-  TRUNK_VERSION: "0.21.14"
+  ANDROID_NDK_VERSION: "27.2.12479018"
+  GRADLE_VERSION: "8.11.1"
 
 jobs:
-  editor-web:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.editor_artifacts_from_run == '' }}
-    name: Build ${{ matrix.editor }} from upstream
+  native-apk:
+    name: Compile upstream Rust editors for Android and package APK
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - editor: vectorcraft
-            build: trunk
-          - editor: filmcraft
-            build: xtask
-          - editor: lightcraft
-            build: xtask
-          - editor: pdfcraft
-            build: trunk
-          - editor: effectcraft
-            build: xtask
-          - editor: designcraft
-            build: trunk
+    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out pinned editor sources
+        uses: actions/checkout@v7
         with:
-          submodules: false
-      - name: Fetch only the editor under test
-        run: git submodule update --init --depth 1 upstream/${{ matrix.editor }}
-      - uses: dtolnay/rust-toolchain@1.95.0
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: upstream/${{ matrix.editor }} -> upstream/${{ matrix.editor }}/target
-      - name: Install web build tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y binaryen
-          if [[ "${{ matrix.build }}" == "trunk" ]]; then
-            cargo install trunk --version "$TRUNK_VERSION" --locked
-          else
-            cargo install wasm-bindgen-cli --version 0.2.129 --locked
-          fi
-      - name: Build upstream WebAssembly editor
-        working-directory: upstream/${{ matrix.editor }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          case "${{ matrix.editor }}" in
-            photocraft) cd apps/photocraft-web && trunk build --release; output=../../dist/web ;;
-            vectorcraft) cd apps/vectorcraft-web && trunk build --release; output=../../dist/web ;;
-            filmcraft) cargo xtask web; output=target/web/dist ;;
-            lightcraft) cargo xtask web; output=target/web-site ;;
-            pdfcraft) cd apps/pdfcraft-web && trunk build --release; output=../../dist/web ;;
-            effectcraft) cargo xtask web; output=target/web/dist ;;
-            designcraft) cd apps/designcraft-web && trunk build --release; output=../../dist/web ;;
-            *) echo "Unknown editor: ${{ matrix.editor }}" >&2; exit 2 ;;
-          esac
-          test -s "$output/index.html"
-          find "$output" -type f -size +0c -print | sed -n '1,20p'
-          root="$GITHUB_WORKSPACE/upstream/${{ matrix.editor }}"
-          bundle="$GITHUB_WORKSPACE/editor-artifacts/${{ matrix.editor }}"
-          mkdir -p "$bundle" "$bundle/licenses"
-          cp -a "$output/." "$bundle/"
-          cp "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$bundle/licenses/"
-          for notice in ATTRIBUTION.md ASSETS.md ATTRIBUTION.toml LICENSES.toml; do
-            if [[ -f "$root/$notice" ]]; then cp "$root/$notice" "$bundle/licenses/"; fi
-          done
-          if [[ -d "$root/licenses" ]]; then mkdir -p "$bundle/licenses/third-party"; cp -a "$root/licenses/." "$bundle/licenses/third-party/"; fi
-          if [[ -f "$root/assets/ATTRIBUTION.md" ]]; then cp "$root/assets/ATTRIBUTION.md" "$bundle/licenses/"; fi
-      - name: Upload built editor bundle
-        uses: actions/upload-artifact@v7
-        with:
-          name: editor-web-${{ matrix.editor }}
-          path: editor-artifacts/${{ matrix.editor }}/
-          if-no-files-found: error
-          retention-days: 7
+          submodules: recursive
 
-  apk:
-    name: Package single installable APK
-    timeout-minutes: 60
-    needs: editor-web
-    if: ${{ always() && (needs.editor-web.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.editor_artifacts_from_run != '')) }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
+      - name: Install Rust Android target
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
-          submodules: false
-      - name: Download editor bundles from this run
-        if: ${{ inputs.editor_artifacts_from_run == '' }}
-        uses: actions/download-artifact@v8
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Cache native Rust dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          pattern: editor-web-*
-          path: editor-artifacts
-          merge-multiple: false
-      - name: Reuse editor bundles from an earlier run
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.editor_artifacts_from_run != '' }}
-        uses: actions/download-artifact@v8
-        with:
-          run-id: ${{ inputs.editor_artifacts_from_run }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          pattern: editor-web-*
-          path: editor-artifacts
-          merge-multiple: false
-      - name: Assemble real upstream editor assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          for editor in vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
-            source="editor-artifacts/editor-web-${editor}"
-            test -s "$source/index.html"
-            mkdir -p "app/src/main/assets/editors/${editor}" "app/src/main/assets/licenses/${editor}"
-            cp -a "$source/." "app/src/main/assets/editors/${editor}/"
-            if [[ -d "$source/licenses" ]]; then
-              cp -a "$source/licenses/." "app/src/main/assets/licenses/${editor}/"
-              rm -rf "app/src/main/assets/editors/${editor}/licenses"
-            fi
-          done
-          # Android's asset merger treats a .gz sidecar and its plain file as duplicate entries.
-          # The WebView serves the uncompressed upstream asset directly, so drop only redundant sidecars.
-          while IFS= read -r -d '' compressed; do
-            original="${compressed%.gz}"
-            if [[ -f "$original" ]]; then
-              echo "Dropping redundant gzip sidecar: $compressed"
-              rm -- "$compressed"
-            fi
-          done < <(find app/src/main/assets/editors -type f -name '*.gz' -print0)
-          test -s app/src/main/assets/studio/index.html
+          workspaces: native-android -> native-android/target
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
+
       - uses: android-actions/setup-android@v4
-      - name: Install Android SDK platform
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Install Android SDK, NDK and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 3.5.5 --locked
+
+      - name: Compile native Rust app and all seven upstream egui editors
+        working-directory: native-android
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo ndk --link-libcxx-shared -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release
+          test -s ../app/src/main/jniLibs/arm64-v8a/libartcraft_android.so
+          test -s ../app/src/main/jniLibs/x86_64/libartcraft_android.so
+          file ../app/src/main/jniLibs/arm64-v8a/libartcraft_android.so ../app/src/main/jniLibs/x86_64/libartcraft_android.so
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "8.11.1"
-      - name: Build debug APK
+          gradle-version: "${{ env.GRADLE_VERSION }}"
+
+      - name: Package installable debug APK
         shell: bash
         run: |
           set -o pipefail
           gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee gradle-build.log
-      - name: Verify APK and editor payloads
+
+      - name: Verify this is a native Rust APK, not a web bundle
         shell: bash
         run: |
           set -euo pipefail
           apk=app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
-          unzip -l "$apk" | grep -q 'assets/studio/index.html'
-          for editor in vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
-            unzip -l "$apk" | grep -q "assets/editors/${editor}/index.html"
-            unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-MIT"
-            unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-APACHE"
-          done
-          if unzip -l "$apk" | grep -q 'assets/editors/photocraft/index.html'; then
-            echo "PhotoCraft must not be included in this six-editor trial APK." >&2
+          listing=$(unzip -l "$apk")
+          grep -q 'lib/arm64-v8a/libartcraft_android.so' <<< "$listing"
+          grep -q 'lib/x86_64/libartcraft_android.so' <<< "$listing"
+          manifest_xml=$("${ANDROID_HOME}/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml)
+          grep -q 'android.app.NativeActivity' <<< "$manifest_xml"
+          if grep -Eq 'assets/editors/|assets/studio/index\.html|assets/.*\.wasm' <<< "$listing"; then
+            echo "Unexpected browser/WASM payload found in native APK." >&2
             exit 1
           fi
           sha256sum "$apk"
-      - name: Upload installable debug APK before smoke tests
+
+      - name: Upload native debug APK before emulator smoke test
         uses: actions/upload-artifact@v7
         with:
-          name: artcraft-studio-debug-apk
+          name: artcraft-studio-native-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
-      - name: Publish Gradle failure details
-        if: failure()
-        shell: bash
-        run: |
-          if [[ -f gradle-build.log ]]; then
-            details=$(grep -E '(^e: |^FAILURE:|What went wrong|Execution failed for task|^Could not |^A problem occurred|^error:|^Caused by:|^.*Exception:)' gradle-build.log | tail -n 40 || true)
-            if [[ -z "$details" ]]; then details=$(tail -n 30 gradle-build.log); fi
-            printf '%s' "$details" | tr '\n' ' ' | head -c 12000 | sed 's/%/%25/g; s/\r/%0D/g' > /tmp/gradle-tail.txt
-            echo "::error title=Gradle build failed::$(cat /tmp/gradle-tail.txt)"
-            echo '### Gradle failure log' >> "$GITHUB_STEP_SUMMARY"
-            echo '```text' >> "$GITHUB_STEP_SUMMARY"
-            tail -n 120 gradle-build.log >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload Gradle log on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: android-gradle-build-log
-          path: gradle-build.log
-          if-no-files-found: ignore
-          retention-days: 7
+
       - name: Enable KVM for Android emulator
         shell: bash
         run: |
@@ -223,15 +112,11 @@ jobs:
             sudo udevadm control --reload-rules
             sudo udevadm trigger --name-match=kvm
             sudo chmod 0666 /dev/kvm
-            echo "KVM is available to the runner."
           else
-            echo "::warning::/dev/kvm is unavailable; the emulator will use software virtualization and may not boot in time."
+            echo "::warning::/dev/kvm is unavailable; emulator startup may be slower."
           fi
-      - name: Release package-manager download cache
-        run: |
-          sudo apt-get clean
-          rm -rf "$HOME/.android/cache"
-      - name: Run Android emulator startup smoke tests for the six bundled editors
+
+      - name: Run native Android startup smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -244,90 +129,27 @@ jobs:
           emulator-boot-timeout: 1200
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           disable-animations: true
-          pre-emulator-launch-script: |
-            {
-              echo '### Android emulator host capacity'
-              echo '```text'
-              df -h "${ANDROID_AVD_HOME:-$HOME/.android/avd}" "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}" || true
-              free -h || true
-              if [[ -e /dev/kvm ]]; then ls -l /dev/kvm; else echo '/dev/kvm missing'; fi
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          script: gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
-      - name: Publish redacted Android smoke-test failure details
-        if: failure()
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import glob
-          import os
-          import re
-          import shutil
-          import xml.etree.ElementTree as ET
+          script: |
+            set -euo pipefail
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb logcat -c
+            adb shell am start -n ai.artcraft.studio/android.app.NativeActivity
+            for attempt in $(seq 1 40); do
+              if adb logcat -d -s ARTCRAFT:V | grep -Fq ARTCRAFT_NATIVE_FIRST_FRAME; then
+                echo "Native Rust UI rendered its first Android frame."
+                exit 0
+              fi
+              sleep 2
+            done
+            adb logcat -d -s ARTCRAFT:V || true
+            echo "Native Rust Android app did not render its first frame within 80 seconds." >&2
+            exit 1
 
-          editors = "vectorcraft|filmcraft|lightcraft|pdfcraft|effectcraft|designcraft"
-          paths = glob.glob("app/build/outputs/androidTest-results/connected/**/*.xml", recursive=True)
-          paths += glob.glob("app/build/reports/androidTests/connected/**/*.xml", recursive=True)
-          count = 0
-          for path in sorted(set(paths)):
-              try:
-                  root = ET.parse(path).getroot()
-              except (ET.ParseError, OSError):
-                  continue
-              cases = root.iter("testcase") if root.tag != "testsuite" else root.findall(".//testcase")
-              for case in cases:
-                  problem = case.find("failure")
-                  if problem is None:
-                      problem = case.find("error")
-                  if problem is None:
-                      continue
-                  count += 1
-                  raw = " ".join((problem.get("message", ""), problem.text or ""))
-                  raw = re.sub(r"\s+", " ", raw)
-                  editor = re.search(rf"\b({editors})\b", raw, re.IGNORECASE)
-                  editor_name = editor.group(1).lower() if editor else "editor"
-                  if "did not render a visible canvas" in raw:
-                      resource = re.search(r"Bundled WebView resource failed to load.*?code (-?[0-9]+)", raw, re.IGNORECASE)
-                      if resource:
-                          detail = f"{editor_name} could not load a bundled WebView resource (HTTP/WebView code {resource.group(1)})."
-                      elif "WebAssembly load or compilation failed." in raw:
-                          detail = f"{editor_name} failed to load or compile its WebAssembly module."
-                      elif "graphics initialization or runtime error" in raw:
-                          detail = f"{editor_name} reported a graphics initialization/runtime error before rendering."
-                      elif "fatal startup marker observed" in raw:
-                          detail = f"{editor_name} reported a fatal startup error before rendering."
-                      elif "no local WebView diagnostic captured" in raw:
-                          detail = f"{editor_name} did not render before the timeout and produced no local WebView error diagnostic."
-                      else:
-                          detail = f"{editor_name} did not report a visible canvas within the startup timeout; inspect the attached report for its redacted startup evidence."
-                  elif "reported a fatal startup error" in raw:
-                      detail = f"{editor_name} reported a fatal startup error."
-                  elif "wrong editor surface observed" in raw:
-                      detail = f"{editor_name} reported a mismatched editor surface."
-                  else:
-                      detail = f"Instrumentation failed in {case.get('classname', 'Android test')}.{case.get('name', 'unknown test')} ({problem.tag})."
-                  print(f"::error title=Android editor smoke-test failure::{detail}")
-          if count == 0:
-              disk_free_gb = shutil.disk_usage("/").free // (1024 ** 3)
-              mem_available = "unknown"
-              try:
-                  with open("/proc/meminfo", encoding="ascii") as meminfo:
-                      for line in meminfo:
-                          if line.startswith("MemAvailable:"):
-                              mem_available = f"{int(line.split()[1]) // 1024} MiB"
-                              break
-              except OSError:
-                  pass
-              kvm = "present" if os.path.exists("/dev/kvm") else "missing"
-              print(f"::error title=Android emulator startup failure::No JUnit result was produced. Runner diagnostics after failure: root disk free {disk_free_gb} GiB; memory available {mem_available}; /dev/kvm {kvm}.")
-          PY
-      - name: Upload emulator smoke-test reports on failure
+      - name: Upload native build log on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: android-emulator-smoke-test-reports
-          path: |
-            app/build/reports/androidTests/connected/**
-            app/build/outputs/androidTest-results/connected/**
+          name: native-android-build-log
+          path: gradle-build.log
           if-no-files-found: ignore
           retention-days: 7
