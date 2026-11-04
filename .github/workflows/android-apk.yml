@@ -63,7 +63,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo ndk --link-cxx-shared -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release
+          if ! cargo ndk --link-cxx-shared -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release >native-build.log 2>&1; then
+            tail -n 45 native-build.log
+            summary=$(tail -n 35 native-build.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/::/%3A%3A/g')
+            echo "::error title=Native Rust build failed::$summary"
+            exit 1
+          fi
           test -s ../app/src/main/jniLibs/arm64-v8a/libartcraft_android.so
           test -s ../app/src/main/jniLibs/x86_64/libartcraft_android.so
           file ../app/src/main/jniLibs/arm64-v8a/libartcraft_android.so ../app/src/main/jniLibs/x86_64/libartcraft_android.so
@@ -150,6 +155,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: native-android-build-log
-          path: gradle-build.log
+          path: |
+            gradle-build.log
+            native-android/native-build.log
           if-no-files-found: ignore
           retention-days: 7
