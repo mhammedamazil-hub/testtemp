@@ -387,7 +387,9 @@
             checkEditorSurface(id, startupStartedAt);
           };
           frame.onerror = () => recordDiagnostic({ level: "error", fatal: true, editor: id, source: "iframe", message: "The editor document could not be loaded." });
-          const query = id === "pdfcraft" ? "?host=parent&webgl" : id === "effectcraft" ? "?webgl&nosw" : "?webgl";
+          // PhotoCraft's documented default lets wgpu select WebGPU where available and fall back to WebGL2;
+          // forcing `?webgl` here can strand Android WebViews that expose WebGPU but not WebGL2.
+          const query = id === "photocraft" ? "" : id === "pdfcraft" ? "?host=parent&webgl" : id === "effectcraft" ? "?webgl&nosw" : "?webgl";
           startupStartedAt = Date.now();
           frame.src = `../editors/${id}/index.html${query}`;
           // Track the actual editor surface, not only the iframe's document load event.

@@ -265,7 +265,19 @@ jobs:
                   editor = re.search(rf"\b({editors})\b", raw, re.IGNORECASE)
                   editor_name = editor.group(1).lower() if editor else "editor"
                   if "did not render a visible canvas" in raw:
-                      detail = f"{editor_name} did not report a visible canvas within the startup timeout."
+                      resource = re.search(r"Bundled WebView resource failed to load.*?code (-?[0-9]+)", raw, re.IGNORECASE)
+                      if resource:
+                          detail = f"{editor_name} could not load a bundled WebView resource (HTTP/WebView code {resource.group(1)})."
+                      elif "WebAssembly load or compilation failed." in raw:
+                          detail = f"{editor_name} failed to load or compile its WebAssembly module."
+                      elif "graphics initialization or runtime error" in raw:
+                          detail = f"{editor_name} reported a graphics initialization/runtime error before rendering."
+                      elif "fatal startup marker observed" in raw:
+                          detail = f"{editor_name} reported a fatal startup error before rendering."
+                      elif "no local WebView diagnostic captured" in raw:
+                          detail = f"{editor_name} did not render before the timeout and produced no local WebView error diagnostic."
+                      else:
+                          detail = f"{editor_name} did not report a visible canvas within the startup timeout; inspect the attached report for its redacted startup evidence."
                   elif "reported a fatal startup error" in raw:
                       detail = f"{editor_name} reported a fatal startup error."
                   elif "wrong editor surface observed" in raw:

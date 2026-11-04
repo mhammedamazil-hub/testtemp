@@ -70,6 +70,13 @@ class MainActivity : Activity() {
         private set
     @Volatile internal var smokeFatalEditor: String? = null
         private set
+    @Volatile private var smokeLastDiagnostic: String? = null
+
+    internal fun smokeStartupEvidence(editor: String): String {
+        val fatal = if (smokeFatalEditor == editor) "fatal startup marker observed" else "no fatal startup marker"
+        val diagnostic = smokeLastDiagnostic?.takeIf { it.startsWith("$editor ") } ?: "no local WebView diagnostic captured"
+        return "$fatal; $diagnostic"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -229,6 +236,8 @@ class MainActivity : Activity() {
         if (!isDebuggable()) return
         val id = intent.getStringExtra(EXTRA_SMOKE_EDITOR) ?: return
         if (id !in EDITORS) return
+        smokeFatalEditor = null
+        smokeLastDiagnostic = null
         webView.postDelayed({ webView.evaluateJavascript("window.ArtCraftStudio && window.ArtCraftStudio.openEditor(${JSONObject.quote(id)})") { } }, 250)
     }
 
@@ -238,6 +247,7 @@ class MainActivity : Activity() {
         val item = JSONObject().put("level", level).put("editor", editor).put("source", source.take(180))
             .put("line", line).put("message", safeDiagnosticMessage(message)).put("fatal", fatal)
         if (fatal && isDebuggable() && editor in EDITORS) smokeFatalEditor = editor
+        if (isDebuggable() && editor in EDITORS) smokeLastDiagnostic = "$editor ${item.optString("source")}: ${item.optString("message")}".take(320)
         if (isDebuggable()) Log.println(if (level == "error") Log.ERROR else Log.WARN, "ArtCraftWebView", item.toString())
         if (::webView.isInitialized) webView.post {
             webView.evaluateJavascript("window.ArtCraftStudio && window.ArtCraftStudio.recordDiagnostic($item)") { }
@@ -273,7 +283,7 @@ class MainActivity : Activity() {
 
     private fun isFatalMessage(message: String): Boolean {
         val lower = message.lowercase()
-        return listOf("failed to start", "failed to load", "runtimeerror", "unreachable", "out of memory", "memory allocation", "webassembly.instantiate", "failed to compile", "panic").any(lower::contains)
+        return listOf("failed to start", "failed to load", "runtimeerror", "unreachable", "out of memory", "memory allocation", "webassembly.instantiate", "failed to compile", "panic", "webgl", "webgpu", "failed to create wgpu surface").any(lower::contains)
     }
 
     private fun localAssetHandler() = object : WebViewAssetLoader.PathHandler {

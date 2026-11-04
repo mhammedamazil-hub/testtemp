@@ -23,12 +23,16 @@ class EditorStartupSmokeTest {
             ActivityScenario.launch<MainActivity>(intent).use { scenario ->
                 val deadline = SystemClock.uptimeMillis() + EDITOR_START_TIMEOUT_MS
                 var observed: String? = null
+                var evidence = "no startup evidence available"
                 while (SystemClock.uptimeMillis() < deadline && observed != editor) {
-                    scenario.onActivity { activity -> observed = activity.smokeSurfaceEditor }
+                    scenario.onActivity { activity ->
+                        observed = activity.smokeSurfaceEditor
+                        evidence = activity.smokeStartupEvidence(editor)
+                    }
                     if (observed != editor) SystemClock.sleep(500)
                 }
-                assertNotNull("$editor did not render a visible canvas within ${EDITOR_START_TIMEOUT_MS / 1_000}s", observed)
-                assertEquals("Wrong editor surface observed", editor, observed)
+                assertNotNull("$editor did not render a visible canvas within ${EDITOR_START_TIMEOUT_MS / 1_000}s; $evidence", observed)
+                assertEquals("Wrong editor surface observed; $evidence", editor, observed)
                 SystemClock.sleep(4_000)
                 scenario.onActivity { activity ->
                     assertEquals("$editor reported a fatal startup error", null, activity.smokeFatalEditor)
