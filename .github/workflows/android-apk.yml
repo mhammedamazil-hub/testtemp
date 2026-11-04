@@ -34,8 +34,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - editor: photocraft
-            build: trunk
           - editor: vectorcraft
             build: trunk
           - editor: filmcraft
@@ -136,7 +134,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
+          for editor in vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
             source="editor-artifacts/editor-web-${editor}"
             test -s "$source/index.html"
             mkdir -p "app/src/main/assets/editors/${editor}" "app/src/main/assets/licenses/${editor}"
@@ -178,11 +176,15 @@ jobs:
           apk=app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
           unzip -l "$apk" | grep -q 'assets/studio/index.html'
-          for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
+          for editor in vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
             unzip -l "$apk" | grep -q "assets/editors/${editor}/index.html"
             unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-MIT"
             unzip -l "$apk" | grep -q "assets/licenses/${editor}/LICENSE-APACHE"
           done
+          if unzip -l "$apk" | grep -q 'assets/editors/photocraft/index.html'; then
+            echo "PhotoCraft must not be included in this six-editor trial APK." >&2
+            exit 1
+          fi
           sha256sum "$apk"
       - name: Upload installable debug APK before smoke tests
         uses: actions/upload-artifact@v7
@@ -229,7 +231,7 @@ jobs:
         run: |
           sudo apt-get clean
           rm -rf "$HOME/.android/cache"
-      - name: Run Android emulator startup smoke tests for all seven editors
+      - name: Run Android emulator startup smoke tests for the six bundled editors
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -263,7 +265,7 @@ jobs:
           import shutil
           import xml.etree.ElementTree as ET
 
-          editors = "photocraft|vectorcraft|filmcraft|lightcraft|pdfcraft|effectcraft|designcraft"
+          editors = "vectorcraft|filmcraft|lightcraft|pdfcraft|effectcraft|designcraft"
           paths = glob.glob("app/build/outputs/androidTest-results/connected/**/*.xml", recursive=True)
           paths += glob.glob("app/build/reports/androidTests/connected/**/*.xml", recursive=True)
           count = 0

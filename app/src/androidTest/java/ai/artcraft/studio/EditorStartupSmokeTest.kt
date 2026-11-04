@@ -14,7 +14,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class EditorStartupSmokeTest {
     @Test
-    fun allSevenEditorsReachCanvasSurface() {
+    fun allSixBundledEditorsReachCanvasSurface() {
         EDITORS.forEach { editor ->
             val context = ApplicationProvider.getApplicationContext<android.content.Context>()
             val intent = Intent(context, MainActivity::class.java)
@@ -44,7 +44,7 @@ class EditorStartupSmokeTest {
     }
 
     companion object {
-        private val EDITORS = listOf("photocraft", "vectorcraft", "filmcraft", "lightcraft", "pdfcraft", "effectcraft", "designcraft")
+        private val EDITORS = listOf("vectorcraft", "filmcraft", "lightcraft", "pdfcraft", "effectcraft", "designcraft")
         private const val EDITOR_START_TIMEOUT_MS = 120_000L
     }
 }

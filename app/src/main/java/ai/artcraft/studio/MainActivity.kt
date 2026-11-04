@@ -406,7 +406,7 @@ class MainActivity : Activity() {
     private fun requestPlanWithConsent(task: String, requestId: String) {
         if (task.isBlank()) { postAgentEvent(requestId, JSONObject().put("type", "error").put("message", "Describe the task first.")); return }
         val editor = activeEditorId
-        if (editor == null || editor !in EDITORS) { postAgentEvent(requestId, JSONObject().put("type", "error").put("message", "Open one of the seven editors before asking the agent to work.")); return }
+        if (editor == null || editor !in EDITORS) { postAgentEvent(requestId, JSONObject().put("type", "error").put("message", "Open one of the six included editors before asking the agent to work.")); return }
         val provider = providerStore.activeProvider()
         val config = providerStore.get(provider)
         if (config.apiKey.isBlank() || config.model.isBlank()) {
@@ -633,7 +633,7 @@ class MainActivity : Activity() {
     }
 
     companion object {
-        private val EDITORS = setOf("photocraft", "vectorcraft", "filmcraft", "lightcraft", "pdfcraft", "effectcraft", "designcraft")
+        private val EDITORS = setOf("vectorcraft", "filmcraft", "lightcraft", "pdfcraft", "effectcraft", "designcraft")
         private const val REQUEST_OPEN = 7101
         private const val REQUEST_SAVE = 7102
         private const val SMOKE_TAG = "ArtCraftSmoke"

@@ -218,7 +218,7 @@
           <span class="brand-name">ARTCRAFT STUDIO</span>
         </div>
         <span class="topbar-spacer"></span>
-        <span class="quiet-label">Seven original editors</span>
+        <span class="quiet-label">Six original editors</span>
         <button class="icon-button" id="settings-button" type="button" aria-label="Settings" title="Provider settings">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z"/><path d="m19 13.7 1.1.8-1.1 2-1.3-.4a7.7 7.7 0 0 1-1.5.9l-.2 1.4h-2.3l-.3-1.4a7.7 7.7 0 0 1-1.6-.4l-1.1.9-1.9-1.2.6-1.3a7.7 7.7 0 0 1-.7-1.6l-1.3-.4v-2.3l1.4-.3a7.7 7.7 0 0 1 .7-1.6l-.7-1.2 1.8-1.4 1.2.8a7.7 7.7 0 0 1 1.7-.4l.4-1.3h2.3l.2 1.4a7.7 7.7 0 0 1 1.5.9l1.3-.5 1.2 2-1.1.9c.2.6.2 1.2.1 1.8Z"/></svg>
         </button>
@@ -232,12 +232,8 @@
           <input id="search" type="search" placeholder="Find an editor" aria-label="Find an editor" autocomplete="off" />
         </div>
       </section>
-      <div class="section-head"><h2>Editors</h2><span class="section-count">07</span></div>
+      <div class="section-head"><h2>Editors</h2><span class="section-count">06</span></div>
       <nav class="editor-grid" aria-label="Editors">
-        <button class="editor" data-editor="photocraft" type="button">
-          <span class="editor-icon"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="m4 17 5-5 3.5 3 2.5-2 5 4"/></svg></span>
-          <strong>PhotoCraft</strong><span class="description">Raster painting, layers, masks and image processing.</span><span class="open-label">Open editor ↗</span>
-        </button>
         <button class="editor" data-editor="vectorcraft" type="button">
           <span class="editor-icon"><svg viewBox="0 0 24 24"><path d="M5 18 18 6M5 18c3-6 7-8 13-12"/><circle cx="5" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M10 13h.01M13 10h.01"/></svg></span>
           <strong>VectorCraft</strong><span class="description">Vector illustration, paths, shapes and SVG.</span><span class="open-label">Open editor ↗</span>
@@ -321,7 +317,7 @@
     <script>
       (() => {
         "use strict";
-        const names = { photocraft: "PhotoCraft", vectorcraft: "VectorCraft", filmcraft: "FilmCraft", lightcraft: "LightCraft", pdfcraft: "PdfCraft", effectcraft: "EffectCraft", designcraft: "DesignCraft" };
+        const names = { vectorcraft: "VectorCraft", filmcraft: "FilmCraft", lightcraft: "LightCraft", pdfcraft: "PdfCraft", effectcraft: "EffectCraft", designcraft: "DesignCraft" };
         const home = document.getElementById("home");
         const workspace = document.getElementById("workspace");
         const frame = document.getElementById("editor-frame");
@@ -387,9 +383,7 @@
             checkEditorSurface(id, startupStartedAt);
           };
           frame.onerror = () => recordDiagnostic({ level: "error", fatal: true, editor: id, source: "iframe", message: "The editor document could not be loaded." });
-          // PhotoCraft's documented default lets wgpu select WebGPU where available and fall back to WebGL2;
-          // forcing `?webgl` here can strand Android WebViews that expose WebGPU but not WebGL2.
-          const query = id === "photocraft" ? "" : id === "pdfcraft" ? "?host=parent&webgl" : id === "effectcraft" ? "?webgl&nosw" : "?webgl";
+          const query = id === "pdfcraft" ? "?host=parent&webgl" : id === "effectcraft" ? "?webgl&nosw" : "?webgl";
           startupStartedAt = Date.now();
           frame.src = `../editors/${id}/index.html${query}`;
           // Track the actual editor surface, not only the iframe's document load event.
@@ -406,7 +400,7 @@
           let surfaceReady = false;
           try {
             const doc = frame.contentDocument;
-            const overlayCandidates = [...(doc?.querySelectorAll('[role="alert"], [role="alertdialog"], #fatal, #device-lost, #designcraft_graphics_error, #lightcraft_blocking, [class*="error-overlay"], [id*="error-screen"], #photocraft_loading, #vectorcraft_loading, #lightcraft_loading, #designcraft_loading, #loading .err') || [])];
+            const overlayCandidates = [...(doc?.querySelectorAll('[role="alert"], [role="alertdialog"], #fatal, #device-lost, #designcraft_graphics_error, #lightcraft_blocking, [class*="error-overlay"], [id*="error-screen"], #vectorcraft_loading, #lightcraft_loading, #designcraft_loading, #loading .err') || [])];
             const startupOverlay = overlayCandidates.find((element) => {
               const style = doc.defaultView.getComputedStyle(element); const rect = element.getBoundingClientRect();
               return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
@@ -421,7 +415,7 @@
               const rect = canvas.getBoundingClientRect(); const style = doc.defaultView.getComputedStyle(canvas);
               return canvas.width > 20 && canvas.height > 20 && rect.width > 20 && rect.height > 20 && style.display !== "none" && style.visibility !== "hidden";
             });
-            const loaderSelector = { photocraft: "#photocraft_loading", vectorcraft: "#vectorcraft_loading", filmcraft: "#loading", lightcraft: "#lightcraft_loading", effectcraft: "#loading", designcraft: "#designcraft_loading" }[id];
+            const loaderSelector = { vectorcraft: "#vectorcraft_loading", filmcraft: "#loading", lightcraft: "#lightcraft_loading", effectcraft: "#loading", designcraft: "#designcraft_loading" }[id];
             const loader = loaderSelector ? doc?.querySelector(loaderSelector) : null;
             const loaderStyle = loader ? doc.defaultView.getComputedStyle(loader) : null;
             const loaderHidden = !loader || loaderStyle.display === "none" || loaderStyle.visibility === "hidden";

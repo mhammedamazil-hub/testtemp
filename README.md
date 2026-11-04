@@ -1,6 +1,6 @@
 # ARTCRAFT STUDIO
 
-An Android host for the seven original ArtCraft editing engines: PhotoCraft, VectorCraft, FilmCraft, LightCraft, PdfCraft, EffectCraft and DesignCraft. The editors remain exact, pinned upstream Git submodules; the Android workflow builds their WebAssembly frontends and packages them into one APK. The host loads only the selected editor from local assets through AndroidX WebViewAssetLoader.
+An Android host for six original ArtCraft editing engines: VectorCraft, FilmCraft, LightCraft, PdfCraft, EffectCraft and DesignCraft. PhotoCraft remains in the pinned upstream sources but is intentionally omitted from this trial APK while its Android WebView startup failure is investigated. The editors remain exact, pinned upstream Git submodules; the Android workflow builds their WebAssembly frontends and packages them into one APK. The host loads only the selected editor from local assets through AndroidX WebViewAssetLoader.
 
 ## Current status
 
@@ -11,7 +11,7 @@ An Android host for the seven original ArtCraft editing engines: PhotoCraft, Vec
 - **Provider settings:** Gemini, Anthropic/Claude and OpenAI-compatible endpoint/model/key settings are implemented; keys are encrypted with an Android Keystore-backed AES-GCM key. The generic connection test sends no project content.
 - **Experimental visual agent:** native per-workflow screenshot consent, provider-backed planning, user plan approval, a visible cursor and bounded UI-action bridge are implemented in source. It dispatches synthetic pointer/keyboard events into the selected real editor, does not run generated scripts, and rechecks the screen between approved steps. **This has not yet been built or runtime-tested**; editor-specific task coverage, action reliability, undo/recovery and project save outcomes are not claimed.
 - **Diagnostics:** local startup diagnostics retain only redacted error categories and safe bundled-resource paths; arbitrary JavaScript error text is omitted to avoid project-content/API-key leakage.
-- **Emulator smoke tests:** CI now launches all seven editors on an Android emulator and waits for a visible canvas while checking fatal startup reports. This is a startup-surface smoke test, not proof of editing/export correctness. The updated workflow has not yet run.
+- **Emulator smoke tests:** CI launches all six editors included in this trial APK on an Android emulator and waits for a visible canvas while checking fatal startup reports. This is a startup-surface smoke test, not proof of editing/export correctness. The updated workflow has not yet run.
 - **APK:** a baseline debug APK build succeeded in earlier run [41580239517](https://github.com/mhammedamazil-hub/testtemp/actions/runs/41580239517), before the current UI/agent/test changes. The updated source has not been rebuilt. The earlier artifact is available from the Actions run, not stored in this repository.
 - **Device testing:** this environment has no Java/JDK, Gradle, Android SDK, adb/emulator or physical device. No physical-device or Galaxy Tab A9 test is claimed.
 
@@ -26,7 +26,7 @@ Each upstream's license applies. The repositories offer MIT OR Apache-2.0 for co
 
 ## Build and smoke-test in GitHub Actions
 
-Run the **Android APK** workflow from the Actions tab or push a change on an `arena/**` branch that touches the listed source/build paths. The workflow builds each upstream web/WASM editor in a separate job, assembles the real bundles into the Android app, builds a debug APK, runs the all-seven Android-emulator startup smoke test, verifies APK payloads and uploads the APK artifact. Smoke-test reports are uploaded on failure.
+Run the **Android APK** workflow from the Actions tab or push a change on an `arena/**` branch that touches the listed source/build paths. The workflow builds each upstream web/WASM editor in a separate job, assembles the real bundles into the Android app, builds a debug APK, runs the six-editor Android-emulator startup smoke test, verifies APK payloads and uploads the APK artifact. Smoke-test reports are uploaded on failure.
 
 The debug-signed APK is for testing, not public distribution. Release signing is not configured.
 
