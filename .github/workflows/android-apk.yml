@@ -54,6 +54,7 @@ jobs:
           set -euo pipefail
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}"
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --version 4.1.2 --locked
@@ -63,7 +64,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! cargo ndk --link-cxx-shared -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release >native-build.log 2>&1; then
+          if ! cargo ndk --link-libcxx-shared -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release >native-build.log 2>&1; then
             tail -n 45 native-build.log
             summary=$(tail -n 35 native-build.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/::/%3A%3A/g')
             echo "::error title=Native Rust build failed::$summary"
