@@ -49,7 +49,9 @@ export default defineConfig({
     },
   },
   test: {
+    // PLY/format tests are pure node; the App render guard asks for jsdom via
+    // a per-file `@vitest-environment jsdom` comment.
     environment: "node",
-    include: ["src/tests/**/*.test.ts"],
+    include: ["src/tests/**/*.test.{ts,tsx}"],
   },
 });

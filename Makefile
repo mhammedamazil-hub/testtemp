@@ -5,7 +5,7 @@ PIP := .venv/bin/pip
 COMPOSE := docker compose
 
 .PHONY: help install venv web-deps dev dev-api dev-web sim test test-api test-web e2e typecheck lint build \
-        preflight smoke docker-build up down sim-up logs clean
+        prebuilt preflight smoke docker-build up down sim-up logs clean
 
 help:
 	@echo "Idol Studio"
@@ -69,6 +69,15 @@ lint:
 build:
 	cd apps/web && npm run build
 	cd apps/api && ../../$(PY) -c "from app.asgi import app; print('API app OK:', app.title)"
+
+# Tracked copy of the production build. Some hosted/sandboxed environments wipe
+# git-ignored directories (dist, node_modules) between sessions, which would
+# leave the API serving nothing; apps/web/prebuilt survives because it is
+# committed. Point IDOL_FRONTEND_DIST at it, or use it as a fallback.
+prebuilt:
+	cd apps/web && npm run build
+	rm -rf apps/web/prebuilt && cp -a apps/web/dist apps/web/prebuilt
+	@echo "prebuilt -> apps/web/prebuilt (commit it after rebuilding)"
 
 preflight:
 	$(PY) scripts/preflight.py

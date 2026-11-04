@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # ---- behaviour ---------------------------------------------------------
     allow_simulated_worker: bool = False
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # Origins allowed to embed the studio in an iframe. Empty = sensible default:
+    # production allows the same origin and hosted previews, development also
+    # allows localhost and the Arena preview hosts so the embedded preview works.
+    frame_ancestors: str = ""
 
     # ---- model files -------------------------------------------------------
     models: ModelFiles = Field(default_factory=ModelFiles)
@@ -100,6 +104,17 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def resolved_frame_ancestors(self) -> str:
+        if self.frame_ancestors.strip():
+            return self.frame_ancestors.strip()
+        if self.is_production:
+            return "'self' https://*.e2b.app"
+        return (
+            "'self' https://*.e2b.app https://e2b.app https://*.arena.ai https://arena.ai "
+            "http://localhost:* http://127.0.0.1:*"
+        )
 
     @property
     def uploads_dir(self) -> Path:

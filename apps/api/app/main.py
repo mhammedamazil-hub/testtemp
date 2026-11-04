@@ -33,6 +33,27 @@ def configure_logging(level: str) -> None:
     logging.getLogger("websockets").setLevel(logging.WARNING)
 
 
+def resolve_frontend_dir(configured: Path | None) -> Path | None:
+    """Find a usable SPA build.
+
+    Order: the configured ``IDOL_FRONTEND_DIST``, then the committed
+    ``apps/web/prebuilt`` snapshot, then ``apps/web/dist``. The prebuilt copy
+    exists because git-ignored build output can disappear (fresh checkout,
+    sandbox restore, CI cache miss) and the studio should still serve its UI
+    instead of returning JSON at `/`.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    candidates: list[Path] = []
+    if configured is not None:
+        candidates.append(Path(configured))
+    candidates.extend((repo_root / "apps/web/prebuilt", repo_root / "apps/web/dist"))
+    for candidate in candidates:
+        if candidate.is_dir() and (candidate / "index.html").is_file():
+            logger.info("Serving frontend from %s", candidate)
+            return candidate
+    return None
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -84,7 +105,7 @@ def create_app(
 
     app.add_middleware(
         SecurityHeadersMiddleware,
-        frame_ancestors="'self' https://*.e2b.app",
+        frame_ancestors=settings.resolved_frame_ancestors,
         is_production=settings.is_production,
     )
     app.add_middleware(ExceptionMiddleware)
@@ -105,7 +126,7 @@ def create_app(
     app.include_router(jobs_routes.router, prefix=settings.api_prefix)
 
     # ---- static SPA -----------------------------------------------------
-    dist = settings.frontend_dist
+    dist = resolve_frontend_dir(settings.frontend_dist)
     if dist is not None and Path(dist).joinpath("index.html").is_file():
         assets_dir = Path(dist) / "assets"
         if assets_dir.is_dir():
