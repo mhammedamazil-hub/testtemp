@@ -69,7 +69,7 @@ jobs:
           library="libartcraft_${{ matrix.editor }}.so"
           if ! cargo ndk --link-libcxx-shared -t arm64-v8a -t x86_64 -o ../../../app/src/main/jniLibs build --release >native-build.log 2>&1; then
             tail -n 45 native-build.log
-            summary=$(grep -F -e 'error[' -e 'error: could not compile' native-build.log | tail -n 20 | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/::/%3A%3A/g')
+            summary=$(tail -n 35 native-build.log | sed -E 's/\\x1B\\[[0-9;]*[mK]//g' | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/::/%3A%3A/g')
             echo "::error title=${{ matrix.editor }} Rust build failed::$summary"
             exit 1
           fi
