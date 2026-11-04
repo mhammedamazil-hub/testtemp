@@ -193,6 +193,22 @@ jobs:
           path: gradle-build.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: Enable KVM for Android emulator
+        shell: bash
+        run: |
+          if [[ -e /dev/kvm ]]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            sudo chmod 0666 /dev/kvm
+            echo "KVM is available to the runner."
+          else
+            echo "::warning::/dev/kvm is unavailable; the emulator will use software virtualization and may not boot in time."
+          fi
+      - name: Release package-manager download cache
+        run: |
+          sudo apt-get clean
+          rm -rf "$HOME/.android/cache"
       - name: Run Android emulator startup smoke tests for all seven editors
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -200,9 +216,21 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          cores: 2
+          ram-size: 2048M
+          disk-size: 4096M
           emulator-boot-timeout: 1200
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 3072 -cores 2 -no-snapshot
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           disable-animations: true
+          pre-emulator-launch-script: |
+            {
+              echo '### Android emulator host capacity'
+              echo '```text'
+              df -h "${ANDROID_AVD_HOME:-$HOME/.android/avd}" "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}" || true
+              free -h || true
+              if [[ -e /dev/kvm ]]; then ls -l /dev/kvm; else echo '/dev/kvm missing'; fi
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           script: gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
       - name: Publish redacted Android smoke-test failure details
         if: failure()
@@ -210,7 +238,9 @@ jobs:
         run: |
           python3 - <<'PY'
           import glob
+          import os
           import re
+          import shutil
           import xml.etree.ElementTree as ET
 
           editors = "photocraft|vectorcraft|filmcraft|lightcraft|pdfcraft|effectcraft|designcraft"
@@ -244,7 +274,18 @@ jobs:
                       detail = f"Instrumentation failed in {case.get('classname', 'Android test')}.{case.get('name', 'unknown test')} ({problem.tag})."
                   print(f"::error title=Android editor smoke-test failure::{detail}")
           if count == 0:
-              print("::error title=Android editor smoke-test failure::No JUnit test failure was found; inspect emulator startup or instrumentation setup in the attached report artifact.")
+              disk_free_gb = shutil.disk_usage("/").free // (1024 ** 3)
+              mem_available = "unknown"
+              try:
+                  with open("/proc/meminfo", encoding="ascii") as meminfo:
+                      for line in meminfo:
+                          if line.startswith("MemAvailable:"):
+                              mem_available = f"{int(line.split()[1]) // 1024} MiB"
+                              break
+              except OSError:
+                  pass
+              kvm = "present" if os.path.exists("/dev/kvm") else "missing"
+              print(f"::error title=Android emulator startup failure::No JUnit result was produced. Runner diagnostics after failure: root disk free {disk_free_gb} GiB; memory available {mem_available}; /dev/kvm {kvm}.")
           PY
       - name: Upload emulator smoke-test reports on failure
         if: failure()
