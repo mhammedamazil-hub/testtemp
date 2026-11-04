@@ -1,5 +1,5 @@
 [package]
-name = "artcraft-android"
+name = "artcraft-lightcraft"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
@@ -14,22 +14,9 @@ egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc7996815719
 winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
 android_logger = "0.15"
 log = "0.4"
+lightcraft-engine = { path = "../../../upstream/lightcraft/crates/engine" }
+lightcraft-ui-egui = { path = "../../../upstream/lightcraft/crates/ui-egui" }
 
-photocraft-engine = { path = "../upstream/photocraft/crates/engine" }
-photocraft-ui-egui = { path = "../upstream/photocraft/crates/ui-egui" }
-vectorcraft-engine = { path = "../upstream/vectorcraft/crates/engine", features = ["bundled-fonts"] }
-vectorcraft-ui-egui = { path = "../upstream/vectorcraft/crates/ui-egui" }
-filmcraft-engine = { path = "../upstream/filmcraft/crates/engine" }
-filmcraft-ui-egui = { path = "../upstream/filmcraft/crates/ui-egui" }
-lightcraft-engine = { path = "../upstream/lightcraft/crates/engine" }
-lightcraft-ui-egui = { path = "../upstream/lightcraft/crates/ui-egui" }
-pdfcraft-ui-egui = { path = "../upstream/pdfcraft/crates/ui-egui" }
-effectcraft-engine = { path = "../upstream/effectcraft/crates/engine" }
-effectcraft-ui-egui = { path = "../upstream/effectcraft/crates/ui-egui" }
-designcraft-engine = { path = "../upstream/designcraft/crates/engine" }
-designcraft-ui-egui = { path = "../upstream/designcraft/crates/ui-egui" }
-
-# Upstream UI crates pin the shared native egui/winit backend to these reviewed source revisions.
 [patch.crates-io]
 ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
@@ -40,20 +27,15 @@ egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc7996
 egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 egui_extras = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_system_font_provider = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_demo_lib = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_inspection = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
-# PdfCraft's UI crates depend on its guarded PDF decoder forks; the registry releases have older APIs.
-hayro-interpret = { path = "../upstream/pdfcraft/vendor/hayro-interpret" }
-hayro = { path = "../upstream/pdfcraft/vendor/hayro" }
-hayro-syntax = { path = "../upstream/pdfcraft/vendor/hayro-syntax" }
-hayro-cmap = { path = "../upstream/pdfcraft/vendor/hayro-cmap" }
-hayro-postscript = { path = "../upstream/pdfcraft/vendor/hayro-postscript" }
-hayro-jbig2 = { path = "../upstream/pdfcraft/vendor/hayro-jbig2" }
-lopdf = { path = "../upstream/pdfcraft/vendor/lopdf" }
-vello_common = { path = "../upstream/pdfcraft/vendor/vello_common" }
-vello_cpu = { path = "../upstream/pdfcraft/vendor/vello_cpu" }
 
 [package.metadata.android]
+
 build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
 
 [package.metadata.android.sdk]

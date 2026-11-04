@@ -27,10 +27,10 @@ The repository root licenses do not clear bundled fonts, icons, models, codecs o
 
 ## Native implementation attempt
 
-- `native-android/` is a Rust `cdylib` entry point using the upstream-pinned eframe/winit Android NativeActivity support.
-- It depends directly on all seven upstream `*-ui-egui` and engine crates, constructs their Rust app/UI types, and provides an egui-native editor launcher.
-- `app/` now packages that Rust library as a NativeActivity APK. The old WebView/Kotlin editor host and web launcher have been removed from the Android build.
-- `.github/workflows/android-apk.yml` cross-compiles for ARM64 and x86_64, packages a debug APK, checks for native libraries/no editor web payload, uploads the APK before smoke testing, then attempts a native emulator first-frame check.
+- `native-android/editors/` contains seven isolated Rust `cdylib` entry points using the upstream-pinned eframe/winit Android NativeActivity support. Keeping each editor in a separate Cargo graph preserves its own upstream crate patches and avoids forcing incompatible PDF/craft-library revisions into one dependency resolver.
+- Every library constructs its authentic upstream Rust app/UI type and implements only the small host adapter needed for eframe; `native-android/shared/host.rs` provides the Android safe-area shim and first-frame diagnostic.
+- `app/` contains a native Android Views launcher and seven `NativeActivity` subclasses, each loading its corresponding Rust shared library. All seven libraries are packaged together in one APK. There is no WebView/editor website or WASM payload.
+- `.github/workflows/android-apk.yml` matrix-builds each editor for ARM64 and x86_64, downloads all fourteen native libraries into one APK, checks the payload, uploads the APK before runtime tests, and attempts a native first-frame launch test for every editor.
 
 **No successful native Rust cross-compile, APK install, emulator first frame, or physical-device use has yet been verified.** Adding the native source is not equivalent to a working APK. The next evidence must come from the new workflow and then an actual device test.
 

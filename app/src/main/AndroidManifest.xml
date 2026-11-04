@@ -4,21 +4,67 @@
 
     <application
         android:allowBackup="false"
-        android:hasCode="false"
+        android:hasCode="true"
         android:icon="@mipmap/ic_launcher"
         android:label="ARTCRAFT STUDIO"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
-            android:name="android.app.NativeActivity"
-            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout"
-            android:exported="true"
-            android:screenOrientation="unspecified">
-            <meta-data android:name="android.app.lib_name" android:value="artcraft_android" />
+            android:name=".MainActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+        <activity
+            android:name=".PhotoCraftActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout"
+            android:exported="false"
+            android:label="PhotoCraft">
+            <meta-data android:name="android.app.lib_name" android:value="artcraft_photocraft" />
+        </activity>
+        <activity
+            android:name=".VectorCraftActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout"
+            android:exported="false"
+            android:label="VectorCraft">
+            <meta-data android:name="android.app.lib_name" android:value="artcraft_vectorcraft" />
+        </activity>
+        <activity
+            android:name=".FilmCraftActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout"
+            android:exported="false"
+            android:label="FilmCraft">
+            <meta-data android:name="android.app.lib_name" android:value="artcraft_filmcraft" />
+        </activity>
+        <activity
+            android:name=".LightCraftActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout"
+            android:exported="false"
+            android:label="LightCraft">
+            <meta-data android:name="android.app.lib_name" android:value="artcraft_lightcraft" />
+        </activity>
+        <activity
+            android:name=".PdfCraftActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout"
+            android:exported="false"
+            android:label="PdfCraft">
+            <meta-data android:name="android.app.lib_name" android:value="artcraft_pdfcraft" />
+        </activity>
+        <activity
+            android:name=".EffectCraftActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout"
+            android:exported="false"
+            android:label="EffectCraft">
+            <meta-data android:name="android.app.lib_name" android:value="artcraft_effectcraft" />
+        </activity>
+        <activity
+            android:name=".DesignCraftActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout"
+            android:exported="false"
+            android:label="DesignCraft">
+            <meta-data android:name="android.app.lib_name" android:value="artcraft_designcraft" />
         </activity>
     </application>
 </manifest>

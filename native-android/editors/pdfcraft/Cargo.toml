@@ -1,0 +1,54 @@
+[package]
+name = "artcraft-pdfcraft"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a", default-features = false, features = ["default_fonts", "wgpu", "android-native-activity"] }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a", default-features = false, features = ["default_fonts"] }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+android_logger = "0.15"
+log = "0.4"
+pdfcraft-ui-egui = { path = "../../../upstream/pdfcraft/crates/ui-egui" }
+
+[patch.crates-io]
+hayro-interpret = { path = "../../../upstream/pdfcraft/vendor/hayro-interpret" }
+hayro = { path = "../../../upstream/pdfcraft/vendor/hayro" }
+hayro-syntax = { path = "../../../upstream/pdfcraft/vendor/hayro-syntax" }
+hayro-cmap = { path = "../../../upstream/pdfcraft/vendor/hayro-cmap" }
+hayro-postscript = { path = "../../../upstream/pdfcraft/vendor/hayro-postscript" }
+hayro-jbig2 = { path = "../../../upstream/pdfcraft/vendor/hayro-jbig2" }
+lopdf = { path = "../../../upstream/pdfcraft/vendor/lopdf" }
+vello_common = { path = "../../../upstream/pdfcraft/vendor/vello_common" }
+vello_cpu = { path = "../../../upstream/pdfcraft/vendor/vello_cpu" }
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_extras = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_kittest = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_system_font_provider = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_demo_lib = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_inspection = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+
+[package.metadata.android]
+
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[profile.release]
+strip = "debuginfo"

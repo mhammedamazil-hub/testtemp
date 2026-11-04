@@ -21,17 +21,24 @@ env:
   GRADLE_VERSION: "8.11.1"
 
 jobs:
-  native-apk:
-    name: Compile upstream Rust editors for Android and package APK
+  editor-native:
+    name: Build ${{ matrix.editor }} native Rust library
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        editor: [photocraft, vectorcraft, filmcraft, lightcraft, pdfcraft, effectcraft, designcraft]
     steps:
-      - name: Check out pinned editor sources
+      - name: Check out editor source
         uses: actions/checkout@v7
         with:
-          submodules: recursive
+          submodules: false
 
-      - name: Install Rust Android target
+      - name: Initialize this pinned upstream editor
+        run: git submodule update --init --depth 1 upstream/${{ matrix.editor }}
+
+      - name: Install Rust Android targets
         uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: aarch64-linux-android,x86_64-linux-android
@@ -39,12 +46,7 @@ jobs:
       - name: Cache native Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native-android -> native-android/target
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "17"
+          workspaces: native-android/editors/${{ matrix.editor }} -> native-android/editors/${{ matrix.editor }}/target
 
       - uses: android-actions/setup-android@v4
 
@@ -59,50 +61,112 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --version 4.1.2 --locked
 
-      - name: Compile native Rust app and all seven upstream egui editors
-        working-directory: native-android
+      - name: Compile editor NativeActivity library for ARM64 and x86_64
+        working-directory: native-android/editors/${{ matrix.editor }}
         shell: bash
         run: |
           set -euo pipefail
-          if ! cargo ndk --link-libcxx-shared -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release >native-build.log 2>&1; then
+          library="libartcraft_${{ matrix.editor }}.so"
+          if ! cargo ndk --link-libcxx-shared -t arm64-v8a -t x86_64 -o ../../../app/src/main/jniLibs build --release >native-build.log 2>&1; then
             tail -n 45 native-build.log
-            summary=$(tail -n 35 native-build.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/::/%3A%3A/g')
-            echo "::error title=Native Rust build failed::$summary"
+            summary=$(grep -F -e 'error[' -e 'error: could not compile' native-build.log | tail -n 20 | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/::/%3A%3A/g')
+            echo "::error title=${{ matrix.editor }} Rust build failed::$summary"
             exit 1
           fi
-          test -s ../app/src/main/jniLibs/arm64-v8a/libartcraft_android.so
-          test -s ../app/src/main/jniLibs/x86_64/libartcraft_android.so
-          file ../app/src/main/jniLibs/arm64-v8a/libartcraft_android.so ../app/src/main/jniLibs/x86_64/libartcraft_android.so
+          test -s "../../../app/src/main/jniLibs/arm64-v8a/$library"
+          test -s "../../../app/src/main/jniLibs/x86_64/$library"
+          file "../../../app/src/main/jniLibs/arm64-v8a/$library" "../../../app/src/main/jniLibs/x86_64/$library"
+
+      - name: Upload native libraries for the single APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: artcraft-native-libs-${{ matrix.editor }}
+          path: app/src/main/jniLibs
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload native build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-build-log-${{ matrix.editor }}
+          path: native-android/editors/${{ matrix.editor }}/native-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  package-apk:
+    name: Package one seven-editor APK and run emulator smoke tests
+    needs: editor-native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out Android app
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK platform and build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Download all seven native editor libraries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artcraft-native-libs-*
+          path: app/src/main/jniLibs
+          merge-multiple: true
+
+      - name: Verify all fourteen native libraries are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          for abi in arm64-v8a x86_64; do
+            for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
+              test -s "app/src/main/jniLibs/${abi}/libartcraft_${editor}.so"
+            done
+          done
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "${{ env.GRADLE_VERSION }}"
 
-      - name: Package installable debug APK
+      - name: Package single installable debug APK
         shell: bash
         run: |
           set -o pipefail
           gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee gradle-build.log
 
-      - name: Verify this is a native Rust APK, not a web bundle
+      - name: Verify native APK has every editor and no web payload
         shell: bash
         run: |
           set -euo pipefail
           apk=app/build/outputs/apk/debug/app-debug.apk
           test -s "$apk"
           listing=$(unzip -l "$apk")
-          grep -q 'lib/arm64-v8a/libartcraft_android.so' <<< "$listing"
-          grep -q 'lib/x86_64/libartcraft_android.so' <<< "$listing"
+          for abi in arm64-v8a x86_64; do
+            for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
+              grep -q "lib/${abi}/libartcraft_${editor}.so" <<< "$listing"
+            done
+          done
           manifest_xml=$("${ANDROID_HOME}/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml)
-          grep -q 'android.app.NativeActivity' <<< "$manifest_xml"
-          if grep -Eq 'assets/editors/|assets/studio/index\.html|assets/.*\.wasm' <<< "$listing"; then
-            echo "Unexpected browser/WASM payload found in native APK." >&2
+          grep -q 'ai.artcraft.studio.MainActivity' <<< "$manifest_xml"
+          for editor in photocraft vectorcraft filmcraft lightcraft pdfcraft effectcraft designcraft; do
+            grep -q "artcraft_${editor}" <<< "$manifest_xml"
+          done
+          if grep -Eq 'assets/editors/|assets/studio/index[.]html|assets/.*[.]wasm' <<< "$listing"; then
+            echo "Unexpected browser/WASM editor payload found in native APK." >&2
             exit 1
           fi
           sha256sum "$apk"
 
-      - name: Upload native debug APK before emulator smoke test
+      - name: Upload installable debug APK before runtime tests
         uses: actions/upload-artifact@v7
         with:
           name: artcraft-studio-native-debug-apk
@@ -122,7 +186,7 @@ jobs:
             echo "::warning::/dev/kvm is unavailable; emulator startup may be slower."
           fi
 
-      - name: Run native Android startup smoke test
+      - name: Install and launch each authentic native editor
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -137,27 +201,36 @@ jobs:
           disable-animations: true
           script: |
             set -euo pipefail
+            package=ai.artcraft.studio
             adb install -r app/build/outputs/apk/debug/app-debug.apk
-            adb logcat -c
-            adb shell am start -n ai.artcraft.studio/android.app.NativeActivity
-            for attempt in $(seq 1 40); do
-              if adb logcat -d -s ARTCRAFT:V | grep -Fq ARTCRAFT_NATIVE_FIRST_FRAME; then
-                echo "Native Rust UI rendered its first Android frame."
-                exit 0
+            adb shell am start -W -n "$package/.MainActivity"
+            for item in "PhotoCraft photocraft" "VectorCraft vectorcraft" "FilmCraft filmcraft" "LightCraft lightcraft" "PdfCraft pdfcraft" "EffectCraft effectcraft" "DesignCraft designcraft"; do
+              read -r title editor <<< "$item"
+              activity="${title}Activity"
+              adb shell am force-stop "$package"
+              adb logcat -c
+              adb shell am start -W -n "$package/.$activity"
+              found=false
+              for attempt in $(seq 1 40); do
+                if adb logcat -d -s ARTCRAFT:V | grep -Fq "ARTCRAFT_NATIVE_FIRST_FRAME:$title"; then
+                  echo "$title rendered its first native Rust UI frame."
+                  found=true
+                  break
+                fi
+                sleep 2
+              done
+              if [[ "$found" != true ]]; then
+                adb logcat -d -s ARTCRAFT:V || true
+                echo "$title did not render its native first frame." >&2
+                exit 1
               fi
-              sleep 2
             done
-            adb logcat -d -s ARTCRAFT:V || true
-            echo "Native Rust Android app did not render its first frame within 80 seconds." >&2
-            exit 1
 
-      - name: Upload native build log on failure
+      - name: Upload Gradle failure log
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: native-android-build-log
-          path: |
-            gradle-build.log
-            native-android/native-build.log
+          name: native-apk-gradle-build-log
+          path: gradle-build.log
           if-no-files-found: ignore
           retention-days: 7
