@@ -56,14 +56,14 @@ jobs:
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
       - name: Install cargo-ndk
-        run: cargo install cargo-ndk --version 3.5.5 --locked
+        run: cargo install cargo-ndk --version 4.1.2 --locked
 
       - name: Compile native Rust app and all seven upstream egui editors
         working-directory: native-android
         shell: bash
         run: |
           set -euo pipefail
-          cargo ndk --link-libcxx-shared -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release
+          cargo ndk --link-cxx-shared -t arm64-v8a -t x86_64 -o ../app/src/main/jniLibs build --release
           test -s ../app/src/main/jniLibs/arm64-v8a/libartcraft_android.so
           test -s ../app/src/main/jniLibs/x86_64/libartcraft_android.so
           file ../app/src/main/jniLibs/arm64-v8a/libartcraft_android.so ../app/src/main/jniLibs/x86_64/libartcraft_android.so
