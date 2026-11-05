@@ -18,8 +18,9 @@ jobs:
       # 2. System dependency layers for headless OpenGL/GLX operation
       - name: Install system dependencies
         run: |
-          sudo apt-get update || (sleep 15 && sudo apt-get update)
-          sudo apt-get install -y \
+          if command -v sudo >/dev/null 2>&1; then SUDO=sudo; else SUDO=""; fi
+          $SUDO apt-get update || (sleep 20 && $SUDO apt-get update)
+          $SUDO apt-get install -y --fix-missing \
             libxxf86vm1 \
             libxfixes3 \
             libxi6 \
