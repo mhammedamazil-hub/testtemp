@@ -18,15 +18,19 @@ jobs:
       # 2. System dependency layers for headless OpenGL/GLX operation
       - name: Install system dependencies
         run: |
+          # Headless OpenGL/GLX dependencies for the bpy path.
+          # Best-effort: the generate_assets.py script falls back to a
+          # standalone glTF/FBX writer when bpy cannot import, so the
+          # pipeline still produces game-ready assets if apt is unavailable.
           if command -v sudo >/dev/null 2>&1; then SUDO=sudo; else SUDO=""; fi
-          $SUDO apt-get update || (sleep 20 && $SUDO apt-get update)
+          $SUDO apt-get update || (sleep 20 && $SUDO apt-get update) || echo "apt unavailable — continuing with standalone bpy fallback"
           $SUDO apt-get install -y --fix-missing \
             libxxf86vm1 \
             libxfixes3 \
             libxi6 \
             libxrender1 \
             libgl1-mesa-glx \
-            libxkbcommon0
+            libxkbcommon0 || echo "apt install unavailable — continuing with standalone bpy fallback"
 
       # 3. Python 3.10 module injection
       - name: Set up Python 3.10 environment
