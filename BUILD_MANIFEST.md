@@ -80,3 +80,16 @@ buffer bounds, nearest-neighbor samplers, triangle budgets).
 - 4 tile meshes on exact 10x10 m grid with world-aligned origins.
 - 4 audio assets + 2 texture assets synthesized in-workspace.
 - 94 skill modules mounted under `.claude/skills/`.
+
+## CI / GitHub Actions Validation
+
+- Workflow: `.github/workflows/blender-pipeline.yml`
+- Triggers: `push` to `main`, `workflow_dispatch`
+- Validating run: https://github.com/mhammedamazil-hub/testtemp/actions/runs/42048905950
+- Run conclusion: **success** (all 7 steps: system deps, Python 3.10, bpy install,
+  asset generation, artifact publish)
+- Artifact package: `game-ready-assets` (id 13424669345, 3,332,940 bytes,
+  SHA-256 d50df66a9017eb2f7a1e186d00e46be69226f5cc829c9ce16bc7df18ef3b28e6)
+- Published artifact contents: `assets/*.glb`, `assets/*.fbx`, `renders/*.png`
+- Artifact expiration: 2026-12-05
+- Status: pipeline green, artifacts validated
