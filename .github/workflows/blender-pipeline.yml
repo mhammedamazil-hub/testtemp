@@ -1,0 +1,52 @@
+name: Blender Headless Asset Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Headless 3D Asset Compilation
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Repository ingestion
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. System dependency layers for headless OpenGL/GLX operation
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxxf86vm1 \
+            libxfixes3 \
+            libxi6 \
+            libxrender1 \
+            libgl1-mesa-glx \
+            libxkbcommon0
+
+      # 3. Python 3.10 module injection
+      - name: Set up Python 3.10 environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Blender Python API
+        run: pip install bpy
+
+      # 4. Execution engine callout
+      - name: Run procedural asset generation
+        run: python3 scripts/generate_assets.py
+
+      # 5. Artifact gathering
+      - name: Publish pipeline artifact package
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-ready-assets
+          path: |
+            assets/*.glb
+            assets/*.fbx
+            renders/*.png
+          retention-days: 30
