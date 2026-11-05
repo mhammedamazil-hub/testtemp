@@ -1,0 +1,98 @@
+# Blender Skills Index
+
+Total skills: 94
+
+- [Blender Director](blender-director.md) — orchestration
+- [Vehicle Artist](vehicle-artist.md) — modeling
+- [Environment Artist](environment-artist.md) — modeling
+- [Asset Optimization](asset-optimization.md) — optimization
+- [PSX Horror Style](psx-horror-style.md) — style
+- [Unreal Export](unreal-export.md) — export
+- [Hard-Surface Modeling](hard-surface-modeling.md) — modeling
+- [Organic Modeling](organic-modeling.md) — modeling
+- [Retro Low-Poly Modeling](retro-low-poly-modeling.md) — modeling
+- [Procedural Modeling](procedural-modeling.md) — modeling
+- [Spline Modeling](spline-modeling.md) — modeling
+- [Boolean Modeling](boolean-modeling.md) — modeling
+- [Kitbashing](kitbashing.md) — modeling
+- [Modular Kit Design](modular-kit-design.md) — modeling
+- [Vertex Snapping](vertex-snapping.md) — modeling
+- [Grid Snap Modeling](grid-snap-modeling.md) — modeling
+- [Digital Sculpting](digital-sculpting.md) — sculpting
+- [Retopology](retopology.md) — sculpting
+- [Multires Sculpting](multires-sculpting.md) — sculpting
+- [Sculpt Brush Authoring](sculpt-brush-authoring.md) — sculpting
+- [Shading Artist](shading-artist.md) — shading
+- [PBR Texturing](pbr-texturing.md) — shading
+- [Stylized Shading](stylized-shading.md) — shading
+- [Emissive Neon Shading](emissive-neon-shading.md) — shading
+- [Texture Baking](texture-baking.md) — shading
+- [UV Unwrapping](uv-unwrapping.md) — shading
+- [Texture Packing](texture-packing.md) — shading
+- [Substance Pipeline](substance-pipeline.md) — shading
+- [PSX Texture Crunch](psx-texture-crunch.md) — shading
+- [Rigging Artist](rigging-artist.md) — rigging
+- [Vehicle Rigging](vehicle-rigging.md) — rigging
+- [Character Rigging](character-rigging.md) — rigging
+- [Mechanical Rigging](mechanical-rigging.md) — rigging
+- [Animation Artist](animation-artist.md) — animation
+- [Keyframe Animation](keyframe-animation.md) — animation
+- [Procedural Animation](procedural-animation.md) — animation
+- [NLA Editing](nla-editing.md) — animation
+- [VFX Artist](vfx-artist.md) — vfx
+- [Particle Systems](particle-systems.md) — vfx
+- [Smoke & Fire Simulation](smoke-fire-simulation.md) — vfx
+- [Fluid Simulation](fluid-simulation.md) — vfx
+- [Cloth Simulation](cloth-simulation.md) — vfx
+- [Rigid Body Simulation](rigid-body-simulation.md) — vfx
+- [Geometry Nodes VFX](geometry-nodes-vfx.md) — vfx
+- [Lighting Artist](lighting-artist.md) — lighting
+- [Cycles Lighting](cycles-lighting.md) — lighting
+- [EEVEE Lighting](eevee-lighting.md) — lighting
+- [HDRI Lighting](hdri-lighting.md) — lighting
+- [Volumetric Lighting](volumetric-lighting.md) — lighting
+- [Neon Sign Lighting](neon-sign-lighting.md) — lighting
+- [Render Engine Config](render-engine-config.md) — rendering
+- [Cycles CPU Optimization](cycles-cpu-optimization.md) — rendering
+- [OpenImageDenoise](openimagedenoise.md) — rendering
+- [Render Passes](render-passes.md) — rendering
+- [Compositing](compositing.md) — rendering
+- [Sequencer Editing](sequencer-editing.md) — rendering
+- [Audio Designer](audio-designer.md) — audio
+- [Sound Synthesis](sound-synthesis.md) — audio
+- [SFX Authoring](sfx-authoring.md) — audio
+- [Loopable Music](loopable-music.md) — audio
+- [Spatial Audio](spatial-audio.md) — audio
+- [Audio Import Pipeline](audio-import-pipeline.md) — audio
+- [UI Artist](ui-artist.md) — ui
+- [HUD Design](hud-design.md) — ui
+- [Texture Sheet Authoring](texture-sheet-authoring.md) — ui
+- [Skybox Painting](skybox-painting.md) — ui
+- [Pixel Art UI](pixel-art-ui.md) — ui
+- [Level Designer](level-designer.md) — level
+- [Procedural Level Gen](procedural-level-gen.md) — level
+- [City Grid Design](city-grid-design.md) — level
+- [Navmesh Baking](navmesh-baking.md) — level
+- [Collision Proxies](collision-proxies.md) — level
+- [Technical Artist](technical-artist.md) — pipeline
+- [Pipeline Engineer](pipeline-engineer.md) — pipeline
+- [Python Tooling](python-tooling.md) — pipeline
+- [Blender Operator Authoring](blender-operator-authoring.md) — pipeline
+- [Headless Execution](headless-execution.md) — pipeline
+- [Render Farm Integration](render-farm-integration.md) — pipeline
+- [Version Control Assets](version-control-assets.md) — pipeline
+- [CI/CD Integration](ci-cd-integration.md) — pipeline
+- [Asset Validation](asset-validation.md) — pipeline
+- [UE5 Import Pipeline](ue5-import-pipeline.md) — unreal
+- [UE5 Material Setup](ue5-material-setup.md) — unreal
+- [UE5 Blueprint Scripting](ue5-blueprint-scripting.md) — unreal
+- [UE5 Level Streaming](ue5-level-streaming.md) — unreal
+- [UE5 Nanite & Lumen](ue5-nanite-lumen.md) — unreal
+- [UE5 Packaging](ue5-packaging.md) — unreal
+- [UE5 Editor Automation](ue5-editor-automation.md) — unreal
+- [LOD Generation](lod-generation.md) — optimization
+- [Decimation](decimation.md) — optimization
+- [Instancing](instancing.md) — optimization
+- [Occlusion Culling](occlusion-culling.md) — optimization
+- [Draw Call Reduction](draw-call-reduction.md) — optimization
+- [Memory Budgeting](memory-budgeting.md) — optimization
