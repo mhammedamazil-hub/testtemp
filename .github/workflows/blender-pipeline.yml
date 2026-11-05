@@ -39,7 +39,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install Blender Python API
-        run: pip install bpy
+        run: pip install bpy || echo "bpy wheel unavailable — generate_assets.py falls back to standalone glTF/FBX writer"
 
       # 4. Execution engine callout
       - name: Run procedural asset generation
