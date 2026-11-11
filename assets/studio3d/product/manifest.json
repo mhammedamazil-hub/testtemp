@@ -1,5 +1,7 @@
 {
-  "cache_key": "844cfa956a3e886416fa623f0ef4b4b0df1b40186c163a42978392de79810e56",
+  "cache_key": "aaa4131553c0d18b8374891535ab0c6c1c30fa4d2b0775ccf60a8cfc44812bce",
+  "spec_sha256": "b3e1efe308e92c95d21f657228c43700ac661b515115ffa2a57bfdc373a74340",
+  "script_sha256": "b317c843525efd7b1a26430e56c6b441cf1547f9da4f2d51a79793fcd7015c81",
   "blender": "5.0.1",
   "devices": [
     "CPU"
