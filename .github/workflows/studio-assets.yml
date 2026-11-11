@@ -1,6 +1,9 @@
 name: Studio CPU Blender assets
 on:
   workflow_dispatch:
+  push:
+    branches: [arena/5ee9eac5-testtemp]
+    paths: [studio/blender_scene.py, .github/workflows/studio-assets.yml]
 permissions:
   contents: write
 jobs:
