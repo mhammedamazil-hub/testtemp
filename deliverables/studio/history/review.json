@@ -1,0 +1,50 @@
+{
+  "reviewer": "Arena agent \u2014 rendered-image inspection, not independent human sign-off",
+  "pptx_sha256": "cf154bec4c978a74a525ae49e2768b3c447229be8d59a8ab66d7c3e973573e17",
+  "slides": [
+    {
+      "index": 1,
+      "render_sha256": "4d9ff8911f5eca91e229702267ea811fd5ef1ce98de25a151ed4e39e92da4ab2",
+      "status": "pass",
+      "observations": "Serif opening establishes an editorial/museum tone."
+    },
+    {
+      "index": 2,
+      "render_sha256": "1c14d116db0ef5af15c18d1db5d95220b04aa55c2eb6f20eb83316cd8172acf3",
+      "status": "pass",
+      "observations": "Chronology is legible; selected milestones are not a complete global history."
+    },
+    {
+      "index": 3,
+      "render_sha256": "161246d9ced7f0440b283600bc1b7ed4b09d4b813c0c16dbce5e5c64c846ded1",
+      "status": "pass",
+      "observations": "Production/circulation diagram fits; no invented numerical findings."
+    },
+    {
+      "index": 4,
+      "render_sha256": "385913956cc15c1c74067a225e149d038732caefaddcaf77dd462c4ebc3712bb",
+      "status": "pass",
+      "observations": "Access distinction is legible and subordinate text wraps safely."
+    },
+    {
+      "index": 5,
+      "render_sha256": "d638d2993b92021aab9d77dcda880409ff0ae89093d30abe9020a9930a6422ef",
+      "status": "pass",
+      "observations": "Closing asks two historically useful questions; primary-source imagery would improve the next iteration."
+    }
+  ],
+  "blockers": [
+    "PowerPoint and LibreOffice application checks not performed.",
+    "Studio-quality breadth and independent art-direction review remain outstanding."
+  ],
+  "office": {
+    "powerpoint": {
+      "status": "not tested",
+      "version": null
+    },
+    "libreoffice": {
+      "status": "not tested",
+      "version": null
+    }
+  }
+}

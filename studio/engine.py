@@ -1,9 +1,10 @@
-import argparse, base64, hashlib, json, os, shutil, subprocess, sys
+import argparse, base64, hashlib, json, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from PIL import Image, ImageFont, ImageDraw
 from .tokens import DIRECTIONS, FONTS
 from .assets import prepare
 from .quality import preflight, check_pptx
+from .story import plan
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -134,6 +135,7 @@ class Canvas:
 
 
 def compose(b):
+    b = plan(b)
     validate(b)
     t = DIRECTIONS[b["direction"]]
     slides = []
@@ -227,7 +229,13 @@ def compose(b):
                 )
             )
             c.text(658, 200, 245, 215, s["message"], 23)
-        c.s["notes"] = s["message"] + "\n\nSource: " + s["source"]
+        c.s["notes"] = (
+            s["message"]
+            + "\n\nSource: "
+            + s["source"]
+            + "\n\nSource detail: "
+            + s.get("source_text", s["message"])
+        )
         if s.get("asset"):
             c.s["notes"] += "\nAsset: " + json.dumps(s["asset"])
         slides.append(c.s)
@@ -297,8 +305,8 @@ def install_fonts():
         shutil.copy2(p, dest / p.name)
 
 
-def build(brief, out):
-    b = json.loads(Path(brief).read_text())
+def _build(brief, out):
+    b = plan(json.loads(Path(brief).read_text()))
     slides = compose(b)
     cli = executable()
     install_fonts()
@@ -310,13 +318,13 @@ def build(brief, out):
     script.write_text(commands(slides, b))
 
     def call(*args):
-        subprocess.run(
-            [cli, *map(str, args)],
-            check=True,
-            timeout=180,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        result = subprocess.run(
+            [cli, *map(str, args)], timeout=180, capture_output=True, text=True
         )
+        if result.returncode:
+            raise ValueError(
+                f"DeckCraft {args[0]} failed ({result.returncode}): {result.stderr[-4000:]}"
+            )
 
     call("run", "--cmd-file", script, "--save", out / "deck.deckcraft")
     for ext in ["pptx", "pdf"]:
@@ -361,6 +369,26 @@ def build(brief, out):
     if errors:
         raise ValueError("; ".join(errors))
     return report
+
+
+def build(brief, out):
+    """Stage and validate before replacing any previously working export."""
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".studio-build-", dir=out.parent) as d:
+        stage = Path(d)
+        report = _build(brief, stage)
+        out.mkdir(parents=True, exist_ok=True)
+        for p in stage.iterdir():
+            if p.is_dir():
+                dest = out / p.name
+                dest.mkdir(exist_ok=True)
+                for old in dest.glob("slide-[0-9][0-9].png"):
+                    old.unlink()
+                shutil.copytree(p, dest, dirs_exist_ok=True)
+            else:
+                os.replace(p, out / p.name)
+        return report
 
 
 def main():

@@ -1,0 +1,50 @@
+{
+  "reviewer": "Arena agent \u2014 rendered-image inspection, not independent human sign-off",
+  "pptx_sha256": "d91a2fb1b94ee2dba6c03c850d96a540026013deb8459540814aca58b7bacc97",
+  "slides": [
+    {
+      "index": 1,
+      "render_sha256": "0163b4b242d33f53c42be3bf427069202f2bb8098c84f7899bbaba9d3ceb3795",
+      "status": "pass",
+      "observations": "Real pavilion geometry fits; fine grain remains in the shaded recess. This is a concept, not photorealistic certification."
+    },
+    {
+      "index": 2,
+      "render_sha256": "af445ffff0802b59e8f2a38edf04ea5ccc817a6227793bde21d0e5e1131d8bf2",
+      "status": "pass",
+      "observations": "Spatial sequence is legible but needs a future plan/section composition for richer explanation."
+    },
+    {
+      "index": 3,
+      "render_sha256": "08f6c225751a6464345f23a1e3c12a3d24b312cef1ef9047484320d6e7103173",
+      "status": "pass",
+      "observations": "Structure/enclosure distinction reads without clipping."
+    },
+    {
+      "index": 4,
+      "render_sha256": "6d4b16ab784de70d52ba8116351883d4f482c8dbb7168a734bb33692e4fdbeb9",
+      "status": "pass",
+      "observations": "Light statement is clear; no fabricated simulation result."
+    },
+    {
+      "index": 5,
+      "render_sha256": "efbcfbe6cf93d98312d84d4c0dac849c2e9727f45f9aec4c0e4f472c0181ae66",
+      "status": "pass",
+      "observations": "Closing proposes real design studies rather than asserting construction feasibility."
+    }
+  ],
+  "blockers": [
+    "PowerPoint and LibreOffice application checks not performed.",
+    "Studio-quality breadth and independent art-direction review remain outstanding."
+  ],
+  "office": {
+    "powerpoint": {
+      "status": "not tested",
+      "version": null
+    },
+    "libreoffice": {
+      "status": "not tested",
+      "version": null
+    }
+  }
+}

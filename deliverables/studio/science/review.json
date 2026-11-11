@@ -1,0 +1,50 @@
+{
+  "reviewer": "Arena agent \u2014 rendered-image inspection, not independent human sign-off",
+  "pptx_sha256": "c8b6f7e881f293a01902bb6c29c0e3425a4206d067bdac898f09e83aef30a1c0",
+  "slides": [
+    {
+      "index": 1,
+      "render_sha256": "4e3da7b40388c7c48a9de9341686633282770c80206919002ff18ca6fb0301ef",
+      "status": "pass",
+      "observations": "Bilayer geometry fits without stretch; transparent edges blend with pale background. Model explicitly marked schematic."
+    },
+    {
+      "index": 2,
+      "render_sha256": "76fcb3c02062b763e1406cb136459ff76e95e50fb468307f298599649ed7893f",
+      "status": "pass",
+      "observations": "Three causal steps are legible; hierarchy and column separation are consistent."
+    },
+    {
+      "index": 3,
+      "render_sha256": "e48ffe2ca3576f0a9e46f356f1e9d6d9bac9dd8bcef8e9080b1c9f8656cd4f10",
+      "status": "pass",
+      "observations": "Simple/facilitated diffusion contrast reads clearly; no clipped labels."
+    },
+    {
+      "index": 4,
+      "render_sha256": "f20e22a8f36175d6ad5d8c45a5887fd036a540c198b480b27fd62984c55ff42f",
+      "status": "pass",
+      "observations": "Energy requirement is dominant; subordinate explanation fits in two lines."
+    },
+    {
+      "index": 5,
+      "render_sha256": "aa2275b77a4bb07a5cf5439efe5738b56757ba88a6da4681c34b22cffc2db619",
+      "status": "pass",
+      "observations": "Closing question is clear; scientific pathway detail remains in source notes."
+    }
+  ],
+  "blockers": [
+    "PowerPoint and LibreOffice application checks not performed.",
+    "Studio-quality breadth and independent art-direction review remain outstanding."
+  ],
+  "office": {
+    "powerpoint": {
+      "status": "not tested",
+      "version": null
+    },
+    "libreoffice": {
+      "status": "not tested",
+      "version": null
+    }
+  }
+}

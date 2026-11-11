@@ -1,0 +1,548 @@
+[
+  {
+    "bg": "#EDECE6",
+    "layout": "hero",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "A PAVILION FOR PAUSE",
+        "size": 12,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "01 / HERO",
+        "size": 12,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          85,
+          420,
+          170
+        ],
+        "text": "Make room\nfor stillness.",
+        "size": 40,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          285,
+          390,
+          140
+        ],
+        "text": "A conceptual pavilion study organized\naround arrival, shelter and a framed\nview.",
+        "size": 22,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "image",
+        "role": "asset",
+        "rect": [
+          483.3759124087591,
+          85.0,
+          413.24817518248176,
+          335.0
+        ],
+        "path": "/home/user/testtemp/.local/studio-cache/1f6f5d10ec75ff9ac875475f11c90a51b131eb0580050898422aae49b1cff75f.png",
+        "license": "Original procedural geometry",
+        "source": "studio/blender_scene.py; assets/studio3d/architecture.json",
+        "alt": "Concept pavilion with plinth, load-bearing walls and roof",
+        "original_path": "assets/studio3d/architecture/view-01.png",
+        "sha256": "1f6f5d10ec75ff9ac875475f11c90a51b131eb0580050898422aae49b1cff75f",
+        "treatment": "alpha-bound crop only; no fabricated background"
+      },
+      {
+        "kind": "text",
+        "role": "caption",
+        "rect": [
+          480,
+          430,
+          420,
+          35
+        ],
+        "text": "Concept model; not a construction document",
+        "size": 12,
+        "font": "sans",
+        "color": "#23352E"
+      }
+    ],
+    "notes": "A conceptual pavilion study organized around arrival, shelter and a framed view.\n\nSource: Original conceptual pavilion study; design intent only, not a built project or engineering certification.\n\nSource detail: A conceptual pavilion study organized around arrival, shelter and a framed view.\nAsset: {\"path\": \"assets/studio3d/architecture/view-01.png\", \"license\": \"Original procedural geometry\", \"source\": \"studio/blender_scene.py; assets/studio3d/architecture.json\", \"alt\": \"Concept pavilion with plinth, load-bearing walls and roof\"}"
+  },
+  {
+    "bg": "#EDECE6",
+    "layout": "mechanism",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "A PAVILION FOR PAUSE",
+        "size": 12,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "02 / MECHANISM",
+        "size": 12,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          95
+        ],
+        "text": "The space unfolds in three moments.",
+        "size": 36,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          48.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "01",
+        "size": 30,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "A compressed\nthreshold.",
+        "size": 22,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          328.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "02",
+        "size": 30,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          328.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          328.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "An open sheltered\nroom.",
+        "size": 22,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          608.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "03",
+        "size": 30,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          608.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          608.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "A framed view outward.",
+        "size": 22,
+        "font": "sans",
+        "color": "#23352E"
+      }
+    ],
+    "notes": "Sequence directs attention before any material or ornament is added.\n\nSource: Original conceptual pavilion study; design intent only, not a built project or engineering certification.\n\nSource detail: Sequence directs attention before any material or ornament is added."
+  },
+  {
+    "bg": "#EDECE6",
+    "layout": "comparison",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "A PAVILION FOR PAUSE",
+        "size": 12,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "03 / COMPARISON",
+        "size": 12,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          100
+        ],
+        "text": "Structure and enclosure play different roles.",
+        "size": 38,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          48,
+          210,
+          390,
+          65
+        ],
+        "text": "Primary structure",
+        "size": 30,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          300,
+          390,
+          135
+        ],
+        "text": "Define a legible load path and a\nrestrained set of supporting\nelements.",
+        "size": 22,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          510,
+          210,
+          390,
+          65
+        ],
+        "text": "Secondary enclosure",
+        "size": 30,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          510,
+          300,
+          390,
+          135
+        ],
+        "text": "Filter light and frame views without\nobscuring the spatial organization.",
+        "size": 22,
+        "font": "sans",
+        "color": "#23352E"
+      }
+    ],
+    "notes": "This distinction is conceptual; structural design requires project-specific engineering.\n\nSource: Original conceptual pavilion study; design intent only, not a built project or engineering certification.\n\nSource detail: This distinction is conceptual; structural design requires project-specific engineering."
+  },
+  {
+    "bg": "#EDECE6",
+    "layout": "statement",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "A PAVILION FOR PAUSE",
+        "size": 12,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "04 / STATEMENT",
+        "size": 12,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "Light is a material\nthat changes.",
+        "size": 48,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "Study the opening across different sun angles\nbefore fixing its proportions.",
+        "size": 25,
+        "font": "sans",
+        "color": "#23352E"
+      }
+    ],
+    "notes": "Study the opening across different sun angles before fixing its proportions.\n\nSource: Original conceptual pavilion study; design intent only, not a built project or engineering certification.\n\nSource detail: Study the opening across different sun angles before fixing its proportions."
+  },
+  {
+    "bg": "#EDECE6",
+    "layout": "closing",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "A PAVILION FOR PAUSE",
+        "size": 12,
+        "font": "sans",
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "05 / CLOSING",
+        "size": 12,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#3D6651"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "Test the space,\nnot just the image.",
+        "size": 48,
+        "font": "sans",
+        "color": "#23352E"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "Next studies: circulation, accessibility, climate\nresponse and a physical or digital section model.",
+        "size": 25,
+        "font": "sans",
+        "color": "#23352E"
+      }
+    ],
+    "notes": "Next studies: circulation, accessibility, climate response and a physical or digital section model.\n\nSource: Original conceptual pavilion study; design intent only, not a built project or engineering certification.\n\nSource detail: Next studies: circulation, accessibility, climate response and a physical or digital section model."
+  }
+]

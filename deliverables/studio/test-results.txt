@@ -1,0 +1,31 @@
+test_deckcraft_roundtrip_if_available (test_studio.IntegrationTests.test_deckcraft_roundtrip_if_available) ... ok
+test_native_chart_export (test_studio.IntegrationTests.test_native_chart_export) ... ok
+test_auto_layout_preserves_source (test_studio.ProductionTests.test_auto_layout_preserves_source) ... ok
+test_contrast (test_studio.ProductionTests.test_contrast) ... ok
+test_deterministic_composition (test_studio.ProductionTests.test_deterministic_composition) ... ok
+test_directions (test_studio.ProductionTests.test_directions) ... ok
+test_fabricated_chart_not_generated (test_studio.ProductionTests.test_fabricated_chart_not_generated) ... ok
+test_failed_export_preserves_previous_deck (test_studio.ProductionTests.test_failed_export_preserves_previous_deck) ... ok
+test_five_complete_briefs (test_studio.ProductionTests.test_five_complete_briefs) ... ok
+test_fonts_valid_and_distinct (test_studio.ProductionTests.test_fonts_valid_and_distinct) ... ok
+test_image_fit_is_not_stretch (test_studio.ProductionTests.test_image_fit_is_not_stretch) ... ok
+test_long_word_rejected (test_studio.ProductionTests.test_long_word_rejected) ... ok
+test_low_contrast_rejected (test_studio.ProductionTests.test_low_contrast_rejected) ... ok
+test_missing_asset_rejected (test_studio.ProductionTests.test_missing_asset_rejected) ... ok
+test_missing_blender_is_diagnostic (test_studio.ProductionTests.test_missing_blender_is_diagnostic) ... ok
+test_missing_brief_fields (test_studio.ProductionTests.test_missing_brief_fields) ... ok
+test_nan_chart_rejected (test_studio.ProductionTests.test_nan_chart_rejected) ... ok
+test_native_chart (test_studio.ProductionTests.test_native_chart) ... ok
+test_no_unsourced_slides (test_studio.ProductionTests.test_no_unsourced_slides) ... ok
+test_off_canvas_rejected (test_studio.ProductionTests.test_off_canvas_rejected) ... ok
+test_overflow_rejected_not_shrunk (test_studio.ProductionTests.test_overflow_rejected_not_shrunk) ... ok
+test_overlap_rejected (test_studio.ProductionTests.test_overlap_rejected) ... ok
+test_release_rejects_missing_office_and_stale_review (test_studio.ProductionTests.test_release_rejects_missing_office_and_stale_review) ... ok
+test_repetition_rejected (test_studio.ProductionTests.test_repetition_rejected) ... ok
+test_source_in_notes_native_commands (test_studio.ProductionTests.test_source_in_notes_native_commands) ... ok
+test_touching_edges_not_overlap (test_studio.ProductionTests.test_touching_edges_not_overlap) ... ok
+
+----------------------------------------------------------------------
+Ran 26 tests in 2.019s
+
+OK

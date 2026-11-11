@@ -1,0 +1,59 @@
+{
+  "title": "Strategy as a set of choices",
+  "direction": "swiss",
+  "audience": "Leadership team",
+  "purpose": "Frame a strategy workshop without invented performance claims",
+  "emotion": "Decisive, analytical",
+  "slides": [
+    {
+      "kind": "opener",
+      "headline": "Choose where\nnot to compete.",
+      "message": "A workshop framework for turning broad ambition into explicit choices.",
+      "source": "Author-authored decision framework; recommendations, not empirical business findings."
+    },
+    {
+      "kind": "comparison",
+      "headline": "Separate aspiration from a decision.",
+      "message": "An aspiration describes intent; a decision commits resources and accepts a trade-off.",
+      "source": "Author-authored decision framework; recommendations, not empirical business findings.",
+      "columns": [
+        {
+          "title": "Aspiration",
+          "body": "\u201cBe the most useful partner.\u201d Useful as a direction, insufficient as a resource choice."
+        },
+        {
+          "title": "Decision",
+          "body": "Prioritize one customer problem, name the owner and define what will be deferred."
+        }
+      ]
+    },
+    {
+      "kind": "diagram",
+      "headline": "Make the assumptions visible.",
+      "message": "A choice links a problem to a testable expectation.",
+      "source": "Author-authored decision framework; recommendations, not empirical business findings.",
+      "steps": [
+        "Name a customer problem.",
+        "State the proposed advantage.",
+        "Identify disconfirming evidence."
+      ],
+      "nodes": [
+        "Customer problem",
+        "Strategic choice",
+        "Evidence to seek"
+      ]
+    },
+    {
+      "kind": "statement",
+      "headline": "A roadmap is not\nthe strategy.",
+      "message": "A delivery sequence is useful only when it serves a clearly stated choice.",
+      "source": "Author-authored decision framework; recommendations, not empirical business findings."
+    },
+    {
+      "kind": "closing",
+      "headline": "Leave with a choice,\nnot another slogan.",
+      "message": "Record the commitment, the trade-off, the accountable owner and the date for review.",
+      "source": "Author-authored decision framework; recommendations, not empirical business findings."
+    }
+  ]
+}

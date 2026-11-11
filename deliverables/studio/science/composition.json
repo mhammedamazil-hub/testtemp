@@ -1,0 +1,548 @@
+[
+  {
+    "bg": "#F1F5F2",
+    "layout": "hero",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "ACROSS THE CELL MEMBRANE",
+        "size": 12,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "01 / HERO",
+        "size": 12,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          85,
+          420,
+          170
+        ],
+        "text": "A boundary.\nNot a barrier.",
+        "size": 40,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          285,
+          390,
+          140
+        ],
+        "text": "The cell membrane regulates\nexchange between a cell and its\nsurroundings.",
+        "size": 22,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "image",
+        "role": "asset",
+        "rect": [
+          480.0,
+          90.47202797202797,
+          420.0,
+          324.05594405594405
+        ],
+        "path": "/home/user/testtemp/.local/studio-cache/7880d7047452c1acb837a78bde78c0c00a9a8a40e8e0b2ee3d39fe003ff3d4ce.png",
+        "license": "Original procedural geometry",
+        "source": "studio/blender_scene.py; assets/studio3d/membrane.json",
+        "alt": "Stylized phospholipid bilayer: polar heads face outward, tails point inward",
+        "original_path": "assets/studio3d/membrane/view-01.png",
+        "sha256": "7880d7047452c1acb837a78bde78c0c00a9a8a40e8e0b2ee3d39fe003ff3d4ce",
+        "treatment": "alpha-bound crop only; no fabricated background"
+      },
+      {
+        "kind": "text",
+        "role": "caption",
+        "rect": [
+          480,
+          430,
+          420,
+          35
+        ],
+        "text": "Molecular schematic; not to scale",
+        "size": 12,
+        "font": "sans",
+        "color": "#123C39"
+      }
+    ],
+    "notes": "The cell membrane regulates exchange between a cell and its surroundings.\n\nSource: OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport\n\nSource detail: The cell membrane regulates exchange between a cell and its surroundings.\nAsset: {\"path\": \"assets/studio3d/membrane/view-01.png\", \"license\": \"Original procedural geometry\", \"source\": \"studio/blender_scene.py; assets/studio3d/membrane.json\", \"alt\": \"Stylized phospholipid bilayer: polar heads face outward, tails point inward\"}"
+  },
+  {
+    "bg": "#F1F5F2",
+    "layout": "mechanism",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "ACROSS THE CELL MEMBRANE",
+        "size": 12,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "02 / MECHANISM",
+        "size": 12,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          95
+        ],
+        "text": "Diffusion follows a concentration gradient.",
+        "size": 36,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          48.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "01",
+        "size": 30,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "Particles move\nrandomly.",
+        "size": 22,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          328.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "02",
+        "size": 30,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          328.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          328.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "More particles leave the\ncrowded side.",
+        "size": 22,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          608.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "03",
+        "size": 30,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          608.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          608.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "Net movement declines\ntoward equilibrium.",
+        "size": 22,
+        "font": "sans",
+        "color": "#123C39"
+      }
+    ],
+    "notes": "Net movement follows the gradient; individual particles continue to move in both directions.\n\nSource: OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport\n\nSource detail: Net movement follows the gradient; individual particles continue to move in both directions."
+  },
+  {
+    "bg": "#F1F5F2",
+    "layout": "comparison",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "ACROSS THE CELL MEMBRANE",
+        "size": 12,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "03 / COMPARISON",
+        "size": 12,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          100
+        ],
+        "text": "Not every molecule crosses the same way.",
+        "size": 38,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          48,
+          210,
+          390,
+          65
+        ],
+        "text": "Simple diffusion",
+        "size": 30,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          300,
+          390,
+          135
+        ],
+        "text": "Small nonpolar molecules can pass\nthrough the lipid bilayer.",
+        "size": 22,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          510,
+          210,
+          390,
+          65
+        ],
+        "text": "Facilitated diffusion",
+        "size": 30,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          510,
+          300,
+          390,
+          135
+        ],
+        "text": "Transport proteins help selected\nsolutes move down their gradients.",
+        "size": 22,
+        "font": "sans",
+        "color": "#123C39"
+      }
+    ],
+    "notes": "Permeability depends on the molecule and the membrane.\n\nSource: OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport\n\nSource detail: Permeability depends on the molecule and the membrane."
+  },
+  {
+    "bg": "#F1F5F2",
+    "layout": "statement",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "ACROSS THE CELL MEMBRANE",
+        "size": 12,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "04 / STATEMENT",
+        "size": 12,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "Against the gradient?\nEnergy is required.",
+        "size": 48,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "Active transport couples movement to an energy\nsource. It is not simply faster diffusion.",
+        "size": 25,
+        "font": "sans",
+        "color": "#123C39"
+      }
+    ],
+    "notes": "Active transport couples movement to an energy source. It is not simply faster diffusion.\n\nSource: OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport\n\nSource detail: Active transport couples movement to an energy source. It is not simply faster diffusion."
+  },
+  {
+    "bg": "#F1F5F2",
+    "layout": "closing",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "ACROSS THE CELL MEMBRANE",
+        "size": 12,
+        "font": "sans",
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "05 / CLOSING",
+        "size": 12,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#A12A22"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "Ask what drives\nthe movement.",
+        "size": 48,
+        "font": "sans",
+        "color": "#123C39"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "Identify the solute, the membrane pathway and the\ndirection of the concentration gradient.",
+        "size": 25,
+        "font": "sans",
+        "color": "#123C39"
+      }
+    ],
+    "notes": "Identify the solute, the membrane pathway and the direction of the concentration gradient.\n\nSource: OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport\n\nSource detail: Identify the solute, the membrane pathway and the direction of the concentration gradient."
+  }
+]

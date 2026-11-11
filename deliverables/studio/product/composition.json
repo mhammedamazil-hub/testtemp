@@ -1,0 +1,548 @@
+[
+  {
+    "bg": "#17252D",
+    "layout": "hero",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "FIELDNOTE / PRODUCT CONCEPT",
+        "size": 12,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "01 / HERO",
+        "size": 12,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          85,
+          420,
+          170
+        ],
+        "text": "Capture the field.\nKeep the context.",
+        "size": 40,
+        "font": "condensed",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          285,
+          390,
+          140
+        ],
+        "text": "An offline research-terminal concept\nfor organizing observations when\nconnectivity is unreliable.",
+        "size": 22,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "image",
+        "role": "asset",
+        "rect": [
+          568.3206686930091,
+          85.0,
+          243.35866261398178,
+          335.0
+        ],
+        "path": "/home/user/testtemp/.local/studio-cache/753c3b2aeb49e747aef224ff5a0d27c9089a5081112060c147411e58b29c144b.png",
+        "license": "Original procedural geometry",
+        "source": "studio/blender_scene.py; assets/studio3d/product.json",
+        "alt": "Original research terminal enclosure concept, not a manufactured product",
+        "original_path": "assets/studio3d/product/view-01.png",
+        "sha256": "753c3b2aeb49e747aef224ff5a0d27c9089a5081112060c147411e58b29c144b",
+        "treatment": "alpha-bound crop only; no fabricated background"
+      },
+      {
+        "kind": "text",
+        "role": "caption",
+        "rect": [
+          480,
+          430,
+          420,
+          35
+        ],
+        "text": "Industrial-design concept; not a real product",
+        "size": 12,
+        "font": "sans",
+        "color": "#EDF2ED"
+      }
+    ],
+    "notes": "An offline research-terminal concept for organizing observations when connectivity is unreliable.\n\nSource: Original concept scenario, not a real product, customer result, benchmark or release announcement.\n\nSource detail: An offline research-terminal concept for organizing observations when connectivity is unreliable.\nAsset: {\"path\": \"assets/studio3d/product/view-01.png\", \"license\": \"Original procedural geometry\", \"source\": \"studio/blender_scene.py; assets/studio3d/product.json\", \"alt\": \"Original research terminal enclosure concept, not a manufactured product\"}"
+  },
+  {
+    "bg": "#17252D",
+    "layout": "mechanism",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "FIELDNOTE / PRODUCT CONCEPT",
+        "size": 12,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "02 / MECHANISM",
+        "size": 12,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          95
+        ],
+        "text": "Design around the research session.",
+        "size": 36,
+        "font": "condensed",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          48.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "01",
+        "size": 30,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "Capture notes locally.",
+        "size": 22,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          328.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "02",
+        "size": 30,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          328.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          328.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "Attach time and\ncontext.",
+        "size": 22,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "text",
+        "role": "number",
+        "rect": [
+          608.0,
+          210,
+          255.0,
+          60
+        ],
+        "text": "03",
+        "size": 30,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          608.0,
+          280,
+          255.0,
+          2
+        ],
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          608.0,
+          302,
+          255.0,
+          115
+        ],
+        "text": "Review before syncing.",
+        "size": 22,
+        "font": "sans",
+        "color": "#EDF2ED"
+      }
+    ],
+    "notes": "The proposed workflow keeps the observation and its context together.\n\nSource: Original concept scenario, not a real product, customer result, benchmark or release announcement.\n\nSource detail: The proposed workflow keeps the observation and its context together."
+  },
+  {
+    "bg": "#17252D",
+    "layout": "comparison",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "FIELDNOTE / PRODUCT CONCEPT",
+        "size": 12,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "03 / COMPARISON",
+        "size": 12,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          100
+        ],
+        "text": "Offline-first is a product decision.",
+        "size": 38,
+        "font": "condensed",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          48,
+          210,
+          390,
+          65
+        ],
+        "text": "During collection",
+        "size": 30,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          300,
+          390,
+          135
+        ],
+        "text": "Show local save state. Avoid\nsuggesting that an unsynced note is\nbacked up remotely.",
+        "size": 22,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          510,
+          210,
+          390,
+          65
+        ],
+        "text": "During reconciliation",
+        "size": 30,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          510,
+          300,
+          390,
+          135
+        ],
+        "text": "Expose conflicts. Let the researcher\nresolve meaning rather than silently\nreplacing text.",
+        "size": 22,
+        "font": "sans",
+        "color": "#EDF2ED"
+      }
+    ],
+    "notes": "The architecture must make state and uncertainty visible to the researcher.\n\nSource: Original concept scenario, not a real product, customer result, benchmark or release announcement.\n\nSource detail: The architecture must make state and uncertainty visible to the researcher."
+  },
+  {
+    "bg": "#17252D",
+    "layout": "statement",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "FIELDNOTE / PRODUCT CONCEPT",
+        "size": 12,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "04 / STATEMENT",
+        "size": 12,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "Trust is a visible\nsystem state.",
+        "size": 48,
+        "font": "condensed",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "A save indicator should communicate what has\nactually happened, not merely that a button was\npressed.",
+        "size": 25,
+        "font": "sans",
+        "color": "#EDF2ED"
+      }
+    ],
+    "notes": "A save indicator should communicate what has actually happened, not merely that a button was pressed.\n\nSource: Original concept scenario, not a real product, customer result, benchmark or release announcement.\n\nSource detail: A save indicator should communicate what has actually happened, not merely that a button was pressed."
+  },
+  {
+    "bg": "#17252D",
+    "layout": "closing",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "FIELDNOTE / PRODUCT CONCEPT",
+        "size": 12,
+        "font": "sans",
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "05 / CLOSING",
+        "size": 12,
+        "font": "sans",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#E3C860"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "Validate the workflow\nbefore the feature list.",
+        "size": 48,
+        "font": "condensed",
+        "color": "#EDF2ED"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "Next research: observe a field session, prototype\ninterruptions and test recovery with participants.",
+        "size": 25,
+        "font": "sans",
+        "color": "#EDF2ED"
+      }
+    ],
+    "notes": "Next research: observe a field session, prototype interruptions and test recovery with participants.\n\nSource: Original concept scenario, not a real product, customer result, benchmark or release announcement.\n\nSource detail: Next research: observe a field session, prototype interruptions and test recovery with participants."
+  }
+]

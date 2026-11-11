@@ -1,0 +1,584 @@
+[
+  {
+    "bg": "#F0E7D7",
+    "layout": "opener",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "THE PRINTED PAGE",
+        "size": 12,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "01 / OPENER",
+        "size": 12,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          100,
+          845,
+          190
+        ],
+        "text": "A page can travel\nfarther than a voice.",
+        "size": 56,
+        "font": "serif",
+        "color": "#332C25"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          365,
+          327,
+          535,
+          110
+        ],
+        "text": "Printing connects technologies, materials,\nlabour and systems of circulation.",
+        "size": 24,
+        "font": "sans",
+        "color": "#332C25"
+      }
+    ],
+    "notes": "Printing connects technologies, materials, labour and systems of circulation.\n\nSource: General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing\n\nSource detail: Printing connects technologies, materials, labour and systems of circulation."
+  },
+  {
+    "bg": "#F0E7D7",
+    "layout": "timeline",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "THE PRINTED PAGE",
+        "size": 12,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "02 / TIMELINE",
+        "size": 12,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          100
+        ],
+        "text": "Printing has more than one origin.",
+        "size": 38,
+        "font": "serif",
+        "color": "#332C25"
+      },
+      {
+        "kind": "text",
+        "role": "date",
+        "rect": [
+          48,
+          200,
+          150,
+          48
+        ],
+        "text": "7th\u20139th c.",
+        "size": 20,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          220,
+          200,
+          680,
+          53
+        ],
+        "text": "Woodblock printing develops in East Asia.",
+        "size": 20,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "text",
+        "role": "date",
+        "rect": [
+          48,
+          262,
+          150,
+          48
+        ],
+        "text": "11th c.",
+        "size": 20,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          220,
+          262,
+          680,
+          53
+        ],
+        "text": "Bi Sheng develops movable type in China.",
+        "size": 20,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "text",
+        "role": "date",
+        "rect": [
+          48,
+          324,
+          150,
+          48
+        ],
+        "text": "15th c.",
+        "size": 20,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          220,
+          324,
+          680,
+          53
+        ],
+        "text": "Metal movable type and press printing expand in Europe.",
+        "size": 20,
+        "font": "sans",
+        "color": "#332C25"
+      }
+    ],
+    "notes": "These selected milestones are not a complete global history.\n\nSource: General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing\n\nSource detail: These selected milestones are not a complete global history."
+  },
+  {
+    "bg": "#F0E7D7",
+    "layout": "diagram",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "THE PRINTED PAGE",
+        "size": 12,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "03 / DIAGRAM",
+        "size": 12,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          95
+        ],
+        "text": "A technology becomes a system.",
+        "size": 36,
+        "font": "serif",
+        "color": "#332C25"
+      },
+      {
+        "kind": "shape",
+        "role": "node",
+        "preset": "ellipse",
+        "rect": [
+          48.0,
+          220,
+          38,
+          38
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48.0,
+          285,
+          252.0,
+          100
+        ],
+        "text": "Type and page",
+        "size": 22,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          96.0,
+          238,
+          226.0,
+          2
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "shape",
+        "role": "node",
+        "preset": "ellipse",
+        "rect": [
+          328.0,
+          220,
+          38,
+          38
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          328.0,
+          285,
+          252.0,
+          100
+        ],
+        "text": "Ink and paper",
+        "size": 22,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          376.0,
+          238,
+          226.0,
+          2
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "shape",
+        "role": "node",
+        "preset": "ellipse",
+        "rect": [
+          608.0,
+          220,
+          38,
+          38
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          608.0,
+          285,
+          252.0,
+          100
+        ],
+        "text": "Readers and circulation",
+        "size": 22,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          409,
+          850,
+          50
+        ],
+        "text": "Production and circulation are parts of the same system.",
+        "size": 18,
+        "font": "sans",
+        "color": "#332C25"
+      }
+    ],
+    "notes": "Production and circulation are parts of the same system.\n\nSource: General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing\n\nSource detail: Production and circulation are parts of the same system."
+  },
+  {
+    "bg": "#F0E7D7",
+    "layout": "comparison",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "THE PRINTED PAGE",
+        "size": 12,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "04 / COMPARISON",
+        "size": 12,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          100
+        ],
+        "text": "More copies do not mean equal access.",
+        "size": 38,
+        "font": "serif",
+        "color": "#332C25"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          48,
+          210,
+          390,
+          65
+        ],
+        "text": "Production",
+        "size": 30,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          300,
+          390,
+          135
+        ],
+        "text": "Making copies can increase the\navailability of a text.",
+        "size": 22,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          510,
+          210,
+          390,
+          65
+        ],
+        "text": "Access",
+        "size": 30,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          510,
+          300,
+          390,
+          135
+        ],
+        "text": "Availability does not remove the\nsocial and economic barriers to\nreading.",
+        "size": 22,
+        "font": "sans",
+        "color": "#332C25"
+      }
+    ],
+    "notes": "Language, cost, literacy and institutions shape who can use printed material.\n\nSource: General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing\n\nSource detail: Language, cost, literacy and institutions shape who can use printed material."
+  },
+  {
+    "bg": "#F0E7D7",
+    "layout": "closing",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "THE PRINTED PAGE",
+        "size": 12,
+        "font": "sans",
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "05 / CLOSING",
+        "size": 12,
+        "font": "sans",
+        "color": "#332C25"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#84452D"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "Ask who made it.\nAsk who could read it.",
+        "size": 48,
+        "font": "serif",
+        "color": "#332C25"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "Study a printed object as evidence of both a\nproduction process and a social world.",
+        "size": 25,
+        "font": "sans",
+        "color": "#332C25"
+      }
+    ],
+    "notes": "Study a printed object as evidence of both a production process and a social world.\n\nSource: General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing\n\nSource detail: Study a printed object as evidence of both a production process and a social world."
+  }
+]

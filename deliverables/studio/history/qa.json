@@ -1,0 +1,9 @@
+{
+  "automated_checks": "pass",
+  "errors": [],
+  "visual_review": "pending",
+  "office_compatibility": "not tested",
+  "slide_count": 5,
+  "brief_sha256": "ec41c376869ed593ac6f990be082c265da8182d87f9cf13703bcabbdf9c5e4c8",
+  "quality_scope": "Geometry, measured text fit, contrast, image aspect, repetition, PPTX relationships, native text, dimensions, full-resolution roundtrip render. Human critique required."
+}

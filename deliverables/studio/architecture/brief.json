@@ -1,0 +1,61 @@
+{
+  "title": "A pavilion for pause",
+  "direction": "architectural",
+  "audience": "Architecture studio reviewers",
+  "purpose": "Communicate a conceptual spatial sequence",
+  "emotion": "Calm, tactile, reflective",
+  "slides": [
+    {
+      "kind": "hero",
+      "headline": "Make room\nfor stillness.",
+      "message": "A conceptual pavilion study organized around arrival, shelter and a framed view.",
+      "source": "Original conceptual pavilion study; design intent only, not a built project or engineering certification.",
+      "asset": {
+        "path": "assets/studio3d/architecture/view-01.png",
+        "license": "Original procedural geometry",
+        "source": "studio/blender_scene.py; assets/studio3d/architecture.json",
+        "alt": "Concept pavilion with plinth, load-bearing walls and roof"
+      },
+      "caption": "Concept model; not a construction document"
+    },
+    {
+      "kind": "mechanism",
+      "headline": "The space unfolds in three moments.",
+      "message": "Sequence directs attention before any material or ornament is added.",
+      "source": "Original conceptual pavilion study; design intent only, not a built project or engineering certification.",
+      "steps": [
+        "A compressed threshold.",
+        "An open sheltered room.",
+        "A framed view outward."
+      ]
+    },
+    {
+      "kind": "comparison",
+      "headline": "Structure and enclosure play different roles.",
+      "message": "This distinction is conceptual; structural design requires project-specific engineering.",
+      "source": "Original conceptual pavilion study; design intent only, not a built project or engineering certification.",
+      "columns": [
+        {
+          "title": "Primary structure",
+          "body": "Define a legible load path and a restrained set of supporting elements."
+        },
+        {
+          "title": "Secondary enclosure",
+          "body": "Filter light and frame views without obscuring the spatial organization."
+        }
+      ]
+    },
+    {
+      "kind": "statement",
+      "headline": "Light is a material\nthat changes.",
+      "message": "Study the opening across different sun angles before fixing its proportions.",
+      "source": "Original conceptual pavilion study; design intent only, not a built project or engineering certification."
+    },
+    {
+      "kind": "closing",
+      "headline": "Test the space,\nnot just the image.",
+      "message": "Next studies: circulation, accessibility, climate response and a physical or digital section model.",
+      "source": "Original conceptual pavilion study; design intent only, not a built project or engineering certification."
+    }
+  ]
+}

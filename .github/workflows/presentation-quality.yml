@@ -16,6 +16,17 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements-studio.txt
+      - name: Install verified headless DeckCraft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .local/tools
+          gh release download v0.17.0 --repo storytold/deckcraft --pattern deckcraft-0.17.0-linux-x86_64.AppImage --pattern SHA256SUMS.txt --dir .local/tools
+          cd .local/tools
+          grep ' deckcraft-0.17.0-linux-x86_64.AppImage$' SHA256SUMS.txt | sha256sum --check --strict
+          chmod +x deckcraft-0.17.0-linux-x86_64.AppImage
+          ./deckcraft-0.17.0-linux-x86_64.AppImage --appimage-extract > /dev/null
+          echo "DECKCRAFT_CLI=$PWD/squashfs-root/usr/bin/deckcraft-cli" >> "$GITHUB_ENV"
       - run: python -m unittest discover -s tests -v
   blender-smoke:
     runs-on: ubuntu-latest

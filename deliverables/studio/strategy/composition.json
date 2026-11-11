@@ -1,0 +1,514 @@
+[
+  {
+    "bg": "#F2F0E9",
+    "layout": "opener",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "STRATEGY AS A SET OF CHOICES",
+        "size": 12,
+        "font": "sans",
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "01 / OPENER",
+        "size": 12,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          100,
+          845,
+          190
+        ],
+        "text": "Choose where\nnot to compete.",
+        "size": 56,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          365,
+          327,
+          535,
+          110
+        ],
+        "text": "A workshop framework for turning broad\nambition into explicit choices.",
+        "size": 24,
+        "font": "sans",
+        "color": "#161616"
+      }
+    ],
+    "notes": "A workshop framework for turning broad ambition into explicit choices.\n\nSource: Author-authored decision framework; recommendations, not empirical business findings.\n\nSource detail: A workshop framework for turning broad ambition into explicit choices."
+  },
+  {
+    "bg": "#F2F0E9",
+    "layout": "comparison",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "STRATEGY AS A SET OF CHOICES",
+        "size": 12,
+        "font": "sans",
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "02 / COMPARISON",
+        "size": 12,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          100
+        ],
+        "text": "Separate aspiration from a decision.",
+        "size": 38,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          48,
+          210,
+          390,
+          65
+        ],
+        "text": "Aspiration",
+        "size": 30,
+        "font": "sans",
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          300,
+          390,
+          135
+        ],
+        "text": "\u201cBe the most useful partner.\u201d Useful\nas a direction, insufficient as a\nresource choice.",
+        "size": 22,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "text",
+        "role": "subhead",
+        "rect": [
+          510,
+          210,
+          390,
+          65
+        ],
+        "text": "Decision",
+        "size": 30,
+        "font": "sans",
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          510,
+          300,
+          390,
+          135
+        ],
+        "text": "Prioritize one customer problem,\nname the owner and define what will\nbe deferred.",
+        "size": 22,
+        "font": "sans",
+        "color": "#161616"
+      }
+    ],
+    "notes": "An aspiration describes intent; a decision commits resources and accepts a trade-off.\n\nSource: Author-authored decision framework; recommendations, not empirical business findings.\n\nSource detail: An aspiration describes intent; a decision commits resources and accepts a trade-off."
+  },
+  {
+    "bg": "#F2F0E9",
+    "layout": "diagram",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "STRATEGY AS A SET OF CHOICES",
+        "size": 12,
+        "font": "sans",
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "03 / DIAGRAM",
+        "size": 12,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          76,
+          860,
+          95
+        ],
+        "text": "Make the assumptions visible.",
+        "size": 36,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "shape",
+        "role": "node",
+        "preset": "ellipse",
+        "rect": [
+          48.0,
+          220,
+          38,
+          38
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48.0,
+          285,
+          252.0,
+          100
+        ],
+        "text": "Customer problem",
+        "size": 22,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          96.0,
+          238,
+          226.0,
+          2
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "shape",
+        "role": "node",
+        "preset": "ellipse",
+        "rect": [
+          328.0,
+          220,
+          38,
+          38
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          328.0,
+          285,
+          252.0,
+          100
+        ],
+        "text": "Strategic choice",
+        "size": 22,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          376.0,
+          238,
+          226.0,
+          2
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "shape",
+        "role": "node",
+        "preset": "ellipse",
+        "rect": [
+          608.0,
+          220,
+          38,
+          38
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          608.0,
+          285,
+          252.0,
+          100
+        ],
+        "text": "Evidence to seek",
+        "size": 22,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          48,
+          409,
+          850,
+          50
+        ],
+        "text": "A choice links a problem to a testable expectation.",
+        "size": 18,
+        "font": "sans",
+        "color": "#161616"
+      }
+    ],
+    "notes": "A choice links a problem to a testable expectation.\n\nSource: Author-authored decision framework; recommendations, not empirical business findings.\n\nSource detail: A choice links a problem to a testable expectation."
+  },
+  {
+    "bg": "#F2F0E9",
+    "layout": "statement",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "STRATEGY AS A SET OF CHOICES",
+        "size": 12,
+        "font": "sans",
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "04 / STATEMENT",
+        "size": 12,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "A roadmap is not\nthe strategy.",
+        "size": 48,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "A delivery sequence is useful only when it serves a\nclearly stated choice.",
+        "size": 25,
+        "font": "sans",
+        "color": "#161616"
+      }
+    ],
+    "notes": "A delivery sequence is useful only when it serves a clearly stated choice.\n\nSource: Author-authored decision framework; recommendations, not empirical business findings.\n\nSource detail: A delivery sequence is useful only when it serves a clearly stated choice."
+  },
+  {
+    "bg": "#F2F0E9",
+    "layout": "closing",
+    "elements": [
+      {
+        "kind": "text",
+        "role": "eyebrow",
+        "rect": [
+          48,
+          22,
+          800,
+          32
+        ],
+        "text": "STRATEGY AS A SET OF CHOICES",
+        "size": 12,
+        "font": "sans",
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "folio",
+        "rect": [
+          48,
+          492,
+          825,
+          30
+        ],
+        "text": "05 / CLOSING",
+        "size": 12,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "shape",
+        "role": "rule",
+        "rect": [
+          48,
+          474,
+          864,
+          2
+        ],
+        "color": "#B62B21"
+      },
+      {
+        "kind": "text",
+        "role": "headline",
+        "rect": [
+          48,
+          95,
+          825,
+          180
+        ],
+        "text": "Leave with a choice,\nnot another slogan.",
+        "size": 48,
+        "font": "sans",
+        "color": "#161616"
+      },
+      {
+        "kind": "text",
+        "role": "body",
+        "rect": [
+          270,
+          321,
+          600,
+          110
+        ],
+        "text": "Record the commitment, the trade-off, the\naccountable owner and the date for review.",
+        "size": 25,
+        "font": "sans",
+        "color": "#161616"
+      }
+    ],
+    "notes": "Record the commitment, the trade-off, the accountable owner and the date for review.\n\nSource: Author-authored decision framework; recommendations, not empirical business findings.\n\nSource detail: Record the commitment, the trade-off, the accountable owner and the date for review."
+  }
+]

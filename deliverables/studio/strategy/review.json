@@ -1,0 +1,50 @@
+{
+  "reviewer": "Arena agent \u2014 rendered-image inspection, not independent human sign-off",
+  "pptx_sha256": "0ae18e918a47767913b1a698ef292db4e49ba43365ba99107e0f94a1b3e4aaf0",
+  "slides": [
+    {
+      "index": 1,
+      "render_sha256": "6bc276ba45e61bba7e1988a7039bcd792180011e71374c232b67b05ab0e7be9e",
+      "status": "pass",
+      "observations": "Asymmetric opening establishes a decision-focused workshop."
+    },
+    {
+      "index": 2,
+      "render_sha256": "57ac40e9c5e8493c871a0a65d752c72fba223620ed96fa6bd2a1f483f4a44e21",
+      "status": "pass",
+      "observations": "Two alternatives are legible without repeated card containers."
+    },
+    {
+      "index": 3,
+      "render_sha256": "62df9711feb8e8b546dccfb019d2c5d4f51168994c0668ac8569f5ee9730a642",
+      "status": "pass",
+      "observations": "Relationship nodes carry a sequence; the caption explains why it matters."
+    },
+    {
+      "index": 4,
+      "render_sha256": "052196e58c37221592e955b14e52a61b7d1f59b6033d4a54cc367fcdfc68380b",
+      "status": "pass",
+      "observations": "Roadmap/strategy distinction has a clear display/body hierarchy."
+    },
+    {
+      "index": 5,
+      "render_sha256": "264feffaba54712494a63b87814cc232dc5e9908f28a6a060887cb7f6313b858",
+      "status": "pass",
+      "observations": "Action request is legible; no invented quantitative promise."
+    }
+  ],
+  "blockers": [
+    "PowerPoint and LibreOffice application checks not performed.",
+    "Studio-quality breadth and independent art-direction review remain outstanding."
+  ],
+  "office": {
+    "powerpoint": {
+      "status": "not tested",
+      "version": null
+    },
+    "libreoffice": {
+      "status": "not tested",
+      "version": null
+    }
+  }
+}

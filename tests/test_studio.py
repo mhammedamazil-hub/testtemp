@@ -42,6 +42,30 @@ class ProductionTests(unittest.TestCase):
             self.assertTrue(any("PowerPoint" in e or "powerpoint" in e for e in errors))
             self.assertTrue(any("stale" in e for e in errors))
 
+    def test_auto_layout_preserves_source(self):
+        from studio.story import plan
+
+        self.b["slides"][1]["kind"] = "auto"
+        self.b["slides"][1]["source_text"] = "Original unshortened passage."
+        result = plan(self.b)
+        self.assertEqual(result["slides"][1]["kind"], "mechanism")
+        self.assertEqual(
+            result["slides"][1]["source_text"], "Original unshortened passage."
+        )
+        self.assertEqual(self.b["slides"][1]["kind"], "auto")
+
+    def test_failed_export_preserves_previous_deck(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            (p / "deck.pptx").write_bytes(b"previous working export")
+            with patch(
+                "studio.engine.executable", return_value="/bin/false"
+            ), self.assertRaisesRegex(ValueError, "failed"):
+                build(ROOT / "examples/briefs/science.json", p)
+            self.assertEqual((p / "deck.pptx").read_bytes(), b"previous working export")
+
     def test_deterministic_composition(self):
         self.assertEqual(compose(self.b), compose(self.b))
 
