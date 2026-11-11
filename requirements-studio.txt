@@ -1,0 +1,3 @@
+Pillow==13.0.0
+imageio-ffmpeg==0.8.1
+# Optional: use a system Blender executable or official bpy==5.0.1 wheel.

@@ -1,0 +1,54 @@
+{
+  "title": "Fieldnote / product concept",
+  "direction": "industrial",
+  "audience": "Design and engineering reviewers",
+  "purpose": "Present a fictional offline research tool concept",
+  "emotion": "Focused, grounded in use",
+  "slides": [
+    {
+      "kind": "opener",
+      "headline": "Capture the field.\nKeep the context.",
+      "message": "Fieldnote is a concept for organizing research observations when connectivity is unreliable.",
+      "source": "Original concept scenario, not a real product, customer result, benchmark or release announcement."
+    },
+    {
+      "kind": "mechanism",
+      "headline": "Design around the research session.",
+      "message": "The proposed workflow keeps the observation and its context together.",
+      "source": "Original concept scenario, not a real product, customer result, benchmark or release announcement.",
+      "steps": [
+        "Capture notes locally.",
+        "Attach time and context.",
+        "Review before syncing."
+      ]
+    },
+    {
+      "kind": "comparison",
+      "headline": "Offline-first is a product decision.",
+      "message": "The architecture must make state and uncertainty visible to the researcher.",
+      "source": "Original concept scenario, not a real product, customer result, benchmark or release announcement.",
+      "columns": [
+        {
+          "title": "During collection",
+          "body": "Show local save state. Avoid suggesting that an unsynced note is backed up remotely."
+        },
+        {
+          "title": "During reconciliation",
+          "body": "Expose conflicts. Let the researcher resolve meaning rather than silently replacing text."
+        }
+      ]
+    },
+    {
+      "kind": "statement",
+      "headline": "Trust is a visible\nsystem state.",
+      "message": "A save indicator should communicate what has actually happened, not merely that a button was pressed.",
+      "source": "Original concept scenario, not a real product, customer result, benchmark or release announcement."
+    },
+    {
+      "kind": "closing",
+      "headline": "Validate the workflow\nbefore the feature list.",
+      "message": "Next research: observe a field session, prototype interruptions and test recovery with participants.",
+      "source": "Original concept scenario, not a real product, customer result, benchmark or release announcement."
+    }
+  ]
+}

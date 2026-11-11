@@ -1,3 +1,14 @@
 __pycache__/
 *.pyc
 soundtrack_raw.pcm
+
+# Local presentation tooling and regenerable intermediates
+.local/
+.venv/
+google_drive/
+output/
+**/__pycache__/
+deliverables/immersive/frames/
+deliverables/immersive/encode.log
+deliverables/immersive/test.deckcraft
+*.blend1

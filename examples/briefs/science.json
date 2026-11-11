@@ -1,0 +1,54 @@
+{
+  "title": "Across the cell membrane",
+  "direction": "scientific",
+  "audience": "Secondary-school biology learners",
+  "purpose": "Explain passive and active transport",
+  "emotion": "Curiosity through causal explanation",
+  "slides": [
+    {
+      "kind": "opener",
+      "headline": "A boundary.\nNot a barrier.",
+      "message": "The cell membrane regulates exchange between a cell and its surroundings.",
+      "source": "OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport"
+    },
+    {
+      "kind": "mechanism",
+      "headline": "Diffusion follows a concentration gradient.",
+      "message": "Net movement follows the gradient; individual particles continue to move in both directions.",
+      "source": "OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport",
+      "steps": [
+        "Particles move randomly.",
+        "More particles leave the crowded side.",
+        "Net movement declines toward equilibrium."
+      ]
+    },
+    {
+      "kind": "comparison",
+      "headline": "Not every molecule crosses the same way.",
+      "message": "Permeability depends on the molecule and the membrane.",
+      "source": "OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport",
+      "columns": [
+        {
+          "title": "Simple diffusion",
+          "body": "Small nonpolar molecules can pass through the lipid bilayer."
+        },
+        {
+          "title": "Facilitated diffusion",
+          "body": "Transport proteins help selected solutes move down their gradients."
+        }
+      ]
+    },
+    {
+      "kind": "statement",
+      "headline": "Against the gradient?\nEnergy is required.",
+      "message": "Active transport couples movement to an energy source. It is not simply faster diffusion.",
+      "source": "OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport"
+    },
+    {
+      "kind": "closing",
+      "headline": "Ask what drives\nthe movement.",
+      "message": "Identify the solute, the membrane pathway and the direction of the concentration gradient.",
+      "source": "OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport"
+    }
+  ]
+}

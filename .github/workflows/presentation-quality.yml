@@ -1,0 +1,29 @@
+name: Presentation quality
+on:
+  workflow_dispatch:
+  push:
+    paths: ['studio/**', 'tests/**', 'examples/**', 'assets/fonts/**', '.github/workflows/presentation-quality.yml']
+  pull_request:
+    paths: ['studio/**', 'tests/**', 'examples/**']
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-studio.txt
+      - run: python -m unittest discover -s tests -v
+  blender-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y blender
+      - run: blender -b --python studio/blender_scene.py -- examples/product-scene.json output/3d
+      - uses: actions/upload-artifact@v4
+        with:
+          name: genuine-blender-source-and-renders
+          path: output/3d/

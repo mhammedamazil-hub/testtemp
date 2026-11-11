@@ -1,0 +1,68 @@
+{
+  "title": "The printed page",
+  "direction": "museum",
+  "audience": "General history learners",
+  "purpose": "Explain printing as a system rather than a lone-inventor story",
+  "emotion": "Reflective, historically contextual",
+  "slides": [
+    {
+      "kind": "opener",
+      "headline": "A page can travel\nfarther than a voice.",
+      "message": "Printing connects technologies, materials, labour and systems of circulation.",
+      "source": "General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing"
+    },
+    {
+      "kind": "timeline",
+      "headline": "Printing has more than one origin.",
+      "message": "These selected milestones are not a complete global history.",
+      "source": "General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing",
+      "events": [
+        {
+          "date": "7th\u20139th c.",
+          "text": "Woodblock printing develops in East Asia."
+        },
+        {
+          "date": "11th c.",
+          "text": "Bi Sheng develops movable type in China."
+        },
+        {
+          "date": "15th c.",
+          "text": "Metal movable type and press printing expand in Europe."
+        }
+      ]
+    },
+    {
+      "kind": "mechanism",
+      "headline": "A technology becomes a system.",
+      "message": "Repeatability depends on more than the shape of a printing press.",
+      "source": "General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing",
+      "steps": [
+        "Prepare type and page.",
+        "Transfer ink to paper.",
+        "Distribute and read copies."
+      ]
+    },
+    {
+      "kind": "comparison",
+      "headline": "More copies do not mean equal access.",
+      "message": "Language, cost, literacy and institutions shape who can use printed material.",
+      "source": "General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing",
+      "columns": [
+        {
+          "title": "Production",
+          "body": "Making copies can increase the availability of a text."
+        },
+        {
+          "title": "Access",
+          "body": "Availability does not remove the social and economic barriers to reading."
+        }
+      ]
+    },
+    {
+      "kind": "closing",
+      "headline": "Ask who made it.\nAsk who could read it.",
+      "message": "Study a printed object as evidence of both a production process and a social world.",
+      "source": "General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+name: Studio CPU Blender assets
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - run: sudo apt-get update && sudo apt-get install -y blender
+      - name: Render genuine geometry on CPU
+        run: |
+          mkdir -p assets/studio3d
+          for recipe in product architecture membrane; do
+            printf '{"recipe":"%s","resolution":1200,"samples":24,"device":"CPU","angles":[30,65]}' "$recipe" > "assets/studio3d/$recipe.json"
+            blender -b --python studio/blender_scene.py -- "assets/studio3d/$recipe.json" "assets/studio3d/$recipe"
+          done
+      - name: Preserve sources and renders on the current branch
+        env:
+          CURRENT_BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name 'Studio asset pipeline'
+          git config user.email 'studio-pipeline@users.noreply.github.com'
+          git add assets/studio3d
+          git diff --cached --quiet && exit 0
+          git commit -m 'Generate genuine CPU Blender presentation assets'
+          git push origin "HEAD:$CURRENT_BRANCH"
