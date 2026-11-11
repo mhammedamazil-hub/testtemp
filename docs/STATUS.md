@@ -38,3 +38,6 @@ Five actual production runs: 25 exported slides, 25 full-resolution roundtrip PN
 - Only the product/pavilion/membrane recipes were rendered in this session. Custom imported-model normalization, arbitrary mesh specifications, full photorealistic asset production and other 3D recipes require dedicated tests.
 - New production decks intentionally do not all animate. Existing Morph/MP4 outputs remain usable; a generalized timed audio/video export API is not implemented.
 - Upstream Rust app/UI/AI internals were not rewritten: they are not in this checkout. It would be misleading to claim that an upstream application overhaul has been completed here.
+
+## Final CI confirmation
+[Final production quality run 43078101120](https://github.com/mhammedamazil-hub/testtemp/actions/runs/43078101120) **passed** after installing and checking the official DeckCraft 0.17.0 AppImage against upstream SHA256SUMS. Both the unit/integration job and the fatal-on-error Blender smoke job succeeded. Local run: 26 tests, zero failures/skips. Remote job has the real CLI installed so the two conditional export integration tests can execute. No Office application validation or independent studio-quality certification is implied by this green CI result.
