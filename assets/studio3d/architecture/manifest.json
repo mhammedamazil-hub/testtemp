@@ -1,0 +1,15 @@
+{
+  "cache_key": "b0bb229a34bb3d0400fbaa739bc146ade4a9e0bc6690b8eba0a2fbd4fedc2f47",
+  "blender": "5.0.1",
+  "devices": [
+    "CPU"
+  ],
+  "recipe": "architecture",
+  "files": [
+    "scene.blend",
+    "view-01.png",
+    "view-02.png"
+  ],
+  "source": "assets/studio3d/architecture.json",
+  "license": "Original procedural geometry; project-authored"
+}

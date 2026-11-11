@@ -1,0 +1,15 @@
+{
+  "cache_key": "844cfa956a3e886416fa623f0ef4b4b0df1b40186c163a42978392de79810e56",
+  "blender": "5.0.1",
+  "devices": [
+    "CPU"
+  ],
+  "recipe": "product",
+  "files": [
+    "scene.blend",
+    "view-01.png",
+    "view-02.png"
+  ],
+  "source": "assets/studio3d/product.json",
+  "license": "Original procedural geometry; project-authored"
+}

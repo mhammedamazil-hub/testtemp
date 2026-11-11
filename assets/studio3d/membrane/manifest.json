@@ -1,0 +1,15 @@
+{
+  "cache_key": "e0e98608bc3f4b5fd8b894c5fc6634bc33a045323b44751ad793d8def876aee6",
+  "blender": "5.0.1",
+  "devices": [
+    "CPU"
+  ],
+  "recipe": "membrane",
+  "files": [
+    "scene.blend",
+    "view-01.png",
+    "view-02.png"
+  ],
+  "source": "assets/studio3d/membrane.json",
+  "license": "Original procedural geometry; project-authored"
+}
