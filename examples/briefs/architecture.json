@@ -6,10 +6,17 @@
   "emotion": "Calm, tactile, reflective",
   "slides": [
     {
-      "kind": "opener",
+      "kind": "hero",
       "headline": "Make room\nfor stillness.",
       "message": "A conceptual pavilion study organized around arrival, shelter and a framed view.",
-      "source": "Original conceptual pavilion study; design intent only, not a built project or engineering certification."
+      "source": "Original conceptual pavilion study; design intent only, not a built project or engineering certification.",
+      "asset": {
+        "path": "assets/studio3d/architecture/view-01.png",
+        "license": "Original procedural geometry",
+        "source": "studio/blender_scene.py; assets/studio3d/architecture.json",
+        "alt": "Concept pavilion with plinth, load-bearing walls and roof"
+      },
+      "caption": "Concept model; not a construction document"
     },
     {
       "kind": "mechanism",

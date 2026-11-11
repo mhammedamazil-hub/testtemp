@@ -18,7 +18,7 @@ jobs:
         run: |
           mkdir -p assets/studio3d
           for recipe in product architecture membrane; do
-            printf '{"recipe":"%s","resolution":1200,"samples":24,"device":"CPU","angles":[30,65]}' "$recipe" > "assets/studio3d/$recipe.json"
+            printf '{"recipe":"%s","resolution":1200,"samples":96,"device":"CPU","angles":[30,65]}' "$recipe" > "assets/studio3d/$recipe.json"
             blender -b --python studio/blender_scene.py -- "assets/studio3d/$recipe.json" "assets/studio3d/$recipe"
           done
       - name: Preserve sources and renders on the current branch

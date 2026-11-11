@@ -6,10 +6,17 @@
   "emotion": "Focused, grounded in use",
   "slides": [
     {
-      "kind": "opener",
+      "kind": "hero",
       "headline": "Capture the field.\nKeep the context.",
-      "message": "Fieldnote is a concept for organizing research observations when connectivity is unreliable.",
-      "source": "Original concept scenario, not a real product, customer result, benchmark or release announcement."
+      "message": "An offline research-terminal concept for organizing observations when connectivity is unreliable.",
+      "source": "Original concept scenario, not a real product, customer result, benchmark or release announcement.",
+      "asset": {
+        "path": "assets/studio3d/product/view-01.png",
+        "license": "Original procedural geometry",
+        "source": "studio/blender_scene.py; assets/studio3d/product.json",
+        "alt": "Original research terminal enclosure concept, not a manufactured product"
+      },
+      "caption": "Industrial-design concept; not a real product"
     },
     {
       "kind": "mechanism",

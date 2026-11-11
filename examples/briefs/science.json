@@ -6,10 +6,17 @@
   "emotion": "Curiosity through causal explanation",
   "slides": [
     {
-      "kind": "opener",
+      "kind": "hero",
       "headline": "A boundary.\nNot a barrier.",
       "message": "The cell membrane regulates exchange between a cell and its surroundings.",
-      "source": "OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport"
+      "source": "OpenStax Biology 2e, sections 5.2\u20135.3: https://openstax.org/books/biology-2e/pages/5-2-passive-transport",
+      "asset": {
+        "path": "assets/studio3d/membrane/view-01.png",
+        "license": "Original procedural geometry",
+        "source": "studio/blender_scene.py; assets/studio3d/membrane.json",
+        "alt": "Stylized phospholipid bilayer: polar heads face outward, tails point inward"
+      },
+      "caption": "Molecular schematic; not to scale"
     },
     {
       "kind": "mechanism",

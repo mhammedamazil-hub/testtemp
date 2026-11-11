@@ -32,14 +32,19 @@
       ]
     },
     {
-      "kind": "mechanism",
+      "kind": "diagram",
       "headline": "A technology becomes a system.",
-      "message": "Repeatability depends on more than the shape of a printing press.",
+      "message": "Production and circulation are parts of the same system.",
       "source": "General overview: Encyclopaedia Britannica, history of printing: https://www.britannica.com/technology/printing/History-of-printing",
       "steps": [
         "Prepare type and page.",
         "Transfer ink to paper.",
         "Distribute and read copies."
+      ],
+      "nodes": [
+        "Type and page",
+        "Ink and paper",
+        "Readers and circulation"
       ]
     },
     {

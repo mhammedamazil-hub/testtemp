@@ -28,14 +28,19 @@
       ]
     },
     {
-      "kind": "mechanism",
+      "kind": "diagram",
       "headline": "Make the assumptions visible.",
-      "message": "Treat strategic choices as hypotheses to investigate, not forecasts disguised as facts.",
+      "message": "A choice links a problem to a testable expectation.",
       "source": "Author-authored decision framework; recommendations, not empirical business findings.",
       "steps": [
         "Name a customer problem.",
         "State the proposed advantage.",
         "Identify disconfirming evidence."
+      ],
+      "nodes": [
+        "Customer problem",
+        "Strategic choice",
+        "Evidence to seek"
       ]
     },
     {
