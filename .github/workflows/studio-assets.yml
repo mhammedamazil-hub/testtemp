@@ -16,10 +16,12 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y blender
       - name: Render genuine geometry on CPU
         run: |
+          set -euo pipefail
           mkdir -p assets/studio3d
           for recipe in product architecture membrane; do
             printf '{"recipe":"%s","resolution":1200,"samples":96,"device":"CPU","angles":[30,65]}' "$recipe" > "assets/studio3d/$recipe.json"
-            blender -b --python studio/blender_scene.py -- "assets/studio3d/$recipe.json" "assets/studio3d/$recipe"
+            blender -b --python-exit-code 1 --python studio/blender_scene.py -- "assets/studio3d/$recipe.json" "assets/studio3d/$recipe"
+            python3 -c "import json,hashlib; from pathlib import Path; p=Path('assets/studio3d/$recipe.json'); m=json.loads(Path('assets/studio3d/$recipe/manifest.json').read_text()); assert m['spec_sha256']==hashlib.sha256(p.read_bytes()).hexdigest(); assert m['script_sha256']==hashlib.sha256(Path('studio/blender_scene.py').read_bytes()).hexdigest()"
           done
       - name: Preserve sources and renders on the current branch
         env:

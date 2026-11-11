@@ -76,15 +76,6 @@ def generate(spec_path, out):
                 continue
     scene.render.resolution_x = scene.render.resolution_y = resolution
     scene.render.resolution_percentage = 100
-    # Explicit denoising compositor for builds whose Cycles output bypasses denoising.
-    scene.use_nodes = True
-    tree = scene.node_tree
-    tree.nodes.clear()
-    layer = tree.nodes.new("CompositorNodeRLayers")
-    denoise = tree.nodes.new("CompositorNodeDenoise")
-    composite = tree.nodes.new("CompositorNodeComposite")
-    tree.links.new(layer.outputs["Image"], denoise.inputs["Image"])
-    tree.links.new(denoise.outputs["Image"], composite.inputs["Image"])
     scene.render.film_transparent = True
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
@@ -250,6 +241,8 @@ def generate(spec_path, out):
     bpy.ops.wm.save_as_mainfile(filepath=str((out / "scene.blend").resolve()))
     m = dict(
         cache_key=key,
+        spec_sha256=hashlib.sha256(Path(spec_path).read_bytes()).hexdigest(),
+        script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         blender=bpy.app.version_string,
         devices=devices,
         recipe=recipe,
@@ -275,4 +268,5 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    if main():
+        raise RuntimeError("Blender scene generation failed; no success fallback")
