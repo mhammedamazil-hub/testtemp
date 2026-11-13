@@ -1,0 +1,1515 @@
+[
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "arena-agent",
+          "version": "1.0"
+        }
+      },
+      "id": 1
+    }
+  },
+  {
+    "recv": {
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {
+        "capabilities": {
+          "prompts": {
+            "listChanged": false
+          },
+          "resources": {
+            "listChanged": false,
+            "subscribe": false
+          },
+          "tools": {
+            "listChanged": false
+          }
+        },
+        "instructions": "FigCraft is an interface design tool: pages hold frames, groups, shapes, text, components and instances, with auto layout, styles, variables and prototyping. Coordinates are page units (1 unit = 1 px at 100% zoom), x right and y DOWN. create_node and set_properties take x/y RELATIVE TO THE PARENT (the page when there is no parent, so page coordinates); inspect_document reports both x/y relative to the parent frame (groups don't count) and absoluteBounds in page coordinates. Children of an auto-layout frame are positioned by the layout (set layout, gap, padding, mainAlign, crossAlign, sizingH/sizingV instead). Every menu item, panel action and shortcut is a command: find ids and params with list_commands (use a filter) and run them with run_command, or several as one undo step with batch. Commands act on `ids` when given, else on the selection; new layers become the selection. Colours are \"#RRGGBB\" or \"#RRGGBBAA\". Verify your work: inspect_document / get_node return the layer tree as JSON (check sizes, fills, layout, overrides), and screenshot returns a PNG of the page or of given layers to look at. undo/redo step through history. Comments: comment.list returns threads (text, anchor node id, frame, page, x/y, replies); fix open ones, reply with what changed, then resolve (a reply reopens a thread). To react to new feedback, call wait_for_changes {after, timeoutMs} and pass the returned cursor back. Resources: figcraft://document, figcraft://node/{id}, figcraft://command/{id}, figcraft://comments. prompts/list has workflows, including fix_comments. Backend: headless (in-process engine session; no window).",
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {
+          "name": "figcraft",
+          "title": "FigCraft",
+          "version": "0.18.1"
+        }
+      }
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "tools/list",
+      "params": {},
+      "id": 2
+    }
+  },
+  {
+    "recv": {
+      "id": 2,
+      "jsonrpc": "2.0",
+      "result": {
+        "tools": [
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": true,
+              "title": "List commands"
+            },
+            "description": "List FigCraft commands: id, label, menu path, shortcut, whether it is undoable, and a parameter description. Every menu item, panel action and shortcut is a command; run one with run_command (or several as one undo step with batch). Most commands act on `ids` when given, else on the selection. Use `filter` to narrow (e.g. \"align\", \"layout\", \"variable\", \"style\", \"component\", \"proto\").",
+            "inputSchema": {
+              "properties": {
+                "filter": {
+                  "description": "Case-insensitive substring matched against id, label, menu path and parameter docs",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "name": "list_commands",
+            "title": "List commands"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Run command"
+            },
+            "description": "Execute one FigCraft command by id with JSON params (ids and params from list_commands). Mutating commands are one undo step each; a failing command leaves the document unchanged. Examples: {\"command\":\"align.left\",\"params\":{\"ids\":[3,4]}}, {\"command\":\"layout.add\",\"params\":{\"ids\":[2],\"direction\":\"vertical\"}}, {\"command\":\"style.create\",\"params\":{\"type\":\"paint\",\"name\":\"Brand/Primary\",\"from\":5}}. Returns the command's result (creation commands return {\"id\"}). Programmatic calls never open dialogs.",
+            "inputSchema": {
+              "properties": {
+                "command": {
+                  "description": "Command id, e.g. node.create, align.left, component.create, file.export",
+                  "type": "string"
+                },
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "params": {
+                  "description": "Command parameters (see list_commands)",
+                  "type": "object"
+                }
+              },
+              "required": [
+                "command"
+              ],
+              "type": "object"
+            },
+            "name": "run_command",
+            "title": "Run command"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Run commands as one step"
+            },
+            "description": "Run several commands in order as ONE undo step (engine `command.batch`). By default (onError: \"abort\"), if any command fails, everything is rolled back and the error names the failing step; success returns an array of the results in order. With onError: \"continue\", a failed step is rolled back on its own, the later steps still run, the call is not an error, and the array instead holds one {step, command, ok, result} or {step, command, ok, error} object per step; a reference to a failed step fails that step too. A later step can use what an earlier step returned: name a step with \"as\": \"card\", then anywhere in a later step's params {\"$ref\": \"card\"} stands for the `id` in its result ({\"$step\": n} does the same by zero-based position). Add \"field\" for another part of the result: a key or a slash path, e.g. {\"$ref\": \"copy\", \"field\": \"ids/0\"} for the first id edit.duplicate returned (with \"map\": true it also returns `map`, each original id \u2192 its copy, so \"field\": \"map/3\" is the copy of layer 3). Any object with a `$ref` or `$step` key is a reference. Example: [{\"command\":\"node.create\",\"as\":\"card\",\"params\":{\"type\":\"frame\"}}, {\"command\":\"node.create\",\"params\":{\"type\":\"text\",\"text\":\"Hi\",\"parent\":{\"$ref\":\"card\"}}}] builds a frame and a text inside it in one call.",
+            "inputSchema": {
+              "properties": {
+                "commands": {
+                  "description": "Steps to run",
+                  "items": {
+                    "properties": {
+                      "as": {
+                        "description": "Name for this step, unique in the batch; later steps use its result with {\"$ref\": name}",
+                        "type": "string"
+                      },
+                      "command": {
+                        "description": "Command id",
+                        "type": "string"
+                      },
+                      "params": {
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "command"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "label": {
+                  "description": "Undo history label (default \"Batch\")",
+                  "type": "string"
+                },
+                "onError": {
+                  "description": "abort (default) rolls back the whole batch on the first failure; continue rolls back only the failed step, runs the rest and returns one {step, command, ok, result|error} object per step",
+                  "enum": [
+                    "abort",
+                    "continue"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "commands"
+              ],
+              "type": "object"
+            },
+            "name": "batch",
+            "title": "Run commands as one step"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Create layer"
+            },
+            "description": "Create a layer (engine `node.create`) and return its id and inspected properties. Coordinates are page units, y down; x/y are relative to the parent frame (the page when there is none, so then they are page coordinates; groups don't count). Inside an auto-layout frame the position is decided by the layout. The new layer becomes the selection.",
+            "inputSchema": {
+              "properties": {
+                "closed": {
+                  "description": "For type vector: close the path",
+                  "type": "boolean"
+                },
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "height": {
+                  "description": "Height (default 100; ignored for lines/arrows and auto-height text)",
+                  "type": "number"
+                },
+                "index": {
+                  "description": "Z-index among the parent's children (default: on top)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "name": {
+                  "description": "Layer name",
+                  "type": "string"
+                },
+                "parent": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "Parent frame/group/component id (default: the current page)"
+                },
+                "path": {
+                  "description": "SVG path data, for type vector (e.g. \"M0 0 L100 0 L50 80 Z\"); its coordinates are kept relative to x/y, so a path that doesn't start at 0,0 is offset by its own box",
+                  "type": "string"
+                },
+                "points": {
+                  "description": "For type vector, instead of path: the points [[x, y], ...]",
+                  "items": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "type": "array"
+                },
+                "props": {
+                  "description": "Any set_properties keys applied at creation, e.g. {\"fill\":\"#3366FF\",\"cornerRadius\":12,\"fontSize\":24,\"layout\":\"vertical\",\"gap\":8,\"padding\":16}",
+                  "type": "object"
+                },
+                "select": {
+                  "description": "Select the new layer (default true)",
+                  "type": "boolean"
+                },
+                "text": {
+                  "description": "Characters, for type text",
+                  "type": "string"
+                },
+                "type": {
+                  "description": "Layer type",
+                  "enum": [
+                    "frame",
+                    "rectangle",
+                    "ellipse",
+                    "polygon",
+                    "star",
+                    "line",
+                    "arrow",
+                    "text",
+                    "vector",
+                    "section",
+                    "component",
+                    "slice"
+                  ],
+                  "type": "string"
+                },
+                "width": {
+                  "description": "Width (default 100; text hugs its content unless width is set, which makes it wrap; for a vector with path, width/height scale the path, one alone keeping its proportion, and without them the path's own box is used)",
+                  "type": "number"
+                },
+                "x": {
+                  "description": "Left, relative to the parent frame (default 0). For a vector with `path` or `points`, x/y move their own origin instead: data whose box starts at (30, 0) makes a layer whose left is x + 30. Start the path at 0,0 to place its left edge at x, or set x afterwards with set_properties (which moves the left edge)",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Top, relative to the parent frame (default 0). For a vector with `path` or `points`, their own top is added, as for x",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            "name": "create_node",
+            "title": "Create layer"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Set properties"
+            },
+            "description": "Set properties on one or more layers as one undo step (engine `node.set`). Keys: name, visible, locked, opacity (0-1), blend, x, y (relative to the parent frame; groups don't count), width, height, rotation (degrees), fill (colour) / fills (array of paints: \"#hex\" or {\"type\":\"solid\",\"color\":\"#hex\"} or {\"type\":\"linearGradient\",\"stops\":[\"#hex\",\"#hex\"]} or stops [{\"position\":0..1,\"color\":\"#hex\"}], optional from/to handles in the unit box; radialGradient too), stroke / strokes, strokeWeight, strokeAlign (inside|center|outside), cornerRadius (n or [tl,tr,br,bl]), effects (array, e.g. {\"type\":\"dropShadow\",\"color\":\"#00000040\",\"offset\":[0,4],\"radius\":8}), clip, layout (null|horizontal|vertical|grid), gap, padding (n or [t,r,b,l]), mainAlign (min|center|max|spaceBetween|spaceAround|spaceEvenly), crossAlign, wrap, contentAlign (auto|spaceBetween: wrapped lines), sizingH / sizingV (fixed|hug|fill), constraints {horizontal, vertical}, characters, fontFamily, fontStyle, fontSize, lineHeight, letterSpacing, textAlign, textAutoResize. Auto layout keys (gap, padding, mainAlign, crossAlign, wrap, \u2026) apply to frames, components and instances only: other layers among the ids are skipped and named in `warnings`, and with none that can take them the call is an error. A fontStyle draws in the family's nearest face; `warnings` says when that face has another weight or slant than the name asks for. Run list_commands with filter \"node.set\" for the full list. Unknown keys are an error. Returns the updated layers.",
+            "inputSchema": {
+              "properties": {
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "ids": {
+                  "description": "Layer ids (default: the selection)",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                },
+                "props": {
+                  "description": "Property values to set",
+                  "type": "object"
+                }
+              },
+              "required": [
+                "props"
+              ],
+              "type": "object"
+            },
+            "name": "set_properties",
+            "title": "Set properties"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": true,
+              "title": "Inspect document"
+            },
+            "description": "The active document as JSON: name, path, dirty flag, current page, selection, the current page's layer tree (id, name, type, x/y relative to the parent frame (groups don't count), width, height, absoluteBounds in page coordinates, fills, strokes, effects, cornerRadius, layout, sizing, text properties, component links, overrides, bound variables), other pages summarised, styles, variable count and the undo history. Use it to verify every change. Each level of `depth` multiplies the response, and `allPages` multiplies it again: on a large document the tree is reported at a shallower depth than asked for, with a `truncated` object saying so. Use get_node to read one subtree deeply instead.",
+            "inputSchema": {
+              "properties": {
+                "allPages": {
+                  "description": "Expand every page, not only the current one",
+                  "type": "boolean"
+                },
+                "depth": {
+                  "description": "Tree depth for the current page (default 4)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "fields": {
+                  "description": "Exact, case-sensitive top-level node keys to include at every level, pages too (e.g. name, type, x, fills, characters, pluginData). Omit for all properties; [] keeps only ids and structure. id, children, childCount and the transport's truncated marker are always kept. Selecting visible emits an explicit boolean for every node. Unknown keys are an error.",
+                  "items": {
+                    "enum": [
+                      "absolute",
+                      "absoluteBounds",
+                      "annotations",
+                      "arc",
+                      "background",
+                      "blend",
+                      "board",
+                      "booleanOperation",
+                      "boundVariables",
+                      "brush",
+                      "characters",
+                      "childCount",
+                      "children",
+                      "clip",
+                      "codeLinks",
+                      "componentProperties",
+                      "componentPropertyDefinitions",
+                      "constraints",
+                      "cornerRadius",
+                      "cornerSmoothing",
+                      "dashes",
+                      "description",
+                      "devChanged",
+                      "devNote",
+                      "devResources",
+                      "devStatus",
+                      "effects",
+                      "exports",
+                      "fills",
+                      "flows",
+                      "fontFamily",
+                      "fontSize",
+                      "fontStyle",
+                      "fontVariations",
+                      "gridCell",
+                      "grids",
+                      "hangingList",
+                      "hangingPunctuation",
+                      "height",
+                      "id",
+                      "innerRadius",
+                      "interactions",
+                      "isMask",
+                      "layout",
+                      "leadingTrim",
+                      "letterSpacing",
+                      "lineDirections",
+                      "lineHeight",
+                      "lineIndentations",
+                      "lineTypes",
+                      "listSpacing",
+                      "listStartOffsets",
+                      "listStyle",
+                      "locked",
+                      "mainComponent",
+                      "mainComponentName",
+                      "maskType",
+                      "maxHeight",
+                      "maxLines",
+                      "maxWidth",
+                      "measurements",
+                      "minHeight",
+                      "minWidth",
+                      "miterAngle",
+                      "name",
+                      "opacity",
+                      "operandOperation",
+                      "overrides",
+                      "pluginData",
+                      "pointCount",
+                      "rotation",
+                      "sectionContentsHidden",
+                      "segments",
+                      "sizing",
+                      "slot",
+                      "strokeAlign",
+                      "strokeJoin",
+                      "strokeSides",
+                      "strokeWeight",
+                      "strokes",
+                      "styledRuns",
+                      "styles",
+                      "textAlign",
+                      "textAutoResize",
+                      "textDecoration",
+                      "textDecorationColor",
+                      "textDecorationOffset",
+                      "textDecorationSkipInk",
+                      "textDecorationStyle",
+                      "textDecorationThickness",
+                      "textDirection",
+                      "textPath",
+                      "textStyleRanges",
+                      "type",
+                      "vertices",
+                      "visible",
+                      "width",
+                      "widthProfile",
+                      "wrapStyle",
+                      "x",
+                      "y"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "maxBytes": {
+                  "description": "Largest response to send, in bytes of the whole JSON-RPC message (default 8388608, which fits the usual 10 MiB client buffer); 1024 of it is kept for the envelope and the request id",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "outline": {
+                  "description": "Compact tree: id, name, type, characters (first 120 characters, then ... only if longer), mainComponentName and explicit visible booleans, plus structure. Cannot combine true with fields; false permits fields.",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "name": "inspect_document",
+            "title": "Inspect document"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": true,
+              "title": "Get layer"
+            },
+            "description": "One layer as JSON (same fields as inspect_document) with its children to `depth`. A subtree too large for one message is reported at a shallower depth, or with a window of the children, and a `truncated` object says so and gives the `offset` to ask for next.",
+            "inputSchema": {
+              "properties": {
+                "depth": {
+                  "description": "Child depth (default 1)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "fields": {
+                  "description": "Exact, case-sensitive top-level node keys to include at every level, pages too (e.g. name, type, x, fills, characters, pluginData). Omit for all properties; [] keeps only ids and structure. id, children, childCount and the transport's truncated marker are always kept. Selecting visible emits an explicit boolean for every node. Unknown keys are an error.",
+                  "items": {
+                    "enum": [
+                      "absolute",
+                      "absoluteBounds",
+                      "annotations",
+                      "arc",
+                      "background",
+                      "blend",
+                      "board",
+                      "booleanOperation",
+                      "boundVariables",
+                      "brush",
+                      "characters",
+                      "childCount",
+                      "children",
+                      "clip",
+                      "codeLinks",
+                      "componentProperties",
+                      "componentPropertyDefinitions",
+                      "constraints",
+                      "cornerRadius",
+                      "cornerSmoothing",
+                      "dashes",
+                      "description",
+                      "devChanged",
+                      "devNote",
+                      "devResources",
+                      "devStatus",
+                      "effects",
+                      "exports",
+                      "fills",
+                      "flows",
+                      "fontFamily",
+                      "fontSize",
+                      "fontStyle",
+                      "fontVariations",
+                      "gridCell",
+                      "grids",
+                      "hangingList",
+                      "hangingPunctuation",
+                      "height",
+                      "id",
+                      "innerRadius",
+                      "interactions",
+                      "isMask",
+                      "layout",
+                      "leadingTrim",
+                      "letterSpacing",
+                      "lineDirections",
+                      "lineHeight",
+                      "lineIndentations",
+                      "lineTypes",
+                      "listSpacing",
+                      "listStartOffsets",
+                      "listStyle",
+                      "locked",
+                      "mainComponent",
+                      "mainComponentName",
+                      "maskType",
+                      "maxHeight",
+                      "maxLines",
+                      "maxWidth",
+                      "measurements",
+                      "minHeight",
+                      "minWidth",
+                      "miterAngle",
+                      "name",
+                      "opacity",
+                      "operandOperation",
+                      "overrides",
+                      "pluginData",
+                      "pointCount",
+                      "rotation",
+                      "sectionContentsHidden",
+                      "segments",
+                      "sizing",
+                      "slot",
+                      "strokeAlign",
+                      "strokeJoin",
+                      "strokeSides",
+                      "strokeWeight",
+                      "strokes",
+                      "styledRuns",
+                      "styles",
+                      "textAlign",
+                      "textAutoResize",
+                      "textDecoration",
+                      "textDecorationColor",
+                      "textDecorationOffset",
+                      "textDecorationSkipInk",
+                      "textDecorationStyle",
+                      "textDecorationThickness",
+                      "textDirection",
+                      "textPath",
+                      "textStyleRanges",
+                      "type",
+                      "vertices",
+                      "visible",
+                      "width",
+                      "widthProfile",
+                      "wrapStyle",
+                      "x",
+                      "y"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "Layer id"
+                },
+                "maxBytes": {
+                  "description": "Largest response to send, in bytes of the whole JSON-RPC message (default 8388608, which fits the usual 10 MiB client buffer); 1024 of it is kept for the envelope and the request id",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "offset": {
+                  "description": "First child to report (default 0), for reading a node with more children than fit in one message",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "outline": {
+                  "description": "Compact tree: id, name, type, characters (first 120 characters, then ... only if longer), mainComponentName and explicit visible booleans, plus structure. Cannot combine true with fields; false permits fields.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "name": "get_node",
+            "title": "Get layer"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Select layers"
+            },
+            "description": "Replace the selection with `ids` (switching to their page). An empty array deselects everything. Most commands act on the selection when no `ids` are passed.",
+            "inputSchema": {
+              "properties": {
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "ids": {
+                  "description": "Layer ids to select",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "ids"
+              ],
+              "type": "object"
+            },
+            "name": "select",
+            "title": "Select layers"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": true,
+              "title": "Export"
+            },
+            "description": "Export layers (default: the selection, else every top-level layer of the current page) as png, jpg, svg, webp, pdf or xml (an Android Vector Drawable, with `warnings` for what it changed or left out, per `vdCompat`) at `scale`, or the whole file as `fig` (experimental: written from public format knowledge, with `warnings` for what was left out; other apps may not open every file) (PDF: with `bleed`, `cropMarks`, `bleedMarks` and `cmyk` for print; options `contentsOnly`, `includeBoundingBox`, and for SVG `svgOutlineText`, `svgIdAttribute`, `svgSimplifyStroke`; for XML `svgIdAttribute` and `vdCompat`; for png, jpg and webp `colorProfile`). With `path` the file is written there (absolute path recommended) and the result says where. Without `path`: png/jpg/webp come back as an image content block, svg as text, xml as text followed by `{format, warnings}`, other formats as base64 `data`.",
+            "inputSchema": {
+              "properties": {
+                "bleed": {
+                  "description": "PDF: bleed around each page, in points or as a length like `3mm` or `0.125in`",
+                  "type": [
+                    "number",
+                    "string"
+                  ]
+                },
+                "bleedMarks": {
+                  "description": "PDF: bleed marks",
+                  "type": "boolean"
+                },
+                "cmyk": {
+                  "description": "PDF: CMYK colour instead of RGB",
+                  "type": "boolean"
+                },
+                "colorProfile": {
+                  "description": "PNG, JPG and WebP: the color profile of the file (default sameAsFile: the document's); colors are converted and out-of-gamut ones clip. SVG, PDF and XML are always sRGB",
+                  "enum": [
+                    "sameAsFile",
+                    "srgb",
+                    "displayP3"
+                  ],
+                  "type": "string"
+                },
+                "contentsOnly": {
+                  "description": "Only the layers themselves (default true); false also draws every other layer that shows in their area",
+                  "type": "boolean"
+                },
+                "cropMarks": {
+                  "description": "PDF: crop marks",
+                  "type": "boolean"
+                },
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "format": {
+                  "description": "Format (default png, or from the path's extension)",
+                  "enum": [
+                    "png",
+                    "jpg",
+                    "svg",
+                    "webp",
+                    "pdf",
+                    "xml",
+                    "fig"
+                  ],
+                  "type": "string"
+                },
+                "ids": {
+                  "description": "Layers to export (several are composited into one image)",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                },
+                "includeBoundingBox": {
+                  "description": "Export the layers' own boxes, cutting off shadows and outside strokes (default false)",
+                  "type": "boolean"
+                },
+                "path": {
+                  "description": "Output file path",
+                  "type": "string"
+                },
+                "quality": {
+                  "description": "JPG: the encoder's quality, 1 (smallest file) to 100; default 90",
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "scale": {
+                  "description": "Pixel scale for raster formats (default 1, max 64)",
+                  "type": "number"
+                },
+                "size": {
+                  "description": "Instead of `scale`: `2x`, or a width or height in pixels like `512w` / `512h`",
+                  "type": "string"
+                },
+                "svgIdAttribute": {
+                  "description": "SVG: layer names as unique `id` attributes (default false)",
+                  "type": "boolean"
+                },
+                "svgOutlineText": {
+                  "description": "SVG: text as outlines (default true); false keeps `<text>` elements",
+                  "type": "boolean"
+                },
+                "svgSimplifyStroke": {
+                  "description": "SVG: strokes as `stroke` attributes where exact (default true); false writes outlines",
+                  "type": "boolean"
+                },
+                "vdCompat": {
+                  "description": "XML: what a Vector Drawable can't draw exactly is approximated with a warning (bestEffort, default), left out with a warning (exact), or written as far as it maps without warnings (ignore: overlapping layer opacity dropped, even-odd fills kept as fillType=evenOdd, diamond gradients left out)",
+                  "enum": [
+                    "bestEffort",
+                    "exact",
+                    "ignore"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "name": "export",
+            "title": "Export"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": true,
+              "title": "Screenshot"
+            },
+            "description": "Look at the design: renders the given layers (or the whole current page, with its background) to PNG and returns it as image content, plus its size and the scale used. The image is scaled down to fit `maxSize` pixels. With `window: true` (or a window id from `inspect_ui`'s `windows`) and an attached app, captures that app window including the UI instead.",
+            "inputSchema": {
+              "properties": {
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "ids": {
+                  "description": "Layers to render (default: the whole current page)",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                },
+                "maxSize": {
+                  "description": "Largest side in pixels (default 1600)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "scale": {
+                  "description": "Requested scale (default 1; reduced to fit maxSize)",
+                  "type": "number"
+                },
+                "window": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ],
+                  "description": "Capture the app window: true for the one in front, or a window id (attached app only; headless renders the page)"
+                }
+              },
+              "type": "object"
+            },
+            "name": "screenshot",
+            "title": "Screenshot"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Open file"
+            },
+            "description": "Open a .figcraft or .json document (FigCraft or REST API file JSON), a .fig or .sketch file (best effort, with `warnings` for what wasn't imported; .sketch from Sketch 48 or newer), an .svg (becomes vectors) or an image (becomes an image layer) as the active document. Returns the new document's summary.",
+            "inputSchema": {
+              "properties": {
+                "path": {
+                  "description": "File path",
+                  "type": "string"
+                },
+                "reload": {
+                  "description": "A file that is already open: read it again from disk into its tab (refused while the tab has unsaved changes). Without it, the result says `stale: true` when the file changed on disk since the tab read or saved it",
+                  "type": "boolean"
+                },
+                "variables": {
+                  "description": "REST API file JSON only: the local variables JSON (`GET /v1/files/:key/variables/local`) as a path or the JSON object. Default: `<name>.variables.json` or `variables.json` next to the file."
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            "name": "open_file",
+            "title": "Open file"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Save file"
+            },
+            "description": "Save the active document as a .figcraft file. `path` is required the first time (an untitled document has no path); later saves reuse it. A `path` ending in .fig writes an experimental .fig export copy instead and leaves the document's own path and unsaved changes alone.",
+            "inputSchema": {
+              "properties": {
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                },
+                "path": {
+                  "description": "Output .figcraft path, or a .fig path for an experimental export copy",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "name": "save_file",
+            "title": "Save file"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Undo"
+            },
+            "description": "Undo the last change (one command, batch or gesture). Returns {undone: bool}.",
+            "inputSchema": {
+              "properties": {
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                }
+              },
+              "type": "object"
+            },
+            "name": "undo",
+            "title": "Undo"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Redo"
+            },
+            "description": "Redo the last undone change. Returns {redone: bool}.",
+            "inputSchema": {
+              "properties": {
+                "document": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "The open file to act on: its `id` (from run_command doc.list, or the `document` open_file and inspect_document return) or its path. Default: the file in front. The tab in front stays in front; with an attached app, a screenshot of the window needs the file in front"
+                }
+              },
+              "type": "object"
+            },
+            "name": "redo",
+            "title": "Redo"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Pointer gesture"
+            },
+            "description": "Drive the canvas with the mouse in page coordinates, exactly as a user would with the current tool: click to select, drag to move/resize/marquee, or draw with a shape tool (set `tool` first, e.g. {\"tool\":\"rectangle\",\"kind\":\"drag\",\"x\":0,\"y\":0,\"to\":[200,100]}). `double` on a text layer starts editing it. Returns the selection and tool.",
+            "inputSchema": {
+              "properties": {
+                "alt": {
+                  "description": "Alt/Option held",
+                  "type": "boolean"
+                },
+                "cmd": {
+                  "description": "Cmd (macOS) / Ctrl held",
+                  "type": "boolean"
+                },
+                "ctrl": {
+                  "description": "Ctrl held (the Control key on macOS)",
+                  "type": "boolean"
+                },
+                "kind": {
+                  "description": "Gesture (default click)",
+                  "enum": [
+                    "click",
+                    "double",
+                    "drag",
+                    "down",
+                    "move",
+                    "up",
+                    "hover"
+                  ],
+                  "type": "string"
+                },
+                "pressure": {
+                  "description": "Pen pressure 0-1 (the Pencil records it as the stroke's width profile; a drag starts with it)",
+                  "type": "number"
+                },
+                "pressureTo": {
+                  "description": "Pen pressure 0-1 at a drag's end (interpolated along it)",
+                  "type": "number"
+                },
+                "shift": {
+                  "description": "Shift held",
+                  "type": "boolean"
+                },
+                "steps": {
+                  "description": "Intermediate move events for drag (default 8)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "to": {
+                  "description": "Drag end [x, y] (page)",
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "tool": {
+                  "description": "Tool to choose first: move|scale|hand|frame|section|slice|rectangle|line|arrow|ellipse|polygon|star|pen|pencil|text|comment",
+                  "type": "string"
+                },
+                "x": {
+                  "description": "Page x",
+                  "type": "number"
+                },
+                "y": {
+                  "description": "Page y",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "type": "object"
+            },
+            "name": "pointer",
+            "title": "Pointer gesture"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Press key"
+            },
+            "description": "Press a key or shortcut as if typed on the canvas: a menu shortcut (e.g. {\"key\":\"G\",\"cmd\":true} groups, {\"key\":\"A\",\"alt\":true,\"shift\":false} \u2026), a tool key (R, O, T, F, V\u2026), Escape, Delete, Enter, arrows (nudge; shift = big nudge). While editing text, keys go to the text editor (Backspace, Delete, Left, Right, Home, End, Enter, Escape, SelectAll).",
+            "inputSchema": {
+              "properties": {
+                "alt": {
+                  "description": "Alt/Option",
+                  "type": "boolean"
+                },
+                "cmd": {
+                  "description": "Cmd/Ctrl",
+                  "type": "boolean"
+                },
+                "ctrl": {
+                  "description": "Ctrl (the Control key on macOS)",
+                  "type": "boolean"
+                },
+                "key": {
+                  "description": "Key name: a letter/digit, Escape, Delete, Backspace, Enter, ArrowLeft\u2026",
+                  "type": "string"
+                },
+                "shift": {
+                  "description": "Shift",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "name": "key",
+            "title": "Press key"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": false,
+              "title": "Type text"
+            },
+            "description": "Type into a text layer. With `id`, starts editing that layer with all of its text selected (so the typed text replaces it), types, then stops editing. Without `id`, types at the caret of the text currently being edited (after a double-click with pointer, or after drawing with the text tool).",
+            "inputSchema": {
+              "properties": {
+                "id": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "Text layer to replace the contents of"
+                },
+                "text": {
+                  "description": "Text to type (\\n for a new line)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "type": "object"
+            },
+            "name": "type_text",
+            "title": "Type text"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": true,
+              "title": "Inspect UI"
+            },
+            "description": "UI state: current tool, view (zoom, centre), status, panels, timings and the app's windows (`windows`: id, title, files) when attached to the app; headless reports the session status.",
+            "inputSchema": {
+              "properties": {},
+              "type": "object"
+            },
+            "name": "inspect_ui",
+            "title": "Inspect UI"
+          },
+          {
+            "annotations": {
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "readOnlyHint": true,
+              "title": "Wait for changes"
+            },
+            "description": "Wait for new comment events in the attached FigCraft app. Returns pending events immediately; otherwise waits up to `timeoutMs` (default 20000, max 25000). Call it again with the returned `cursor` to keep watching. Headless returns immediately (no other writer). Events carry a sequence number, kind, document and a small payload (for comments, the thread id).",
+            "inputSchema": {
+              "properties": {
+                "after": {
+                  "description": "Return events after this cursor (default 0)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "limit": {
+                  "description": "Most events to return (default 100, max 1000)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "timeoutMs": {
+                  "description": "Longest wait in milliseconds (default 20000, max 25000)",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "topics": {
+                  "description": "Event topics (default [\"comments\"]; document events are not emitted yet)",
+                  "items": {
+                    "enum": [
+                      "comments",
+                      "document",
+                      "all"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "name": "wait_for_changes",
+            "title": "Wait for changes"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "name": "create_node",
+        "arguments": {
+          "type": "frame",
+          "name": "Card",
+          "x": 40,
+          "y": 40,
+          "width": 320,
+          "props": {
+            "fill": "#FFFFFF",
+            "cornerRadius": 16,
+            "layout": "vertical",
+            "padding": 24,
+            "gap": 12,
+            "sizingV": "hug"
+          }
+        }
+      },
+      "id": 3
+    }
+  },
+  {
+    "recv": {
+      "id": 3,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\n  \"id\": 2,\n  \"node\": {\n    \"absoluteBounds\": {\n      \"height\": 48.0,\n      \"width\": 320.0,\n      \"x\": 40.0,\n      \"y\": 40.0\n    },\n    \"clip\": true,\n    \"cornerRadius\": 16.0,\n    \"fills\": [\n      {\n        \"color\": \"#FFFFFF\",\n        \"type\": \"solid\"\n      }\n    ],\n    \"height\": 48.0,\n    \"id\": 2,\n    \"layout\": {\n      \"columnTracks\": [],\n      \"contentAlign\": \"auto\",\n      \"crossAlign\": \"min\",\n      \"crossGap\": 10.0,\n      \"gap\": 12.0,\n      \"gridColumns\": 2,\n      \"gridRows\": 2,\n      \"mainAlign\": \"min\",\n      \"mode\": \"vertical\",\n      \"padding\": [\n        24.0,\n        24.0,\n        24.0,\n        24.0\n      ],\n      \"reverseZ\": false,\n      \"rowTracks\": [],\n      \"strokesIncluded\": true,\n      \"wrap\": false\n    },\n    \"name\": \"Card\",\n    \"sizing\": {\n      \"horizontal\": \"fixed\",\n      \"vertical\": \"hug\"\n    },\n    \"type\": \"FRAME\",\n    \"width\": 320.0,\n    \"x\": 40.0,\n    \"y\": 40.0\n  }\n}",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "name": "create_node",
+        "arguments": {
+          "type": "text",
+          "parent": 2,
+          "text": "Ada Lovelace",
+          "props": {
+            "fontSize": 24,
+            "fontStyle": "Bold"
+          }
+        }
+      },
+      "id": 4
+    }
+  },
+  {
+    "recv": {
+      "id": 4,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\n  \"id\": 3,\n  \"node\": {\n    \"absoluteBounds\": {\n      \"height\": 29.0,\n      \"width\": 158.0,\n      \"x\": 64.0,\n      \"y\": 64.0\n    },\n    \"characters\": \"Ada Lovelace\",\n    \"fills\": [\n      {\n        \"color\": \"#000000\",\n        \"type\": \"solid\"\n      }\n    ],\n    \"fontFamily\": \"Inter\",\n    \"fontSize\": 24.0,\n    \"fontStyle\": \"Bold\",\n    \"height\": 29.0,\n    \"id\": 3,\n    \"letterSpacing\": \"0%\",\n    \"lineHeight\": \"Auto\",\n    \"name\": \"Ada Lovelace\",\n    \"sizing\": {\n      \"horizontal\": \"hug\",\n      \"vertical\": \"hug\"\n    },\n    \"textAlign\": \"left\",\n    \"textAutoResize\": \"widthAndHeight\",\n    \"type\": \"TEXT\",\n    \"width\": 158.0,\n    \"x\": 24.0,\n    \"y\": 24.0\n  }\n}",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "name": "batch",
+        "arguments": {
+          "label": "Row",
+          "commands": [
+            {
+              "command": "node.create",
+              "as": "row",
+              "params": {
+                "type": "frame",
+                "parent": 2,
+                "name": "Row",
+                "width": 240,
+                "props": {
+                  "layout": "horizontal",
+                  "gap": 8,
+                  "sizingH": "fill"
+                }
+              }
+            },
+            {
+              "command": "node.create",
+              "params": {
+                "type": "rectangle",
+                "parent": {
+                  "$ref": "row"
+                },
+                "width": 64,
+                "height": 24,
+                "props": {
+                  "fill": "#7048E8",
+                  "cornerRadius": 6
+                }
+              }
+            },
+            {
+              "command": "node.create",
+              "params": {
+                "type": "rectangle",
+                "parent": {
+                  "$ref": "row"
+                },
+                "width": 64,
+                "height": 24,
+                "props": {
+                  "fill": "#12B886",
+                  "cornerRadius": 6
+                }
+              }
+            }
+          ]
+        }
+      },
+      "id": 5
+    }
+  },
+  {
+    "recv": {
+      "id": 5,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "[\n  {\n    \"id\": 4\n  },\n  {\n    \"id\": 5\n  },\n  {\n    \"id\": 6\n  }\n]",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "name": "set_properties",
+        "arguments": {
+          "ids": [
+            2
+          ],
+          "props": {
+            "fill": "#F8F9FA"
+          }
+        }
+      },
+      "id": 6
+    }
+  },
+  {
+    "recv": {
+      "id": 6,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\n  \"nodes\": [\n    {\n      \"absoluteBounds\": {\n        \"height\": 189.0,\n        \"width\": 320.0,\n        \"x\": 40.0,\n        \"y\": 40.0\n      },\n      \"childCount\": 2,\n      \"clip\": true,\n      \"cornerRadius\": 16.0,\n      \"fills\": [\n        {\n          \"color\": \"#F8F9FA\",\n          \"type\": \"solid\"\n        }\n      ],\n      \"height\": 189.0,\n      \"id\": 2,\n      \"layout\": {\n        \"columnTracks\": [],\n        \"contentAlign\": \"auto\",\n        \"crossAlign\": \"min\",\n        \"crossGap\": 10.0,\n        \"gap\": 12.0,\n        \"gridColumns\": 2,\n        \"gridRows\": 2,\n        \"mainAlign\": \"min\",\n        \"mode\": \"vertical\",\n        \"padding\": [\n          24.0,\n          24.0,\n          24.0,\n          24.0\n        ],\n        \"reverseZ\": false,\n        \"rowTracks\": [],\n        \"strokesIncluded\": true,\n        \"wrap\": false\n      },\n      \"name\": \"Card\",\n      \"sizing\": {\n        \"horizontal\": \"fixed\",\n        \"vertical\": \"hug\"\n      },\n      \"type\": \"FRAME\",\n      \"width\": 320.0,\n      \"x\": 40.0,\n      \"y\": 40.0\n    }\n  ],\n  \"ok\": true\n}",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "name": "inspect_document",
+        "arguments": {
+          "depth": 4,
+          "outline": true
+        }
+      },
+      "id": 7
+    }
+  },
+  {
+    "recv": {
+      "id": 7,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\n  \"colorProfile\": \"srgb\",\n  \"currentPage\": 1,\n  \"dirty\": true,\n  \"history\": {\n    \"redo\": 0,\n    \"undo\": [\n      \"Set properties\",\n      \"Row\",\n      \"Create layer\",\n      \"Create layer\"\n    ]\n  },\n  \"id\": 1,\n  \"images\": 0,\n  \"kind\": \"design\",\n  \"name\": \"Untitled\",\n  \"pages\": [\n    {\n      \"children\": [\n        {\n          \"children\": [\n            {\n              \"characters\": \"Ada Lovelace\",\n              \"id\": 3,\n              \"name\": \"Ada Lovelace\",\n              \"type\": \"TEXT\",\n              \"visible\": true\n            },\n            {\n              \"children\": [\n                {\n                  \"id\": 5,\n                  \"name\": \"Rectangle\",\n                  \"type\": \"RECTANGLE\",\n                  \"visible\": true\n                },\n                {\n                  \"id\": 6,\n                  \"name\": \"Rectangle\",\n                  \"type\": \"RECTANGLE\",\n                  \"visible\": true\n                }\n              ],\n              \"id\": 4,\n              \"name\": \"Row\",\n              \"type\": \"FRAME\",\n              \"visible\": true\n            }\n          ],\n          \"id\": 2,\n          \"name\": \"Card\",\n          \"type\": \"FRAME\",\n          \"visible\": true\n        }\n      ],\n      \"id\": 1,\n      \"name\": \"Page 1\",\n      \"type\": \"PAGE\",\n      \"visible\": true\n    }\n  ],\n  \"path\": null,\n  \"selection\": [\n    6\n  ],\n  \"styles\": [],\n  \"textEdit\": null,\n  \"variables\": 0\n}",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "name": "screenshot",
+        "arguments": {
+          "ids": [
+            2
+          ],
+          "scale": 2
+        }
+      },
+      "id": 8
+    }
+  },
+  {
+    "recv": {
+      "id": 8,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "data": "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f/M3XLp0idd8zdcE4CVf8qV4zdd6Td7yLd+K/yjf973fyzOe8QxekNd8zdfkNV/rtfiPsLu7y8/97M/yu7/7OzzjGc9gd3eXv/3bv+VBD3oQD3rQgzh27Dgv9VIvxWu+5mvymq/1Wryofvd3foff/d3f5fl5zdd8TV7ztV6LF2Z3d5fv+77v5W//5m94xjOewe/+7u9y7NgxXuqlXooHPehBvMd7vCev+Vqvxf2eceutfN/3fR/Pz3u8x3vwoAc/mH+Nv/mbv+HnfvZn+d3f/R0A/uZv/gaAl3qpl+LYseO81Eu9FA960IN4j/d8T/4jPOPWW/nZn/tZfvd3fpdLl3Z5xjOewTOe8Qxe8iVfkuPHj/OgBz2IBz3owbzHe7wHD3rwg7nqqquu+i+EVuvBXHXVVVddddVVV131/wXBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8Jlf/lZn3HC3Lh3sbf/dGap/7twJ1PG7lwb3LV/3w3Pqxy8prCw16y5yVeZcbJawv/HW5b7vJL9z2Z379wG7cvL/F3+/dy1f98L7F9LTcvjvHqJ2/hTa55BLcsjnPVVVdd9R9tPYz8L4ZW68H8LzbrO57bhXsbv/IDB/zpr6246n+/V3yDOW/0blucvLbwX+G25S5f+pTf54fu+juu+t/vXW54CT7x4a/OLYvjXHXVVVf9R1kPI/+LodV6MP+LzfqOB/rTX1vy09+6z/LAXPV/x2JLvMvH7PASrzrnP9Mv3PskPuLvf4FL04qr/u84Vud83Yu/GW927SO56qqrrvqPsB5G/hdDq/Vg/heb9R33+9NfW/JDX7nHVf93vcvH7vCKb7DgP8MP3fm3fPjf/wJX/d/19S/+ZrzLjS/JVVddddW/13oY+V+M4P+IP/21JT/0lXtc9X/bD33lHn/3hyv+o/3CvU/iw//+F7jq/7YP//tf4BfufRJXXXXVVf/PEfwfcOdTR37oK/e46v+HH/qqPS7c2/iPcttyl4/4+1/gqv8fPuLvf4HblrtcddVVV/0/RvB/wE9/6z5X/f+xPDC//P0H/Ef5kqf8PpemFVf9/3BpWvElT/l9rrrqqqv+HyP4X+4pfzvwlL8duer/lz/79RUX7m38e9223OWH7/o7rvr/5Yfv+jtuW+5y1VVXXfX/FMH/cn/6a0uu+v/p7/5wxb/XL977ZK76/+kX730yV1111VX/TxH8L/f3f7zmqv+fnvJ3I/9ef3DxGVz1/9MfXHwGV1111VX/T1H5X255YK76/+nifY1/r9uXe1z1/9Ptyz2uuuqqq/6fonLVVf9L3fnUiX+vv9u/l6v+f/q7/Xu56qqrrvp/iuCqq6666qqrrrrqqv9PCK666qqrrrrqqquu+v+E4Kqrrrrqqquuuuqq/08Irrrqqquuuuqqq676/4Tgqquuuuqqq6666qr/Twiuuuqqq6666qqrrvr/hOCqq6666qqrrrrqqv9PCK666qqrrrrqqquu+v+E4Kqrrrrqqquuuuqq/08Irrrqqquuuuqqq676/4Tgqquuuuqqq6666qr/Twiuuuqqq6666qqrrvr/hOCqq6666qqrrrrqqv9PCK666qqrrrrqqquu+v+E4Kqrrrrqqquuuuqq/08Irrrqqquuuuqqq676/4Tgqquuuuqqq6666qr/Twiuuuqqq6666qqrrvr/hOCqq6666qqrrrrqqv9PCK666qqrrrrqqquu+v+E4Kqrrrrqqquuuuqq/08Irrrqqquuuuqqq676/4Tgqquuuuqqq6666qr/Twiuuuqqq6666qqrrvr/hOCqq6666qqrrrrqqv9PCP6Xu+Ghlav+f7rhoZV/rxffvoar/n968e1ruOqqq676f4rgf7mT1xau+v/p5LWFf69bFse46v+nWxbHuOqqq676f4rgf7mHv0THVf8/PfwlOv69Xu3Eg7jq/6dXO/Egrrrqqqv+nyL4X+4lXnXOVf8/vcSrzvn3etNrH8FV/z+96bWP4Kqrrrrq/ymC/+VOXlt4hdefc9X/L6/w+nNOXlv497plcZx3vuEluOr/l3e+4SW4ZXGcq6666qr/pwj+D3jjd99ivimu+v9hvine+N23+I/ySQ9/dXbqjKv+f9ipMz7p4a/OVVddddX/YwT/B5y8tvCuH7vDVf8/vOvH7nDy2sJ/lFsWx/n6F39zrvr/4etf/M25ZXGcq6666qr/xwj+j3iJV53zLh+7w1X/t73Lx+7wEq865z/am137SL7+xd+Mq/5v+/oXfzPe7NpHctVVV131/xxarQfzv9is73igv/vDFT/4lXusDs1V/3fMN8W7fuwOL/Gqc/4z/cK9T+LD//7n2ZvWXPV/x06d8fUv/ua82bWP5KqrrrrqP8J6GPlfDK3Wg/lfbNZ3PLcL9zZ++fsP+LNfX3HV/36v8Ppz3vjdtzh5beG/wm3LXb7kKb/PD9/1d1z1v9873/ASfNLDX51bFse56qqrrvqPsh5G/hdDq/Vg/heb9R0vyIV7G3/3hyue8ncjF+5t3PW0iav+57vhoZWT1xYe/hIdL/Gqc05eW/jvcNtyl1+898n8wcVncNvyEn+/fx9X/c/34tvXcMviGK924kG86bWP4JbFca666qqr/qOth5H/xdBqPZj/xWZ9x1VXXXXVVVddddV/pfUw8r8YwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/58QXHXVVVddddVVV131/wnBVVddddVVV1111VX/nxBcddVVV1111VVXXfX/CcFVV1111VVXXXXVVf+fEFx11VVXXXXVVVdd9f8JwVVXXXXVVVddddVV/59Q+V9uPYxcddVVV1111VVXXfUiI7jqqquuuuqqq6666v8Tgquuuuqqq6666qqr/j8huOqqq6666qqrrrrq/xOCq6666qqrrrrqqqv+PyG46qqrrrrqqquuuur/E4Krrrrqqquuuuqqq/4/Ibjqqquuuuqqq6666v8Tgquuuuqqq6666qqr/j8huOqqq6666qqrrrrq/xOCq6666qqrrrrqqqv+PyG46qqrrrrqqquuuur/E4Krrrrqqquuuuqqq/4/Ibjqqquuuuqqq6666v8Tgquuuuqqq6666qqr/j8huOqqq6666qqrrrrq/xOCq6666qqrrrrqqqv+PyG46qqrrrrqqquuuur/E8L2M7jqqquuuuqqq6666v8F288I0K1cddVVV1111VVXXfX/hG4NybtcddVVV1111VVXXfX/g7g1DH/NVVddddVVV1111VX/T/jWCMpfc9VVV1111VVXXXXV/wtB+WvZPr4exotcddVVV1111VVXXfV/3qzvToSkXeBvuOqqq6666qqrrrrq/7q/kbQbAIjf5qqrrrrqqquuuuqq/9vEbwMEQMB3c9VVV1111VVXXXXV/2kB3w0gnmm5Wt8q6UFcddVVV1111VVXXfV/ju1nLOazBwMEzyT01Vx11VVXXXXVVVdd9X+S0FdzBeKZbB9fD+OtwDGuuuqqq6666qqrrvq/5NKs7x4saRcgeCZJu8ZfzVVXXXXVVVddddVV/6cYf7WkXa5APIDt4+thvBU4xlVXXXXVVVddddVV/xdcmvXdgyXtcgXBA0jatfhorrrqqquuuuqqq676P8HioyXt8myI52O5Gn5b4rW46qqrrrrqqquuuup/LZvfWcz71+Y5IZ6Ppf1gDeNfA8e46qqrrrrqqquuuup/o0vuu5deSLfynAiej4V0q4j35qqrrrrqqquuuuqq/5VEvPdCupXnRfACzGb1pxFfw1VXXXXVVVddddVV/7uIr5nN6k/z/CH+Bcv18N2C9+Kqq6666qqrrrrqqv/xDN+zmPXvzQuGeBGs1uufBr0VV1111VVXXXXVVVf9j2X4nsWsf29eOIIXwXw2e2vD93DVVVddddVVV1111f9Ihu9ZzPr35l9G8CJazPr3RnwNV1111VVXXXXVVVf9zyK+ZjHr35sXDeJfab2e3trkdwPHuOqqq6666qqrrrrqv9MlEe89m9Wf5kWH+DdY2g9mPX63xGtx1VVXXXXVVVddddV/OZvfYda990K6lX8dgn+DhXTrYt6/tsX7AJe46qqrrrrqqquuuuq/yiWL91nM+9deSLfyr4f4d7J9fDUMHy300cAxrrrqqquuuuqqq676z3DJ+Kvnff/Vknb5t0P8B7F9fL0e39v4oyU9iKuuuuqqq6666qqr/t1sP0Poq2ez7rsl7fLvh/hPMAzDSye8N+a1gZfiqquuuuqqq6666qp/jb9B/HbAd/d9/9f8x0L8J7N9fBjaayftpQUvbes4+MGSHsRVV1111VVXXXXV/2O2nwG6VfKu4a+D8td9X35b0i7/efhHcI2emCLClNIAAAAASUVORK5CYII=",
+            "mimeType": "image/png",
+            "type": "image"
+          },
+          {
+            "text": "{\"height\":378,\"ids\":[2],\"scale\":2.0,\"source\":\"layers\",\"width\":640}",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    }
+  },
+  {
+    "sent": {
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "name": "undo",
+        "arguments": {}
+      },
+      "id": 9
+    }
+  },
+  {
+    "recv": {
+      "id": 9,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\n  \"undone\": true\n}",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    }
+  }
+]

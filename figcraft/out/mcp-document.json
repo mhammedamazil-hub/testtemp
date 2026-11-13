@@ -1,0 +1,70 @@
+{
+  "colorProfile": "srgb",
+  "currentPage": 1,
+  "dirty": true,
+  "history": {
+    "redo": 0,
+    "undo": [
+      "Set properties",
+      "Row",
+      "Create layer",
+      "Create layer"
+    ]
+  },
+  "id": 1,
+  "images": 0,
+  "kind": "design",
+  "name": "Untitled",
+  "pages": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "characters": "Ada Lovelace",
+              "id": 3,
+              "name": "Ada Lovelace",
+              "type": "TEXT",
+              "visible": true
+            },
+            {
+              "children": [
+                {
+                  "id": 5,
+                  "name": "Rectangle",
+                  "type": "RECTANGLE",
+                  "visible": true
+                },
+                {
+                  "id": 6,
+                  "name": "Rectangle",
+                  "type": "RECTANGLE",
+                  "visible": true
+                }
+              ],
+              "id": 4,
+              "name": "Row",
+              "type": "FRAME",
+              "visible": true
+            }
+          ],
+          "id": 2,
+          "name": "Card",
+          "type": "FRAME",
+          "visible": true
+        }
+      ],
+      "id": 1,
+      "name": "Page 1",
+      "type": "PAGE",
+      "visible": true
+    }
+  ],
+  "path": null,
+  "selection": [
+    6
+  ],
+  "styles": [],
+  "textEdit": null,
+  "variables": 0
+}

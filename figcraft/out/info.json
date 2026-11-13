@@ -1,0 +1,27 @@
+{
+  "file": "figcraft/out/sign-in.figcraft",
+  "images": 0,
+  "missingFonts": [],
+  "name": "sign-in",
+  "nodes": 10,
+  "notes": [],
+  "pages": [
+    {
+      "frames": [
+        {
+          "height": 844.0,
+          "id": 2,
+          "name": "Sign in",
+          "type": "FRAME",
+          "width": 390.0
+        }
+      ],
+      "id": 1,
+      "name": "Onboarding",
+      "nodes": 9,
+      "topLevel": 1
+    }
+  ],
+  "styles": 0,
+  "variables": 0
+}

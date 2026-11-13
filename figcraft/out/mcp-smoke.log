@@ -1,0 +1,12 @@
+initialize: {"name": "figcraft", "title": "FigCraft", "version": "0.18.1"}
+tools/list: 19 tools
+  batch, create_node, export, get_node, inspect_document, inspect_ui, key, list_commands, open_file, pointer, redo, run_command, save_file, screenshot, select, set_properties, type_text, undo, wait_for_changes
+create_node frame -> 2 isError: False
+create_node text -> isError: False
+batch -> isError: False
+set_properties -> isError: False
+inspect_document -> 1394 bytes
+screenshot -> ['/home/runner/work/testtemp/testtemp/figcraft/out/mcp-card.png']
+undo ok
+checks: {"create_frame": true, "create_text": true, "batch": true, "set_properties": true, "inspect_document": true, "screenshot": true}
+MCP SMOKE: PASS
