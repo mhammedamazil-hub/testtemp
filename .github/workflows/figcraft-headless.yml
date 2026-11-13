@@ -116,6 +116,7 @@ jobs:
           $cli export figcraft/out/sign-in.figcraft -o figcraft/out/exports/ --scale 2 --no-system-fonts
           $cli export figcraft/out/sign-in.figcraft -o figcraft/out/sign-in.svg --no-system-fonts
           $cli export figcraft/out/sign-in.figcraft -o figcraft/out/sign-in.pdf --no-system-fonts
+          $cli render figcraft/out/sign-in-v2.figcraft -o figcraft/out/page-v2.png --no-system-fonts
           $cli convert figcraft/out/sign-in-v2.figcraft figcraft/out/v2.json
           ls -l figcraft/out figcraft/out/exports
           file figcraft/out/page.png figcraft/out/exports/* || true
@@ -147,6 +148,38 @@ jobs:
           test "$code" -eq 1
           echo "$out" | grep -q "automation path rejected"
           test ! -e escaped.png
+
+      - name: Write the evidence log the agent reads
+        run: |
+          set -euo pipefail
+          cli=work/appdir/usr/bin/figcraft-cli
+          {
+            echo "# FigCraft headless run (Ubuntu runner, no display)"
+            echo
+            echo "Vendored from: \`appdir/usr/bin/figcraft-cli\` inside the published"
+            echo "\`figcraft-$FV-linux-x86_64.AppImage\`, unpacked with \`--appimage-extract\`."
+            echo
+            echo "## AppImage"
+            echo '```'
+            ls -l appdir/usr/bin
+            echo '```'
+            echo
+            echo "## CLI version"
+            echo '```'
+            $cli --version
+            echo '```'
+            echo
+            echo "## Command surface"
+            echo '```'
+            python3 -c "import json;c=json.load(open('work/commands.json'));print(len(c),'commands');[print(' ',x['id'],'—',x.get('label','')) for x in c if x['id'] in ('node.create','node.set','text.set','component.create','layout.add','inspect.code','inspect.properties','export')]"
+            echo '```'
+            echo
+            echo "## MCP server (headless engine over stdio JSON-RPC)"
+            echo '```'
+            cat figcraft/out/mcp-smoke.log
+            echo '```'
+          } > figcraft/out/run-log.md
+          cat figcraft/out/run-log.md
 
       - name: Publish the renders into the log (base64) and as an artifact
         run: |
