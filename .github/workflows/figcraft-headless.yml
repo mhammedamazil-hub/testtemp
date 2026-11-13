@@ -152,6 +152,19 @@ jobs:
           echo "$out" | grep -q "automation path rejected"
           test ! -e escaped.png
 
+      - name: What the design system knows about itself (code + property handoff)
+        run: |
+          set -euo pipefail
+          cli=work/appdir/usr/bin/figcraft-cli
+          cat > figcraft/inspect.json <<'JSON'
+          [
+            {"command": "inspect.code", "params": {"id": 2, "language": "react"}},
+            {"command": "inspect.properties", "params": {"id": 8, "colorFormat": "css"}}
+          ]
+          JSON
+          $cli run figcraft/inspect.json --in figcraft/out/sign-in-v2.figcraft \
+            --no-system-fonts | tee figcraft/out/inspect-run.jsonl
+
       - name: Write the evidence log the agent reads
         if: always()
         run: |
