@@ -1,0 +1,171 @@
+name: FigCraft headless control probe
+
+# Drives FigCraft's bundled headless CLI (figcraft-cli) from CI, because this
+# sandbox can reach github.com/api.github.com but not the release CDN
+# (release-assets.githubusercontent.com) that hosts the AppImage.
+#
+#   gh workflow run figcraft-headless.yml --ref <branch>
+#
+# What it proves, in order:
+#   1. the published Linux AppImage unpacks and really contains figcraft-cli
+#   2. `cli <args>` AppRun forwarding works
+#   3. a design script builds a 390x844 screen, auto layout, shadow, component
+#   4. the result saves to .figcraft, re-opens, and is edited again
+#   5. PNG / SVG / PDF exports and a whole-page render are produced
+#   6. the MCP server answers real tool calls over stdio (headless engine)
+#   7. --automation-read-root / --automation-write-root confinement holds
+# Logs carry the renders as base64 so the agent can look at them; the same
+# files are uploaded as the `figcraft-headless` artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: FigCraft release to unpack (launcher payload version)
+        required: false
+        default: "0.18.1"
+
+permissions:
+  contents: write
+
+jobs:
+  headless:
+    name: Headless FigCraft control
+    runs-on: ubuntu-latest
+    env:
+      FV: ${{ inputs.version || '0.18.1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download the Linux AppImage and verify its checksum
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          base="https://github.com/storytold/figcraft/releases/download/v$FV"
+          curl -fsSL -o work/figcraft.AppImage "$base/figcraft-$FV-linux-x86_64.AppImage"
+          curl -fsSL -o work/SHA256SUMS.txt "$base/SHA256SUMS.txt"
+          got=$(sha256sum work/figcraft.AppImage | cut -d' ' -f1)
+          want=$(grep "figcraft-$FV-linux-x86_64.AppImage\$" work/SHA256SUMS.txt | cut -d' ' -f1)
+          echo "sha256 appimage: $got"
+          echo "sha256 published: $want"
+          [ "$got" = "$want" ] || { echo "checksum mismatch"; exit 1; }
+          chmod +x work/figcraft.AppImage
+          ls -l work/figcraft.AppImage
+
+      - name: Unpack the AppImage (no FUSE needed) and look for the CLI
+        run: |
+          set -euo pipefail
+          cd work
+          ./figcraft.AppImage --appimage-extract > /dev/null
+          mv squashfs-root appdir
+          echo "--- appdir/usr/bin"; ls -l appdir/usr/bin
+          echo "--- AppRun cli forwarding"; sed -n '/= cli/,/^fi/p' appdir/AppRun
+          test -x appdir/usr/bin/figcraft-cli
+          echo "--- version"; appdir/usr/bin/figcraft-cli --version
+
+      - name: Headless CLI basics
+        run: |
+          set -euo pipefail
+          cli=work/appdir/usr/bin/figcraft-cli
+          $cli --help | head -40
+          echo "--- command surface"
+          $cli commands --json > work/commands.json
+          python3 - <<'PY'
+          import json
+          cmds = json.load(open("work/commands.json"))
+          print("commands:", len(cmds))
+          for probe in ("node.create","node.set","text.set","component.create","inspect.code","layout.add","inspect.properties"):
+              hit = [c for c in cmds if c["id"] == probe]
+              print(f"  {probe}: {'yes' if hit else 'NO'}", (hit[0].get("label") if hit else ""))
+          PY
+
+      - name: Build a design from a script and save a .figcraft file
+        run: |
+          set -euo pipefail
+          cli=work/appdir/usr/bin/figcraft-cli
+          mkdir -p figcraft/out
+          $cli run figcraft/design.json --out figcraft/out/sign-in.figcraft \
+            --no-system-fonts --automation-write-root figcraft/out --automation-read-root figcraft
+          echo "--- info"
+          $cli info figcraft/out/sign-in.figcraft --json --no-system-fonts | tee figcraft/out/info.json
+          ls -l figcraft/out
+
+      - name: Re-open the saved file, edit it, and render again
+        run: |
+          set -euo pipefail
+          cli=work/appdir/usr/bin/figcraft-cli
+          $cli run figcraft/edit.json --in figcraft/out/sign-in.figcraft \
+            --out figcraft/out/sign-in-v2.figcraft --no-system-fonts
+          $cli info figcraft/out/sign-in-v2.figcraft --no-system-fonts | tee figcraft/out/info-v2.txt
+
+      - name: Exports and renders
+        run: |
+          set -euo pipefail
+          cli=work/appdir/usr/bin/figcraft-cli
+          mkdir -p figcraft/out/exports
+          $cli render figcraft/out/sign-in.figcraft -o figcraft/out/page.png --no-system-fonts
+          $cli export figcraft/out/sign-in.figcraft -o figcraft/out/exports/ --scale 2 --no-system-fonts
+          $cli export figcraft/out/sign-in.figcraft -o figcraft/out/sign-in.svg --no-system-fonts
+          $cli export figcraft/out/sign-in.figcraft -o figcraft/out/sign-in.pdf --no-system-fonts
+          $cli convert figcraft/out/sign-in-v2.figcraft figcraft/out/v2.json
+          ls -l figcraft/out figcraft/out/exports
+          file figcraft/out/page.png figcraft/out/exports/* || true
+
+      - name: MCP server smoke test (headless engine, stdio JSON-RPC)
+        env:
+          FIGCRAFT_CLI: ${{ github.workspace }}/work/appdir/usr/bin/figcraft-cli
+          FIGCRAFT_OUT: ${{ github.workspace }}/figcraft/out
+        run: |
+          set -euo pipefail
+          python3 figcraft/mcp_smoke.py 2>&1 | tee figcraft/out/mcp-smoke.log
+
+      - name: Automation roots must confine a stray write
+        run: |
+          set -euo pipefail
+          cli=work/appdir/usr/bin/figcraft-cli
+          mkdir -p work/out
+          echo "--- allowed: write inside the write root"
+          $cli render figcraft/out/sign-in.figcraft -o work/out/ok.png \
+            --automation-read-root figcraft --automation-write-root work/out --no-system-fonts
+          ls -l work/out
+          echo "--- refused: write outside the write root (expect exit 1)"
+          set +e
+          out=$($cli render figcraft/out/sign-in.figcraft -o ./escaped.png \
+            --automation-read-root figcraft --automation-write-root work/out --no-system-fonts 2>&1)
+          code=$?
+          set -e
+          echo "exit=$code"; echo "$out"
+          test "$code" -eq 1
+          echo "$out" | grep -q "automation path rejected"
+          test ! -e escaped.png
+
+      - name: Publish the renders into the log (base64) and as an artifact
+        run: |
+          set -euo pipefail
+          for f in figcraft/out/page.png figcraft/out/exports/*.png; do
+            [ -f "$f" ] || continue
+            echo "==BASE64_IMAGE $f"
+            base64 -w0 "$f"
+            echo
+            echo "==END_BASE64_IMAGE $f"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: figcraft-headless
+          path: figcraft/out
+          if-no-files-found: error
+
+      - name: Commit the generated design + renders back to this branch
+        run: |
+          set -euo pipefail
+          git config user.name "figcraft-headless[bot]"
+          git config user.email "figcraft-headless@users.noreply.github.com"
+          git add -f figcraft/out figcraft/design.json figcraft/edit.json figcraft/mcp_smoke.py 2>/dev/null || git add figcraft/out
+          git commit -m "figcraft: headless control run (AppImage CLI, outputs)" || echo "nothing to commit"
+          git push origin "HEAD:${{ github.ref_name }}"

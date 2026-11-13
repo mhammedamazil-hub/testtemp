@@ -1,0 +1,47 @@
+[
+  {"command": "node.create", "as": "screen", "params": {
+    "type": "frame", "name": "Sign in", "x": 0, "y": 0, "width": 390, "height": 844,
+    "props": {"fill": "#F4F1FF", "clip": true, "layout": "vertical",
+              "padding": 32, "gap": 20, "mainAlign": "center", "crossAlign": "center"}}},
+
+  {"command": "node.create", "as": "avatar", "params": {
+    "type": "ellipse", "parent": {"$ref": "screen"}, "width": 72, "height": 72,
+    "props": {"fill": "#7048E8"}}},
+
+  {"command": "node.create", "as": "title", "params": {
+    "type": "text", "parent": {"$ref": "screen"}, "text": "Welcome back",
+    "props": {"fontSize": 30, "fontStyle": "Bold", "fill": "#1A1523"}}},
+
+  {"command": "node.create", "as": "subtitle", "params": {
+    "type": "text", "parent": {"$ref": "screen"}, "text": "Sign in to the FigCraft design system",
+    "props": {"fontSize": 15, "fill": "#6B6480"}}},
+
+  {"command": "node.create", "as": "field", "params": {
+    "type": "frame", "parent": {"$ref": "screen"}, "name": "Email field",
+    "width": 300, "props": {"fill": "#FFFFFF", "cornerRadius": 12, "layout": "vertical",
+                            "padding": 16, "sizingH": "fill",
+                            "effects": [{"type": "dropShadow", "color": "#1A15231F",
+                                        "offset": [0, 2], "radius": 10}]}}},
+
+  {"command": "node.create", "params": {
+    "type": "text", "parent": {"$ref": "field"}, "text": "you@studio.dev",
+    "props": {"fontSize": 16, "fill": "#6B6480"}}},
+
+  {"command": "node.create", "as": "button", "params": {
+    "type": "frame", "parent": {"$ref": "screen"}, "name": "Continue",
+    "width": 300, "props": {"fill": "#7048E8", "cornerRadius": 12, "layout": "horizontal",
+                            "padding": 16, "sizingH": "fill", "mainAlign": "center"}}},
+
+  {"command": "node.create", "params": {
+    "type": "text", "parent": {"$ref": "button"}, "text": "Continue",
+    "props": {"fontSize": 16, "fontStyle": "Bold", "fill": "#FFFFFF"}}},
+
+  {"command": "component.create", "params": {"ids": [{"$ref": "button"}]}},
+
+  {"command": "node.create", "params": {
+    "type": "text", "parent": {"$ref": "screen"},
+    "text": "No account? Start a 14-day trial",
+    "props": {"fontSize": 13, "fill": "#8B849C"}}},
+
+  {"command": "page.rename", "params": {"name": "Onboarding"}}
+]
