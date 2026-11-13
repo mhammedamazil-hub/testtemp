@@ -1,0 +1,2 @@
+confinement: exit=1
+error: automation path rejected: . is outside the folders that may be written: /home/runner/work/testtemp/testtemp/work/out

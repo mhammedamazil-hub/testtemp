@@ -1,0 +1,99 @@
+# FigCraft headless run (Ubuntu runner, no display, no FUSE)
+
+The binary driven here is `appdir/usr/bin/figcraft-cli`, shipped inside the
+published `figcraft-0.18.1-linux-x86_64.AppImage` and unpacked with
+`--appimage-extract` (checksum verified against the release SHA256SUMS.txt).
+No window, no GPU: the engine's CPU renderer does the drawing.
+
+## AppImage payload
+```
+total 211936
+-rwxr-xr-x 1 runner runner 125844248 Nov 12 00:50 figcraft
+-rwxr-xr-x 1 runner runner  91175576 Nov 12 00:50 figcraft-cli
+```
+
+## Version
+```
+figcraft-cli 0.18.1
+```
+
+## Command surface
+```
+645 commands exposed
+  node.create        yes  Create layer
+  node.set           yes  Set properties
+  text.set           yes  Set text
+  component.create   yes  Create component
+  layout.add         yes  Add auto layout
+  inspect.code       yes  Code for layer
+  inspect.properties yes  Inspect properties
+  file.export        yes  Export
+```
+
+## Design script -> undo/confinement-checked run, then reopen + edit
+```
+{"command":"node.create","ok":true,"result":{"id":2},"step":0}
+{"command":"node.create","ok":true,"result":{"id":3},"step":1}
+{"command":"node.create","ok":true,"result":{"id":4},"step":2}
+{"command":"node.create","ok":true,"result":{"id":5},"step":3}
+{"command":"node.create","ok":true,"result":{"id":6},"step":4}
+{"command":"node.create","ok":true,"result":{"id":7},"step":5}
+{"command":"node.create","ok":true,"result":{"id":8},"step":6}
+{"command":"node.create","ok":true,"result":{"id":9},"step":7}
+{"command":"component.create","ok":true,"result":{"id":8},"step":8}
+{"command":"node.create","ok":true,"result":{"id":10},"step":9}
+{"command":"page.rename","ok":true,"result":{"ok":true},"step":10}
+
+{"command":"command.batch","ok":true,"result":[{"command":"text.set","ok":true,"result":{"ok":true},"step":0},{"command":"node.set","ok":true,"result":{"ok":true},"step":1},{"command":"node.set","ok":true,"result":{"ok":true},"step":2},{"command":"inspect.code","error":"invalid parameters for `inspect.code`: step 3: unknown parameter `lang` (it takes id, language, mobile, unit, rootFontSize)","ok":false,"step":3},{"command":"inspect.properties","error":"invalid parameters for `inspect.properties`: step 4: select a layer or pass `id`","ok":false,"step":4}],"step":0}
+{"command":"node.create","ok":true,"result":{"id":11},"step":1}
+```
+
+## MCP server (headless engine over stdio JSON-RPC)
+```
+initialize: {"name": "figcraft", "title": "FigCraft", "version": "0.18.1"}
+tools/list: 19 tools
+  batch, create_node, export, get_node, inspect_document, inspect_ui, key, list_commands, open_file, pointer, redo, run_command, save_file, screenshot, select, set_properties, type_text, undo, wait_for_changes
+create_node frame -> 2 isError: False
+create_node text -> isError: False
+batch -> isError: False
+set_properties -> isError: False
+inspect_document -> 1394 bytes
+screenshot -> ['/home/runner/work/testtemp/testtemp/figcraft/out/mcp-card.png']
+undo ok
+checks: {"create_frame": true, "create_text": true, "batch": true, "set_properties": true, "inspect_document": true, "screenshot": true}
+MCP SMOKE: PASS
+```
+
+## File stats
+```
+{
+  "file": "figcraft/out/sign-in.figcraft",
+  "images": 0,
+  "missingFonts": [],
+  "name": "sign-in",
+  "nodes": 10,
+  "notes": [],
+  "pages": [
+    {
+      "frames": [
+        {
+          "height": 844.0,
+          "id": 2,
+          "name": "Sign in",
+          "type": "FRAME",
+          "width": 390.0
+        }
+      ],
+      "id": 1,
+      "name": "Onboarding",
+      "nodes": 9,
+      "topLevel": 1
+    }
+  ],
+  "styles": 0,
+  "variables": 0
+}
+figcraft/out/sign-in-v2.figcraft — sign-in (11 nodes, 0 styles, 0 variables, 0 images)
+page 1 "Onboarding": 10 nodes, 1 top-level
+  2 FRAME "Sign in" 390.0×844.0
+```
