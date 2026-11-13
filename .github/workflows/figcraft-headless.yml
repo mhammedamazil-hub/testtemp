@@ -94,7 +94,8 @@ jobs:
           cli=work/appdir/usr/bin/figcraft-cli
           mkdir -p figcraft/out
           $cli run figcraft/design.json --out figcraft/out/sign-in.figcraft \
-            --no-system-fonts --automation-write-root figcraft/out --automation-read-root figcraft
+            --no-system-fonts --automation-write-root figcraft/out --automation-read-root figcraft \
+            | tee figcraft/out/design-run.jsonl
           echo "--- info"
           $cli info figcraft/out/sign-in.figcraft --json --no-system-fonts | tee figcraft/out/info.json
           ls -l figcraft/out
@@ -104,7 +105,8 @@ jobs:
           set -euo pipefail
           cli=work/appdir/usr/bin/figcraft-cli
           $cli run figcraft/edit.json --in figcraft/out/sign-in.figcraft \
-            --out figcraft/out/sign-in-v2.figcraft --no-system-fonts
+            --out figcraft/out/sign-in-v2.figcraft --no-system-fonts \
+            | tee figcraft/out/edit-run.jsonl
           $cli info figcraft/out/sign-in-v2.figcraft --no-system-fonts | tee figcraft/out/info-v2.txt
 
       - name: Exports and renders
@@ -145,40 +147,16 @@ jobs:
           code=$?
           set -e
           echo "exit=$code"; echo "$out"
+          printf 'confinement: exit=%s\n%s\n' "$code" "$out" > figcraft/out/confinement.txt
           test "$code" -eq 1
           echo "$out" | grep -q "automation path rejected"
           test ! -e escaped.png
 
       - name: Write the evidence log the agent reads
+        if: always()
         run: |
-          set -euo pipefail
-          cli=work/appdir/usr/bin/figcraft-cli
-          {
-            echo "# FigCraft headless run (Ubuntu runner, no display)"
-            echo
-            echo "Vendored from: \`appdir/usr/bin/figcraft-cli\` inside the published"
-            echo "\`figcraft-$FV-linux-x86_64.AppImage\`, unpacked with \`--appimage-extract\`."
-            echo
-            echo "## AppImage"
-            echo '```'
-            ls -l appdir/usr/bin
-            echo '```'
-            echo
-            echo "## CLI version"
-            echo '```'
-            $cli --version
-            echo '```'
-            echo
-            echo "## Command surface"
-            echo '```'
-            python3 -c "import json;c=json.load(open('work/commands.json'));print(len(c),'commands');[print(' ',x['id'],'—',x.get('label','')) for x in c if x['id'] in ('node.create','node.set','text.set','component.create','layout.add','inspect.code','inspect.properties','export')]"
-            echo '```'
-            echo
-            echo "## MCP server (headless engine over stdio JSON-RPC)"
-            echo '```'
-            cat figcraft/out/mcp-smoke.log
-            echo '```'
-          } > figcraft/out/run-log.md
+          bash figcraft/evidence.sh work/appdir/usr/bin/figcraft-cli work/appdir "$FV" \
+            > figcraft/out/run-log.md || echo "(evidence log incomplete)" | tee -a figcraft/out/run-log.md
           cat figcraft/out/run-log.md
 
       - name: Publish the renders into the log (base64) and as an artifact
@@ -193,12 +171,14 @@ jobs:
           done
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: figcraft-headless
           path: figcraft/out
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Commit the generated design + renders back to this branch
+        if: always()
         run: |
           set -euo pipefail
           git config user.name "figcraft-headless[bot]"
